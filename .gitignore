@@ -1,0 +1,62 @@
+# Julia
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
+/Manifest.toml
+**/Manifest.toml
+LocalPreferences.toml
+JuliaLocalPreferences.toml
+
+# Documenter build output
+docs/build/
+docs/site/
+
+# Native build outputs
+*.so
+*.so.*
+*.dylib
+*.dll
+*.a
+*.la
+*.lo
+*.o
+*.obj
+*.mod
+*.mod*
+build/
+build.log
+deps/build.log
+deps/deps.jl
+deps/downloads/
+deps/usr/
+deps/src/
+
+# Julia depot / dev artefacts
+.julia/
+.julia_depot/
+
+# Test outputs (generated during runs)
+test/logs/
+**/output/
+**/output_debug/
+zvo_*.dat
+zqp_*.dat
+
+# Allowlist: fixtures that look like test outputs but must be committed.
+# Order matters — these "!" lines must come *after* the broad ignores above.
+!test/integration/reference/**/zvo_out_first10.dat
+!test/integration/reference/**/inputs/zqp_opt.dat
+!test/integration/reference/**/inputs/initial.def
+!examples/inputs/**/zqp_opt.dat
+!examples/inputs/**/initial.def
+
+# Fixture staging dir (used only during pre-release harvest, not committed)
+_fixture_harvest/
+
+# IDE / OS
+.DS_Store
+.cursor/
+.serena/
+.devcontainer/
+.vscode/
+.idea/

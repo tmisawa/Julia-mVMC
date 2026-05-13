@@ -1,0 +1,15 @@
+         ModPara  modpara_phys.def
+         LocSpin  locspn.def
+           Trans  trans.def
+    CoulombInter  coulombinter.def
+            Hund  hund.def
+        Exchange  exchange.def
+        OneBodyG  greenone.def
+        TwoBodyG  greentwo.def
+      Gutzwiller  gutzwilleridx.def
+         Jastrow  jastrowidx.def
+         Orbital  orbitalidx.def
+        TransSym  qptransidx.def
+     InGutzwiller output/zqp_gutzwiller_opt.dat
+        InJastrow output/zqp_jastrow_opt.dat
+       InOrbital  output/zqp_orbital_opt.dat

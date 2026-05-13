@@ -1,0 +1,33 @@
+name = "MVMCOptimizers"
+uuid = "3516085a-728f-4003-a487-32232985ade4"
+version = "0.1.0"
+authors = ["Takahiro Misawa <tmisawa@issp.u-tokyo.ac.jp>"]
+
+[deps]
+FastGaussQuadrature = "442a2c76-b920-505d-bb47-c5924d526838"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+LoopVectorization = "bdcacae8-1622-11e9-2a5c-532679323890"
+MVMCExpertModeParsers = "f8463493-42a4-4c1a-8bf4-93a3cbd844bc"
+PfaPack = "fb1811a7-9b9e-407c-aa55-948d91a1aed1"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+SFMT = "f01bd734-aebb-490b-aa9b-8490e8eb2402"
+TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
+
+[sources]
+MVMCExpertModeParsers = {path = "../MVMCExpertModeParsers.jl"}
+PfaPack = {path = "../PfaPack.jl"}
+SFMT = {path = "../SFMT.jl"}
+
+[compat]
+FastGaussQuadrature = "1.0"
+LoopVectorization = "0.12.173"
+TimerOutputs = "0.5.29"
+julia = "1.11"
+
+[extras]
+Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Logging", "Test"]

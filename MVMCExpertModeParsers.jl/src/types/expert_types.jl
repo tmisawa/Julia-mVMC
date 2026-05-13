@@ -1,0 +1,725 @@
+"""
+Expert Mode Data Types
+
+Core data structures for mVMC Expert Mode file parsing and generation.
+These types represent the various components of mVMC Expert Mode files.
+"""
+
+"""
+    ParseResult{T}
+
+Generic result container for parsing operations.
+"""
+struct ParseResult{T}
+    success::Bool
+    data::Union{T,Nothing}
+    error_message::String
+    line_number::Int
+end
+
+"""
+    ValidationResult
+
+Result of parameter validation.
+"""
+struct ValidationResult
+    is_valid::Bool
+    errors::Vector{String}
+    warnings::Vector{String}
+end
+
+"""
+    FileInfo
+
+Information about a file.
+"""
+struct FileInfo
+    filename::String
+    filepath::String
+    exists::Bool
+    size_bytes::Int
+    last_modified::Dates.DateTime
+end
+
+"""
+    ParsingContext
+
+Context for parsing operations, tracking errors, warnings, and line numbers.
+"""
+mutable struct ParsingContext
+    filename::String
+    line_number::Int
+    errors::Vector{String}
+    warnings::Vector{String}
+
+    function ParsingContext(filename::String)
+        new(filename, 0, String[], String[])
+    end
+end
+
+"""
+    ModParaParameters
+
+Parameters for modpara.def file.
+Contains all the main simulation parameters.
+"""
+mutable struct ModParaParameters
+    # Basic system parameters
+    nsite::Int
+    nelec::Int
+    nlocspin::Int
+    ncond::Int
+
+    # Calculation modes
+    vmc_calc_mode::Int  # 0: optimization, 1: physics calculation
+    lanczos_mode::Int   # 0: none, 1: energy only, 2: Green functions
+
+    # VMC parameters
+    nsr_opt_itr_step::Int
+    nsr_opt_itr_smp::Int
+    nsr_opt_fix_smp::Int
+    nvmc_warmup::Int
+    nvmc_interval::Int
+    nvmc_sample::Int
+
+    # SR parameters
+    dsr_opt_red_cut::Float64
+    dsr_opt_sta_del::Float64
+    dsr_opt_step_dt::Float64
+    dsr_opt_cg_tol::Float64
+    nsr_opt_cg_max_iter::Int
+
+    # SR solver selection
+    nsrcg::Int          # 0: direct solver (LAPACK), !=0: CG solver
+    nstore_o::Int       # 0: normal, !=0: store O samples
+
+    # Random number generation
+    rnd_seed::Int
+    nsplit_size::Int
+
+    # Quantum projection
+    nsp_gauss_leg::Int
+    nsp_stot::Int
+    nmp_trans::Int
+    two_sz::Int
+
+    # Data output
+    n_data_idx_start::Int
+    n_data_qty_smp::Int
+    c_data_file_head::String
+    c_para_file_head::String
+
+    # File control
+    n_file_flush_interval::Int
+
+    # Complex flag
+    complex_flag::Int
+
+    # RBM parameters
+    nneuron::Int
+    nneuron_general::Int
+    nneuron_charge::Int
+    nneuron_spin::Int
+    nblock_size_rbm_ratio::Int
+
+    # Lanczos parameters
+    n_one_body_g::Int
+    n_two_body_g::Int
+    n_two_body_g_ex::Int
+
+    # Exchange update
+    nex_update_path::Int
+
+    # Orbital parameters
+    n_orbital_idx::Int  # Number of unique orbital parameters (from NOrbitalIdx in orbitalidx.def)
+
+    function ModParaParameters(;
+        nsite::Int = 0,
+        nelec::Int = 0,
+        nlocspin::Int = 0,
+        ncond::Int = -1,
+        vmc_calc_mode::Int = 0,
+        lanczos_mode::Int = 0,
+        nsr_opt_itr_step::Int = 1000,
+        nsr_opt_itr_smp::Int = 1000,
+        nsr_opt_fix_smp::Int = 0,
+        nvmc_warmup::Int = 1000,
+        nvmc_interval::Int = 1,
+        nvmc_sample::Int = 10000,
+        dsr_opt_red_cut::Float64 = 1e-6,
+        dsr_opt_sta_del::Float64 = 0.0,
+        dsr_opt_step_dt::Float64 = 0.01,
+        dsr_opt_cg_tol::Float64 = 1e-6,
+        nsr_opt_cg_max_iter::Int = 1000,
+        nsrcg::Int = 0,
+        nstore_o::Int = 1,
+        rnd_seed::Int = 12345,
+        nsplit_size::Int = 1,
+        nsp_gauss_leg::Int = 1,
+        nsp_stot::Int = 0,
+        nmp_trans::Int = 0,
+        two_sz::Int = -1,  # -1 means Sz not conserved (FSZ mode), matching C default
+        n_data_idx_start::Int = 0,
+        n_data_qty_smp::Int = 1,
+        c_data_file_head::String = "zvo",
+        c_para_file_head::String = "zqp",
+        n_file_flush_interval::Int = 1,
+        complex_flag::Int = 0,
+        nneuron::Int = 0,
+        nneuron_general::Int = 0,
+        nneuron_charge::Int = 0,
+        nneuron_spin::Int = 0,
+        # C default (readdef.c): NBlockSize_RBMRatio = 200
+        nblock_size_rbm_ratio::Int = 200,
+        n_one_body_g::Int = 0,
+        n_two_body_g::Int = 0,
+        n_two_body_g_ex::Int = 0,
+        nex_update_path::Int = 1,
+        n_orbital_idx::Int = 0,
+    )
+        new(
+            nsite,
+            nelec,
+            nlocspin,
+            ncond,
+            vmc_calc_mode,
+            lanczos_mode,
+            nsr_opt_itr_step,
+            nsr_opt_itr_smp,
+            nsr_opt_fix_smp,
+            nvmc_warmup,
+            nvmc_interval,
+            nvmc_sample,
+            dsr_opt_red_cut,
+            dsr_opt_sta_del,
+            dsr_opt_step_dt,
+            dsr_opt_cg_tol,
+            nsr_opt_cg_max_iter,
+            nsrcg,
+            nstore_o,
+            rnd_seed,
+            nsplit_size,
+            nsp_gauss_leg,
+            nsp_stot,
+            nmp_trans,
+            two_sz,
+            n_data_idx_start,
+            n_data_qty_smp,
+            c_data_file_head,
+            c_para_file_head,
+            n_file_flush_interval,
+            complex_flag,
+            nneuron,
+            nneuron_general,
+            nneuron_charge,
+            nneuron_spin,
+            nblock_size_rbm_ratio,
+            n_one_body_g,
+            n_two_body_g,
+            n_two_body_g_ex,
+            nex_update_path,
+            n_orbital_idx,
+        )
+    end
+end
+
+"""
+    TransferTerm
+
+Single transfer (hopping) term.
+"""
+struct TransferTerm
+    site1::Int
+    spin1::Int
+    site2::Int
+    spin2::Int
+    value::ComplexF64
+    spin::Symbol  # :up, :down, :both
+end
+
+TransferTerm(site1::Int, spin1::Int, site2::Int, spin2::Int, value::ComplexF64) = begin
+    spin = spin1 == 0 ? :up : :down
+    TransferTerm(site1, spin1, site2, spin2, value, spin)
+end
+
+TransferTerm(site1::Int, site2::Int, value::ComplexF64, spin::Symbol) = begin
+    spin1 = spin == :down ? 1 : 0
+    spin2 = spin1
+    TransferTerm(site1, spin1, site2, spin2, value, spin)
+end
+
+"""
+    CoulombIntraTerm
+
+On-site Coulomb interaction term.
+"""
+struct CoulombIntraTerm
+    site::Int
+    value::Float64
+end
+
+"""
+    CoulombInterTerm
+
+Inter-site Coulomb interaction term.
+"""
+struct CoulombInterTerm
+    site1::Int
+    site2::Int
+    value::Float64
+end
+
+"""
+    HundTerm
+
+Hund coupling term.
+"""
+struct HundTerm
+    site1::Int
+    site2::Int
+    value::Float64
+end
+
+"""
+    ExchangeTerm
+
+Exchange coupling term.
+"""
+struct ExchangeTerm
+    site1::Int
+    site2::Int
+    value::Float64
+end
+
+"""
+    PairHopTerm
+
+Pair hopping term.
+"""
+struct PairHopTerm
+    site1::Int
+    site2::Int
+    value::Float64
+end
+
+"""
+    GutzwillerTerm
+
+Gutzwiller projection term.
+"""
+mutable struct GutzwillerTerm
+    site::Int
+    value::ComplexF64
+    is_complex::Bool
+end
+
+"""
+    JastrowTerm
+
+Jastrow factor term.
+"""
+mutable struct JastrowTerm
+    site1::Int
+    site2::Int
+    value::ComplexF64
+    is_complex::Bool
+end
+
+"""
+    OrbitalTerm
+
+Orbital parameter term.
+"""
+mutable struct OrbitalTerm
+    site1::Int
+    site2::Int
+    idx::Int      # Orbital parameter index (0 to NOrbitalIdx-1)
+    value::ComplexF64
+    is_complex::Bool
+    sign::Int  # OrbitalSgn: +1 or -1 (default: 1)
+end
+
+# Constructor with default sign = 1 for backward compatibility
+OrbitalTerm(site1::Int, site2::Int, value::ComplexF64, is_complex::Bool) =
+    OrbitalTerm(site1, site2, 0, value, is_complex, 1)
+
+# Constructor with explicit sign (backward compatibility for older test/helpers)
+OrbitalTerm(site1::Int, site2::Int, value::ComplexF64, is_complex::Bool, sign::Int) =
+    OrbitalTerm(site1, site2, 0, value, is_complex, sign)
+
+# Constructor with idx for orbitalidx.def format
+OrbitalTerm(site1::Int, site2::Int, idx::Int, value::ComplexF64, is_complex::Bool) =
+    OrbitalTerm(site1, site2, idx, value, is_complex, 1)
+
+"""
+    GreenOneTerm
+
+One-body Green's function measurement term.
+"""
+struct GreenOneTerm
+    site1::Int
+    site2::Int
+    spin1::Symbol
+    spin2::Symbol
+end
+
+"""
+    GreenTwoTerm
+
+Two-body Green's function measurement term.
+"""
+struct GreenTwoTerm
+    site1::Int
+    site2::Int
+    site3::Int
+    site4::Int
+    spin1::Symbol
+    spin2::Symbol
+    spin3::Symbol
+    spin4::Symbol
+end
+
+"""
+    QPTransTerm
+
+Quantum projection translation term.
+"""
+struct QPTransTerm
+    site::Int
+    momentum::Vector{Float64}
+    phase::Float64
+end
+
+"""
+    InterAllTerm
+
+General interaction term.
+
+The format stores 4 site-spin pairs:
+- site0, spin0: first creation operator (c†_{site0, spin0})
+- site1, spin1: first annihilation operator (c_{site1, spin1})
+- site2, spin2: second creation operator (c†_{site2, spin2})
+- site3, spin3: second annihilation operator (c_{site3, spin3})
+
+The term represents: value * <c†_{site0,spin0} c_{site1,spin1} c†_{site2,spin2} c_{site3,spin3}>
+"""
+struct InterAllTerm
+    site0::Int
+    spin0::Int
+    site1::Int
+    spin1::Int
+    site2::Int
+    spin2::Int
+    site3::Int
+    spin3::Int
+    value::ComplexF64
+    is_complex::Bool
+end
+
+"""
+    LocSpinTerm
+
+Local spin term.
+"""
+struct LocSpinTerm
+    site::Int
+    spin_value::Int
+end
+
+"""
+    RBMTerm
+
+Base RBM term structure.
+"""
+abstract type RBMTerm end
+
+"""
+    ChargeRBMPhysLayerTerm
+
+Charge RBM physical layer term.
+"""
+mutable struct ChargeRBMPhysLayerTerm <: RBMTerm
+    site::Int
+    value::ComplexF64
+    is_complex::Bool
+    idx::Int
+end
+ChargeRBMPhysLayerTerm(site::Int, value::ComplexF64, is_complex::Bool) =
+    ChargeRBMPhysLayerTerm(site, value, is_complex, site)
+
+"""
+    SpinRBMPhysLayerTerm
+
+Spin RBM physical layer term.
+"""
+mutable struct SpinRBMPhysLayerTerm <: RBMTerm
+    site::Int
+    value::ComplexF64
+    is_complex::Bool
+    idx::Int
+end
+SpinRBMPhysLayerTerm(site::Int, value::ComplexF64, is_complex::Bool) =
+    SpinRBMPhysLayerTerm(site, value, is_complex, site)
+
+"""
+    GeneralRBMPhysLayerTerm
+
+General RBM physical layer term.
+"""
+mutable struct GeneralRBMPhysLayerTerm <: RBMTerm
+    site::Int
+    spin::Int
+    value::ComplexF64
+    is_complex::Bool
+    idx::Int
+end
+GeneralRBMPhysLayerTerm(site::Int, value::ComplexF64, is_complex::Bool) =
+    GeneralRBMPhysLayerTerm(site, 0, value, is_complex, site)
+
+"""
+    ChargeRBMHiddenLayerTerm
+
+Charge RBM hidden layer term.
+"""
+mutable struct ChargeRBMHiddenLayerTerm <: RBMTerm
+    site::Int
+    value::ComplexF64
+    is_complex::Bool
+    idx::Int
+end
+ChargeRBMHiddenLayerTerm(site::Int, value::ComplexF64, is_complex::Bool) =
+    ChargeRBMHiddenLayerTerm(site, value, is_complex, site)
+
+"""
+    SpinRBMHiddenLayerTerm
+
+Spin RBM hidden layer term.
+"""
+mutable struct SpinRBMHiddenLayerTerm <: RBMTerm
+    site::Int
+    value::ComplexF64
+    is_complex::Bool
+    idx::Int
+end
+SpinRBMHiddenLayerTerm(site::Int, value::ComplexF64, is_complex::Bool) =
+    SpinRBMHiddenLayerTerm(site, value, is_complex, site)
+
+"""
+    GeneralRBMHiddenLayerTerm
+
+General RBM hidden layer term.
+"""
+mutable struct GeneralRBMHiddenLayerTerm <: RBMTerm
+    site::Int
+    value::ComplexF64
+    is_complex::Bool
+    idx::Int
+end
+GeneralRBMHiddenLayerTerm(site::Int, value::ComplexF64, is_complex::Bool) =
+    GeneralRBMHiddenLayerTerm(site, value, is_complex, site)
+
+"""
+    ChargeRBMPhysHiddenTerm
+
+Charge RBM physical-hidden connection term.
+"""
+mutable struct ChargeRBMPhysHiddenTerm <: RBMTerm
+    site1::Int
+    site2::Int
+    value::ComplexF64
+    is_complex::Bool
+    idx::Int
+end
+ChargeRBMPhysHiddenTerm(site1::Int, site2::Int, value::ComplexF64, is_complex::Bool) =
+    ChargeRBMPhysHiddenTerm(site1, site2, value, is_complex, 0)
+
+"""
+    SpinRBMPhysHiddenTerm
+
+Spin RBM physical-hidden connection term.
+"""
+mutable struct SpinRBMPhysHiddenTerm <: RBMTerm
+    site1::Int
+    site2::Int
+    value::ComplexF64
+    is_complex::Bool
+    idx::Int
+end
+SpinRBMPhysHiddenTerm(site1::Int, site2::Int, value::ComplexF64, is_complex::Bool) =
+    SpinRBMPhysHiddenTerm(site1, site2, value, is_complex, 0)
+
+"""
+    GeneralRBMPhysHiddenTerm
+
+General RBM physical-hidden connection term.
+"""
+mutable struct GeneralRBMPhysHiddenTerm <: RBMTerm
+    site1::Int
+    spin::Int
+    site2::Int
+    value::ComplexF64
+    is_complex::Bool
+    idx::Int
+end
+GeneralRBMPhysHiddenTerm(site1::Int, site2::Int, value::ComplexF64, is_complex::Bool) =
+    GeneralRBMPhysHiddenTerm(site1, 0, site2, value, is_complex, 0)
+
+"""
+    DoublonHolon2SiteTerm
+
+Doublon-Holon 2-site term.
+"""
+struct DoublonHolon2SiteTerm
+    site1::Int
+    site2::Int
+    value::ComplexF64
+    is_complex::Bool
+end
+
+"""
+    DoublonHolon4SiteTerm
+
+Doublon-Holon 4-site term.
+"""
+struct DoublonHolon4SiteTerm
+    site1::Int
+    site2::Int
+    site3::Int
+    site4::Int
+    value::ComplexF64
+    is_complex::Bool
+end
+
+"""
+    ExpertModeData
+
+Container for all Expert Mode data.
+"""
+mutable struct ExpertModeData
+    # Main parameters
+    modpara::ModParaParameters
+
+    # Transfer terms
+    transfer_terms::Vector{TransferTerm}
+
+    # Interaction terms
+    coulomb_intra_terms::Vector{CoulombIntraTerm}
+    coulomb_inter_terms::Vector{CoulombInterTerm}
+    hund_terms::Vector{HundTerm}
+    exchange_terms::Vector{ExchangeTerm}
+    pair_hop_terms::Vector{PairHopTerm}
+    inter_all_terms::Vector{InterAllTerm}
+
+    # Variational parameters
+    gutzwiller_terms::Vector{GutzwillerTerm}
+    jastrow_terms::Vector{JastrowTerm}
+    orbital_terms::Vector{OrbitalTerm}
+
+    # Index arrays for projection factors (C implementation equivalents)
+    gutzwiller_idx::Vector{Int}  # GutzwillerIdx[ri] = idx for site ri (0-based indexing)
+    jastrow_idx::Matrix{Int}  # JastrowIdx[ri, rj] = idx for site pair (ri, rj) (0-based indexing)
+    n_gutzwiller_idx::Int  # NGutzwillerIdx
+    n_jastrow_idx::Int  # NJastrowIdx
+
+    # Green's function measurements
+    green_one_terms::Vector{GreenOneTerm}
+    green_two_terms::Vector{GreenTwoTerm}
+
+    # Quantum projection
+    qptrans_terms::Vector{QPTransTerm}
+    para_qp_trans::Vector{ComplexF64}  # ParaQPTrans values from qptransidx.def
+    n_qp_trans::Int  # NQPTrans from qptransidx.def
+    n_qp_opt_trans::Int  # NQPOptTrans (default: 1)
+    qp_weights::Union{Nothing,Any}  # QuantumProjectionWeights (initialized by init_qp_weight!)
+
+    # QPTrans mappings (from qptransidx.def)
+    qp_trans::Vector{Vector{Int}}  # QPTrans[mpidx][ori] = trj (translated site)
+    qp_trans_inv::Vector{Vector{Int}}  # QPTransInv[mpidx][trj] = ori (inverse mapping)
+    qp_trans_sgn::Vector{Vector{Int}}  # QPTransSgn[mpidx][ori] = sign (+1 or -1)
+    qp_opt_trans::Vector{Vector{Int}}  # QPOptTrans[optidx][ri] = ori
+    qp_opt_trans_sgn::Vector{Vector{Int}}  # QPOptTransSgn[optidx][ri] = sign (+1 or -1)
+
+    # OrbitalIdx and OrbitalSgn matrices (from orbitalidx.def)
+    # OrbitalIdx[i+1, j+1] = orbital parameter index for site pair (i, j)
+    orbital_idx_matrix::Union{Nothing,Matrix{Int}}  # Like C's OrbitalIdx[ri][rj]
+    orbital_sgn::Union{Nothing,Matrix{Int}}  # OrbitalSgn[i+1, j+1] = sign (+1 or -1) for site pair (i, j)
+
+    # Local spins
+    locspin_terms::Vector{LocSpinTerm}
+
+    # RBM terms
+    charge_rbm_phys_layer_terms::Vector{ChargeRBMPhysLayerTerm}
+    spin_rbm_phys_layer_terms::Vector{SpinRBMPhysLayerTerm}
+    general_rbm_phys_layer_terms::Vector{GeneralRBMPhysLayerTerm}
+    charge_rbm_hidden_layer_terms::Vector{ChargeRBMHiddenLayerTerm}
+    spin_rbm_hidden_layer_terms::Vector{SpinRBMHiddenLayerTerm}
+    general_rbm_hidden_layer_terms::Vector{GeneralRBMHiddenLayerTerm}
+    charge_rbm_phys_hidden_terms::Vector{ChargeRBMPhysHiddenTerm}
+    spin_rbm_phys_hidden_terms::Vector{SpinRBMPhysHiddenTerm}
+    general_rbm_phys_hidden_terms::Vector{GeneralRBMPhysHiddenTerm}
+
+    # Doublon-Holon terms
+    doublon_holon_2site_terms::Vector{DoublonHolon2SiteTerm}
+    doublon_holon_4site_terms::Vector{DoublonHolon4SiteTerm}
+
+    # Optimization flags (corresponds to C implementation's OptFlag)
+    optimization_flags::Vector{Bool}
+    complex_flags::Vector{Int}  # Complex number flags for each term type
+
+    # Orbital mode flags (corresponds to C implementation's iFlgOrbitalGeneral)
+    i_flg_orbital_general::Int  # 0: sz conserved, 1: general (fsz)
+    i_flg_orbital_anti_parallel::Int  # 0: not used, 1: OrbitalAntiParallel exists
+    i_flg_orbital_parallel::Int  # 0: not used, 1: OrbitalParallel exists
+
+    function ExpertModeData()
+        new(
+            ModParaParameters(),
+            TransferTerm[],
+            CoulombIntraTerm[],
+            CoulombInterTerm[],
+            HundTerm[],
+            ExchangeTerm[],
+            PairHopTerm[],
+            InterAllTerm[],
+            GutzwillerTerm[],
+            JastrowTerm[],
+            OrbitalTerm[],
+            Int[],
+            zeros(Int, 0, 0),
+            0,
+            0,  # gutzwiller_idx, jastrow_idx, n_gutzwiller_idx, n_jastrow_idx
+            GreenOneTerm[],
+            GreenTwoTerm[],
+            QPTransTerm[],
+            ComplexF64[],
+            0,
+            1,
+            nothing,  # para_qp_trans, n_qp_trans, n_qp_opt_trans, qp_weights
+            Vector{Vector{Int}}[],  # qp_trans
+            Vector{Vector{Int}}[],  # qp_trans_inv
+            Vector{Vector{Int}}[],  # qp_trans_sgn
+            Vector{Vector{Int}}[],  # qp_opt_trans
+            Vector{Vector{Int}}[],  # qp_opt_trans_sgn
+            nothing,  # orbital_idx_matrix
+            nothing,  # orbital_sgn
+            LocSpinTerm[],
+            ChargeRBMPhysLayerTerm[],
+            SpinRBMPhysLayerTerm[],
+            GeneralRBMPhysLayerTerm[],
+            ChargeRBMHiddenLayerTerm[],
+            SpinRBMHiddenLayerTerm[],
+            GeneralRBMHiddenLayerTerm[],
+            ChargeRBMPhysHiddenTerm[],
+            SpinRBMPhysHiddenTerm[],
+            GeneralRBMPhysHiddenTerm[],
+            # Doublon-Holon terms
+            DoublonHolon2SiteTerm[],
+            DoublonHolon4SiteTerm[],
+            Bool[],
+            Int[],  # Initialize empty optimization and complex flags
+            0,
+            0,
+            0,  # i_flg_orbital_general, i_flg_orbital_anti_parallel, i_flg_orbital_parallel (default: 0)
+        )
+    end
+end

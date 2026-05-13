@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: Julia-mVMC
+abstract: Julia port of mVMC (many-variable Variational Monte Carlo) solver for quantum lattice models.
+authors:
+  - family-names: Misawa
+    given-names: Takahiro
+    email: tmisawa@issp.u-tokyo.ac.jp
+version: 0.1.0
+date-released: "2026-05-14"
+license: GPL-3.0-or-later
+repository-code: "https://github.com/tmisawa/Julia-mVMC"
+keywords:
+  - variational-monte-carlo
+  - quantum-many-body
+  - julia
+  - condensed-matter-physics

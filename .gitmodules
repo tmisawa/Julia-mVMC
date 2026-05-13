@@ -1,0 +1,6 @@
+[submodule "PfaPack.jl"]
+	path = PfaPack.jl
+	url = https://github.com/tmisawa/PfaPack.jl.git
+[submodule "SFMT.jl"]
+	path = SFMT.jl
+	url = https://github.com/tmisawa/SFMT.jl.git

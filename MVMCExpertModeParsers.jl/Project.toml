@@ -1,0 +1,26 @@
+name = "MVMCExpertModeParsers"
+uuid = "f8463493-42a4-4c1a-8bf4-93a3cbd844bc"
+version = "0.1.0"
+authors = ["Takahiro Misawa <tmisawa@issp.u-tokyo.ac.jp>"]
+
+[deps]
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+SFMT = "f01bd734-aebb-490b-aa9b-8490e8eb2402"
+
+[sources]
+SFMT = {path = "../SFMT.jl"}
+
+[compat]
+julia = "1.11"
+
+[extras]
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+ReTestItems = "817f1d60-ba6b-4fd5-9520-3cf149f6a823"
+StableRNGs = "860ef19b-820b-49d6-a774-d7a799459cd3"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test", "ReTestItems", "Random", "StableRNGs"]

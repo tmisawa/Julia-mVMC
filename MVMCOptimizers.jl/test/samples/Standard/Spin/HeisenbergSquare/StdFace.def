@@ -1,0 +1,10 @@
+L = 4
+W = 4
+Lsub = 2
+Wsub = 2
+model = "Spin"
+lattice = "tetragonal"
+J = 1.0
+NSROptItrStep = 200
+2Sz = 0
+//NVMCCalMode = 1

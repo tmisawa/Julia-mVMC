@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        julia-version: ["1.11", "1.12"]
+      fail-fast: false
+
+    env:
+      # CI runs the smoke-test step counts; release-gate sweeps (50 SR steps)
+      # are run locally before tagging.
+      JULIA_MVMC_EXAMPLE_STEPS: "5"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install native prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gfortran g++ make libblas-dev liblapack-dev
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ matrix.julia-version }}
+
+      - uses: julia-actions/cache@v2
+
+      - name: Build subpackages (native deps)
+        run: |
+          julia --project=@. -e 'using Pkg; Pkg.instantiate(); Pkg.build(verbose=true)'
+
+      - name: Run unit tests (each subpackage)
+        run: |
+          for d in SFMT.jl MVMCExpertModeParsers.jl PfaPack.jl MVMCOptimizers.jl; do
+            echo "=== $d ==="
+            (cd "$d" && julia --project=@. -e 'using Pkg; Pkg.test()')
+          done
+
+      - name: Run integration tests
+        run: |
+          julia --project=@. test/integration/runtests.jl
+
+      - name: Run examples (smoke test, JULIA_MVMC_EXAMPLE_STEPS=5)
+        run: |
+          for f in examples/*.jl; do
+            echo "=== $f ==="
+            julia --project=@. "$f"
+          done
