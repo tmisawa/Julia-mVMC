@@ -50,6 +50,10 @@ jobs:
         run: |
           julia --project=@. test/integration/runtests.jl
 
+      - name: Run C ctest-equivalent integration tests
+        run: |
+          julia --project=@. test/integration/ctest_equivalent.jl
+
       - name: Run examples (smoke test, JULIA_MVMC_EXAMPLE_STEPS=5)
         run: |
           for f in examples/*.jl; do
