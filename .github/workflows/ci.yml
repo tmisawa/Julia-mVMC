@@ -6,9 +6,11 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.os }}, Julia ${{ matrix.julia-version }})
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
+        os: ["ubuntu-latest", "macos-latest"]
         julia-version: ["1.11", "1.12"]
       fail-fast: false
 
@@ -22,10 +24,17 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install native prerequisites
+      - name: Install native prerequisites (Linux)
+        if: ${{ runner.os == 'Linux' }}
         run: |
           sudo apt-get update
           sudo apt-get install -y gfortran g++ make libblas-dev liblapack-dev
+
+      - name: Install native prerequisites (macOS)
+        if: ${{ runner.os == 'macOS' }}
+        run: |
+          brew install gcc
+          gfortran --version
 
       - uses: julia-actions/setup-julia@v2
         with:
