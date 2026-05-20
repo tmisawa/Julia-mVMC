@@ -32,8 +32,20 @@ jobs:
 
       - name: Install native prerequisites (macOS)
         if: ${{ runner.os == 'macOS' }}
+        shell: bash
         run: |
           brew install gcc
+          if ! command -v gfortran >/dev/null 2>&1; then
+            gfortran_bin="$(find "$(brew --prefix gcc)/bin" -maxdepth 1 \( -type f -o -type l \) -name 'gfortran-*' | head -n 1)"
+            if [ -z "$gfortran_bin" ]; then
+              echo "No Homebrew gfortran executable found" >&2
+              exit 1
+            fi
+            mkdir -p "$RUNNER_TEMP/gfortran-shim"
+            ln -sf "$gfortran_bin" "$RUNNER_TEMP/gfortran-shim/gfortran"
+            echo "$RUNNER_TEMP/gfortran-shim" >> "$GITHUB_PATH"
+            export PATH="$RUNNER_TEMP/gfortran-shim:$PATH"
+          fi
           gfortran --version
 
       - uses: julia-actions/setup-julia@v2
