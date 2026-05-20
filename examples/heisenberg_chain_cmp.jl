@@ -10,5 +10,10 @@ const NAMELIST  = joinpath(INPUT_DIR, "namelist.def")
 const NSTEPS    = parse(Int, get(ENV, "JULIA_MVMC_EXAMPLE_STEPS", "50"))
 
 println("=== Heisenberg chain (complex) — $(NSTEPS) SR steps ===")
-result = MVMCOptimizers.run_para_opt_from_namelist(NAMELIST; nsteps=NSTEPS, mode=:cmp)
+result = MVMCOptimizers.run_para_opt_from_namelist(
+    NAMELIST;
+    nsteps = NSTEPS,
+    nsmp = NSTEPS,
+    mode = :cmp,
+)
 println("Final energy / site = ", result.final_energy_per_site)

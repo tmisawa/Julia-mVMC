@@ -37,6 +37,7 @@ using MVMCOptimizers
 
 result = run_para_opt_from_namelist("path/to/namelist.def";
     nsteps = 50,
+    nsmp = 50,                   # NSROptItrSmp override; must satisfy nsteps >= nsmp
     mode = :real,                # :real, :cmp, or :fsz
     output_dir = "out",
     seed = 11272,                # SFMT19937 seed (overrides modpara.def's RndSeed)
@@ -64,7 +65,7 @@ info = vmc_para_opt!(data;
 
 | Function | Purpose |
 |----------|---------|
-| `run_para_opt_from_namelist(path; nsteps, mode, ...)` | High-level driver. Parses `.def` files, seeds the RNG, runs `nsteps` SR steps, writes `zvo_out.dat` / `zqp_opt.dat`. |
+| `run_para_opt_from_namelist(path; nsteps, mode, nsmp=nothing, ...)` | High-level driver. Parses `.def` files, seeds the RNG, runs `nsteps` SR steps, writes `zvo_out.dat` / `zqp_opt.dat`. `nsmp` overrides `NSROptItrSmp` for final-sample averaging and must satisfy `nsteps >= nsmp`. |
 | `vmc_para_opt!(data; callback=nothing)` | Lower-level SR optimization loop (no I/O, no parser). |
 | `vmc_phys_cal!(data; rnd_seed=0)` | Physical-quantity calculation (experimental in v0.1). |
 | `read_initial_def!(data, path)` | Overlay variational parameters from an `initial.def` file. |

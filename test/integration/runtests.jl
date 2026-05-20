@@ -61,6 +61,7 @@ function run_model(name, mode)
     result = MVMCOptimizers.run_para_opt_from_namelist(
         namelist;
         nsteps = N_STEPS,
+        nsmp = N_STEPS,
         mode   = mode,
     )
     return result.zvo_first_n
