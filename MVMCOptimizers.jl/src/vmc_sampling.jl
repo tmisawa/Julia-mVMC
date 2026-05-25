@@ -2558,6 +2558,8 @@ function vmc_make_sample!(
         end
     end
     burn_flag = state.electron_config.counter[11] != 0  # Use counter[11] as burn_flag storage
+    # [30] makeInitialSample: initial/burn sample + initial CalculateMAll + logIP
+    ctimer_start!(c_timer, 30)
     if !burn_flag
         result = make_initial_sample!(
             tmp_ele_idx,
@@ -2666,6 +2668,7 @@ function vmc_make_sample!(
         end
         burn_flag = false
     end
+    ctimer_stop!(c_timer, 30)
 
     # Main sampling loop
     n_out_step = burn_flag ? n_vmc_sample + 1 : n_vmc_warmup + n_vmc_sample
@@ -2688,6 +2691,8 @@ function vmc_make_sample!(
             if update_type == HOPPING
                 state.electron_config.counter[1] += 1
 
+                # [31] make candidate (closed before the reject `continue`)
+                ctimer_start!(c_timer, 31)
                 mi, ri, rj, s, reject_flag = make_candidate_hopping(
                     tmp_ele_idx,
                     tmp_ele_cfg,
@@ -2696,12 +2701,17 @@ function vmc_make_sample!(
                     loc_spn,
                     rng,
                 )
+                ctimer_stop!(c_timer, 31)
 
                 if reject_flag != 0
                     continue
                 end
 
-                # Update electron configuration
+                # [32] hopping update ([60]-[63])
+                ctimer_start!(c_timer, 32)
+
+                # [60] UpdateProjCnt: electron-config + projection update
+                ctimer_start!(c_timer, 60)
                 update_ele_config!(
                     mi,
                     ri,
@@ -2724,9 +2734,11 @@ function vmc_make_sample!(
                     tmp_ele_num,
                     data,
                 )
+                ctimer_stop!(c_timer, 60)
 
-                # Calculate new Pfaffian (CalculateNewPfM2)
+                # [61] CalculateNewPfM2
                 # Use pre-allocated workspace array (reset before use)
+                ctimer_start!(c_timer, 61)
                 fill!(pf_m_new, 0.0 + 0.0im)
                 calculate_new_pf_m2!(
                     mi,
@@ -2738,9 +2750,12 @@ function vmc_make_sample!(
                     data,
                     state,
                 )
+                ctimer_stop!(c_timer, 61)
 
-                # Calculate log inner product (CalculateLogIP_fcmp)
+                # [62] CalculateLogIP
+                ctimer_start!(c_timer, 62)
                 log_ip_new = calculate_log_ip_fcmp(pf_m_new, qp_start, qp_end, data)
+                ctimer_stop!(c_timer, 62)
                 if use_rbm
                     update_rbm_cnt_hopping!(rbm_cnt_new, rbm_cnt_old, ri, rj, s, data)
                 end
@@ -2758,7 +2773,10 @@ function vmc_make_sample!(
                 r_metro = rng_real2(rng)
                 if w > r_metro
                     # Accept
+                    # [63] UpdateMAll
+                    ctimer_start!(c_timer, 63)
                     update_m_all!(mi, s, tmp_ele_idx, qp_start, qp_end, data, state)
+                    ctimer_stop!(c_timer, 63)
                     copy!(tmp_ele_proj_cnt, proj_cnt_new)
                     state.slater_matrix.pf_m .= pf_m_new
                     log_ip_old = log_ip_new
@@ -2781,9 +2799,13 @@ function vmc_make_sample!(
                         n_elec,
                     )
                 end
+                ctimer_stop!(c_timer, 32)
 
             elseif update_type == EXCHANGE
                 # Exchange update: two electrons exchange positions
+
+                # [31] make candidate (closed before the reject/`s==t` continues)
+                ctimer_start!(c_timer, 31)
                 mi, ri, mj, rj, s, t, reject_flag = make_candidate_exchange(
                     tmp_ele_idx,
                     tmp_ele_cfg,
@@ -2792,6 +2814,7 @@ function vmc_make_sample!(
                     tmp_ele_num,
                     rng,
                 )
+                ctimer_stop!(c_timer, 31)
 
                 if reject_flag != 0
                     continue
@@ -2804,6 +2827,9 @@ function vmc_make_sample!(
                     continue
                 end
 
+                # [33] exchange update ([65]-[68]); starts after both `continue`s
+                ctimer_start!(c_timer, 33)
+
                 # Store old positions
                 ri_old = ri
                 rj_old = rj
@@ -2814,6 +2840,8 @@ function vmc_make_sample!(
                 n0_rj_before = tmp_ele_num[rj+1]
                 n1_rj_before = tmp_ele_num[rj+n_site+1]
 
+                # [65] UpdateProjCnt: both electrons' config + projection update
+                ctimer_start!(c_timer, 65)
                 # Update electron configuration (first electron)
                 update_ele_config!(
                     mi,
@@ -2849,6 +2877,7 @@ function vmc_make_sample!(
                     n_elec,
                 )
                 update_proj_cnt!(rj, ri, t, proj_cnt_new, proj_cnt_new, tmp_ele_num, data)
+                ctimer_stop!(c_timer, 65)
 
                 # Debug: Check ele_num after exchange for half-filling
                 n0_ri_after = tmp_ele_num[ri+1]
@@ -2864,7 +2893,8 @@ function vmc_make_sample!(
                     @error "  After:  ri(n0=$n0_ri_after,n1=$n1_ri_after), rj(n0=$n0_rj_after,n1=$n1_rj_after)"
                 end
 
-                # Calculate new Pfaffian (CalculateNewPfMTwo2_fcmp)
+                # [66] CalculateNewPfMTwo2
+                ctimer_start!(c_timer, 66)
                 pf_m_new = zeros(ComplexF64, length(state.slater_matrix.pf_m))
                 calculate_new_pf_m_two2!(
                     mi,
@@ -2878,9 +2908,12 @@ function vmc_make_sample!(
                     data,
                     state,
                 )
+                ctimer_stop!(c_timer, 66)
 
-                # Calculate log inner product (CalculateLogIP_fcmp)
+                # [67] CalculateLogIP
+                ctimer_start!(c_timer, 67)
                 log_ip_new = calculate_log_ip_fcmp(pf_m_new, qp_start, qp_end, data)
+                ctimer_stop!(c_timer, 67)
                 if use_rbm
                     update_rbm_cnt_hopping!(rbm_cnt_new, rbm_cnt_old, ri, rj, s, data)
                     update_rbm_cnt_hopping!(rbm_cnt_new, rbm_cnt_new, rj, ri, t, data)
@@ -2899,6 +2932,8 @@ function vmc_make_sample!(
                 r_metro = rng_real2(rng)
                 if w > r_metro
                     # Accept
+                    # [68] UpdateMAllTwo
+                    ctimer_start!(c_timer, 68)
                     update_m_all_two!(
                         mi,
                         s,
@@ -2912,6 +2947,7 @@ function vmc_make_sample!(
                         data,
                         state,
                     )
+                    ctimer_stop!(c_timer, 68)
                     tmp_ele_proj_cnt .= proj_cnt_new
                     log_ip_old = log_ip_new
                     if use_rbm
@@ -2943,10 +2979,12 @@ function vmc_make_sample!(
                         n_elec,
                     )
                 end
+                ctimer_stop!(c_timer, 33)
             end
 
-            # Recalculate Pfaffian periodically
+            # [34] recal PfM and InvM: periodic full recompute + logIP update
             if n_accept > n_site
+                ctimer_start!(c_timer, 34)
                 # Recalculate PfM and InvM from scratch
                 result = calculate_m_all_fcmp!(tmp_ele_idx, qp_start, qp_end, data, state)
                 if result == 0
@@ -2964,6 +3002,7 @@ function vmc_make_sample!(
                     end
                 end
                 n_accept = 0
+                ctimer_stop!(c_timer, 34)
             end
         end
 
@@ -3014,6 +3053,8 @@ function vmc_make_sample!(
                     continue
                 end
 
+                # [35] save electron config (after the validation/bounds `continue`s)
+                ctimer_start!(c_timer, 35)
                 for i = 1:n_size
                     state.electron_config.ele_idx[offset_idx+i] = tmp_ele_idx[i]
                 end
@@ -3095,6 +3136,7 @@ function vmc_make_sample!(
                 for i = 1:n_proj
                     state.electron_config.ele_proj_cnt[offset_proj+i] = tmp_ele_proj_cnt[i]
                 end
+                ctimer_stop!(c_timer, 35)
             end
         end
     end
