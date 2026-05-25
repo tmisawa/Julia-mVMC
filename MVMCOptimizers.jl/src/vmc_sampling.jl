@@ -5540,6 +5540,7 @@ function vmc_make_sample_real!(
     data::ExpertModeData,
     state::VMCOptimizationState,
     rng::AbstractRNG = Random.GLOBAL_RNG,
+    c_timer::CTimer = CTIMER_DISABLED,
 )
     # Get parameters
     n_site = data.modpara.nsite
@@ -5586,6 +5587,9 @@ function vmc_make_sample_real!(
         end
     end
     burn_flag = state.electron_config.counter[11] != 0  # Use counter[11] as burn_flag storage
+    # [30] makeInitialSample: initial/burn sample + initial CalculateMAll + logIP.
+    # (early `return`s below are fatal-error exits; leaving [30] open is fine then.)
+    ctimer_start!(c_timer, 30)
     if !burn_flag
         info = make_initial_sample!(
             tmp_ele_idx,
@@ -5691,6 +5695,7 @@ function vmc_make_sample_real!(
         log_ip_old =
             calculate_log_ip_real(state.slater_matrix.pf_m_real, qp_start, qp_end, data)
     end
+    ctimer_stop!(c_timer, 30)
 
     # Sampling loop
     n_out_step = burn_flag ? n_vmc_sample + 1 : n_vmc_warmup + n_vmc_sample
@@ -5712,9 +5717,10 @@ function vmc_make_sample_real!(
             update_type = get_update_type(n_ex_update_path, data.i_flg_orbital_general, rng)
 
             if update_type == HOPPING
-                # Non-timed path (when timer disabled)
                 state.electron_config.counter[1] += 1
 
+                # [31] make candidate (closed before the reject `continue`)
+                ctimer_start!(c_timer, 31)
                 mi, ri, rj, s, reject_flag = make_candidate_hopping(
                     tmp_ele_idx,
                     tmp_ele_cfg,
@@ -5723,12 +5729,18 @@ function vmc_make_sample_real!(
                     loc_spn,
                     rng,
                 )
+                ctimer_stop!(c_timer, 31)
 
                 if reject_flag != 0
                     continue
                 end
 
-                # Update electron configuration
+                # [32] hopping update (children [60]-[63]); starts after the
+                # reject `continue` so the timer is never left open.
+                ctimer_start!(c_timer, 32)
+
+                # [60] UpdateProjCnt: electron-config + projection update
+                ctimer_start!(c_timer, 60)
                 update_ele_config!(
                     mi,
                     ri,
@@ -5740,8 +5752,6 @@ function vmc_make_sample_real!(
                     n_site,
                     n_elec,
                 )
-
-                # Update projection counts
                 update_proj_cnt!(
                     ri,
                     rj,
@@ -5751,8 +5761,10 @@ function vmc_make_sample_real!(
                     tmp_ele_num,
                     data,
                 )
+                ctimer_stop!(c_timer, 60)
 
-                # Calculate new Pfaffian using real version
+                # [61] CalculateNewPfM2
+                ctimer_start!(c_timer, 61)
                 calculate_new_pf_m2_real!(
                     mi,
                     s,
@@ -5763,9 +5775,12 @@ function vmc_make_sample_real!(
                     data,
                     state,
                 )
+                ctimer_stop!(c_timer, 61)
 
-                # Calculate log inner product
+                # [62] CalculateLogIP
+                ctimer_start!(c_timer, 62)
                 log_ip_new = calculate_log_ip_real(pf_m_new_real, qp_start, qp_end, data)
+                ctimer_stop!(c_timer, 62)
 
                 # Metropolis acceptance/rejection
                 x = log_proj_ratio(proj_cnt_new, tmp_ele_proj_cnt, data)
@@ -5776,6 +5791,8 @@ function vmc_make_sample_real!(
 
                 if w > rng_real2(rng)
                     # Accept
+                    # [63] UpdateMAll
+                    ctimer_start!(c_timer, 63)
                     update_m_all_real!(
                         mi,
                         s,
@@ -5785,6 +5802,7 @@ function vmc_make_sample_real!(
                         data,
                         state,
                     )
+                    ctimer_stop!(c_timer, 63)
                     copy!(tmp_ele_proj_cnt, proj_cnt_new)
                     state.slater_matrix.pf_m_real .= pf_m_new_real
                     log_ip_old = log_ip_new
@@ -5804,12 +5822,14 @@ function vmc_make_sample_real!(
                         n_elec,
                     )
                 end
+                ctimer_stop!(c_timer, 32)
 
             elseif update_type == EXCHANGE
-
-                # Non-timed path
                 # Exchange update: two electrons exchange positions
                 # Uses O(N²) Sherman-Morrison update instead of O(N³) full recalculation
+
+                # [31] make candidate (closed before the reject `continue`)
+                ctimer_start!(c_timer, 31)
                 mi, ri, mj, rj, s, t, reject_flag = make_candidate_exchange(
                     tmp_ele_idx,
                     tmp_ele_cfg,
@@ -5818,15 +5838,22 @@ function vmc_make_sample_real!(
                     tmp_ele_num,
                     rng,
                 )
+                ctimer_stop!(c_timer, 31)
 
                 if reject_flag != 0
                     continue
                 end
 
+                # [33] exchange update (children [65]-[68]); starts after the
+                # reject `continue` so the timer is never left open.
+                ctimer_start!(c_timer, 33)
+
                 # Store old positions for Sherman-Morrison update
                 ri_old = ri
                 rj_old = rj
 
+                # [65] UpdateProjCnt: both electrons' config + projection update
+                ctimer_start!(c_timer, 65)
                 # Update electron configuration (first electron)
                 update_ele_config!(
                     mi,
@@ -5862,8 +5889,10 @@ function vmc_make_sample_real!(
                     n_elec,
                 )
                 update_proj_cnt!(rj, ri, t, proj_cnt_new, proj_cnt_new, tmp_ele_num, data)
+                ctimer_stop!(c_timer, 65)
 
-                # Calculate new Pfaffian using O(N²) algorithm (no inv_m update yet)
+                # [66] CalculateNewPfMTwo2: O(N²) algorithm (no inv_m update yet)
+                ctimer_start!(c_timer, 66)
                 calculate_new_pf_m_two2_real!(
                     mi,
                     s,
@@ -5876,9 +5905,12 @@ function vmc_make_sample_real!(
                     data,
                     state,
                 )
+                ctimer_stop!(c_timer, 66)
 
-                # Calculate log inner product from proposed Pfaffian
+                # [67] CalculateLogIP
+                ctimer_start!(c_timer, 67)
                 log_ip_new = calculate_log_ip_real(pf_m_new_real, qp_start, qp_end, data)
+                ctimer_stop!(c_timer, 67)
 
                 # Metropolis acceptance/rejection
                 x = log_proj_ratio(proj_cnt_new, tmp_ele_proj_cnt, data)
@@ -5889,6 +5921,8 @@ function vmc_make_sample_real!(
 
                 if w > rng_real2(rng)
                     # Accept: update inv_m using O(N²) Sherman-Morrison
+                    # [68] UpdateMAllTwo
+                    ctimer_start!(c_timer, 68)
                     update_m_all_two_real!(
                         mi,
                         s,
@@ -5902,6 +5936,7 @@ function vmc_make_sample_real!(
                         data,
                         state,
                     )
+                    ctimer_stop!(c_timer, 68)
                     tmp_ele_proj_cnt .= proj_cnt_new
                     log_ip_old = log_ip_new
                     n_accept += 1
@@ -5931,10 +5966,12 @@ function vmc_make_sample_real!(
                     )
                     # No need to recalculate M matrix - inv_m was never modified!
                 end
+                ctimer_stop!(c_timer, 33)
             end
 
-            # Recalculate Pfaffian periodically
+            # [34] recal PfM and InvM: periodic full recompute + logIP update
             if n_accept > n_site
+                ctimer_start!(c_timer, 34)
                 result = calculate_m_all_real!(tmp_ele_idx, qp_start, qp_end, data, state)
                 if result == 0
                     log_ip_old = calculate_log_ip_real(
@@ -5945,6 +5982,7 @@ function vmc_make_sample_real!(
                     )
                 end
                 n_accept = 0
+                ctimer_stop!(c_timer, 34)
             end
         end
 
@@ -5959,6 +5997,8 @@ function vmc_make_sample_real!(
                     continue
                 end
 
+                # [35] save electron config (after the validation `continue`)
+                ctimer_start!(c_timer, 35)
                 # Save electron configuration
                 offset_idx = sample * n_size
                 offset_cfg = sample * n_site2
@@ -5995,6 +6035,7 @@ function vmc_make_sample_real!(
                 end
 
                 n_saved_samples += 1
+                ctimer_stop!(c_timer, 35)
             end
         end
     end

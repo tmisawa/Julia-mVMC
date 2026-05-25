@@ -226,7 +226,7 @@ function vmc_para_opt!(
 
             if i_flg_orbital_general == 0
                 if n_proj_bf == 0
-                    vmc_make_sample_real!(data, state, rng)
+                    vmc_make_sample_real!(data, state, rng, timer)
                 else
                     vmc_bf_make_sample_real!(data, state, rng)
                 end
@@ -256,7 +256,7 @@ function vmc_para_opt!(
         # 4. Main calculation (energy and SR quantities)
         if n_proj_bf == 0
             if i_flg_orbital_general == 0
-                vmc_main_cal!(data, state)
+                vmc_main_cal!(data, state, timer)
             else
                 vmc_main_cal_fsz!(data, state)
             end
