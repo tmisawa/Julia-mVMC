@@ -16,7 +16,6 @@ using Random
 using SFMT
 
 using LoopVectorization: @turbo
-using TimerOutputs
 
 # Import ExpertModeData and update_qp_weight! from MVMCExpertModeParsers
 using MVMCExpertModeParsers: MVMCExpertModeParsers
