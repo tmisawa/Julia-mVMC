@@ -219,9 +219,11 @@ function vmc_para_opt!(
         ctimer_start!(timer, 3)
         # 3. VMC Sampling
         if !all_complex  # real
-            # Convert to real arrays if needed
+            # Convert to real arrays if needed ([69] MAll: real/complex copy)
             if !isempty(state.slater_matrix.slater_elm_real)
+                ctimer_start!(timer, 69)
                 convert_to_real_arrays!(state)
+                ctimer_stop!(timer, 69)
             end
 
             if i_flg_orbital_general == 0
@@ -231,19 +233,21 @@ function vmc_para_opt!(
                     vmc_bf_make_sample_real!(data, state, rng)
                 end
             else
-                vmc_make_sample_fsz_real!(data, state, rng)
+                vmc_make_sample_fsz_real!(data, state, rng, timer)
             end
 
-            # Convert back to complex if needed
+            # Convert back to complex if needed ([69] MAll: real/complex copy)
             if !isempty(state.slater_matrix.inv_m_real)
+                ctimer_start!(timer, 69)
                 convert_from_real_arrays!(state)
+                ctimer_stop!(timer, 69)
             end
         else  # complex
             if n_proj_bf == 0
                 if i_flg_orbital_general == 0
-                    vmc_make_sample!(data, state, rng)
+                    vmc_make_sample!(data, state, rng, timer)
                 else
-                    vmc_make_sample_fsz!(data, state, rng)
+                    vmc_make_sample_fsz!(data, state, rng, timer)
                 end
             else
                 vmc_bf_make_sample!(data, state, rng)
@@ -258,7 +262,7 @@ function vmc_para_opt!(
             if i_flg_orbital_general == 0
                 vmc_main_cal!(data, state, timer)
             else
-                vmc_main_cal_fsz!(data, state)
+                vmc_main_cal_fsz!(data, state, timer)
             end
         else
             vmc_bf_main_cal!(data, state)
@@ -303,9 +307,9 @@ function vmc_para_opt!(
         ctimer_start!(timer, 5)
         # 8. Stochastic optimization
         if n_sr_cg != 0
-            info = stochastic_opt_cg!(data, state)
+            info = stochastic_opt_cg!(data, state, timer)
         else
-            info = stochastic_opt!(data, state)
+            info = stochastic_opt!(data, state, timer)
         end
         ctimer_stop!(timer, 5)
 

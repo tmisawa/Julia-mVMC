@@ -2866,7 +2866,7 @@ Equivalent to C's `VMCMainCal_fsz()`.
 # Reference
 - C implementation: mVMC/src/mVMC/vmccal_fsz.c:36-248 (VMCMainCal_fsz)
 """
-function vmc_main_cal_fsz!(data::ExpertModeData, state::VMCOptimizationState)
+function vmc_main_cal_fsz!(data::ExpertModeData, state::VMCOptimizationState, c_timer::CTimer = CTIMER_DISABLED)
     n_site = data.modpara.nsite
     n_site2 = 2 * n_site
     n_elec = data.modpara.nelec

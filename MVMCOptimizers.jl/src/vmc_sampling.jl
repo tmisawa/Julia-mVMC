@@ -2512,6 +2512,7 @@ function vmc_make_sample!(
     data::ExpertModeData,
     state::VMCOptimizationState,
     rng::AbstractRNG = Random.GLOBAL_RNG,
+    c_timer::CTimer = CTIMER_DISABLED,
 )
 
     n_site = data.modpara.nsite
@@ -3728,6 +3729,7 @@ function vmc_make_sample_fsz!(
     data::ExpertModeData,
     state::VMCOptimizationState,
     rng::AbstractRNG = Random.GLOBAL_RNG,
+    c_timer::CTimer = CTIMER_DISABLED,
 )
     n_site = data.modpara.nsite
     n_elec = data.modpara.nelec
@@ -6074,6 +6076,7 @@ function vmc_make_sample_fsz_real!(
     data::ExpertModeData,
     state::VMCOptimizationState,
     rng::AbstractRNG = Random.GLOBAL_RNG,
+    c_timer::CTimer = CTIMER_DISABLED,
 )
     n_site = data.modpara.nsite
     n_elec = data.modpara.nelec
