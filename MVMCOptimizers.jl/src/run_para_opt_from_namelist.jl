@@ -74,6 +74,22 @@ function run_para_opt_from_namelist(namelist_path::AbstractString;
 
     namelist_str = String(namelist_path)
 
+    # C-compatible section timer. Enabled by MVMC_C_TIMER (MVMC_TIMER kept as a
+    # deprecated alias during migration off the old TimerOutputs path). This is
+    # the single place that reads the env var and constructs the concrete
+    # CTimer; it then flows into vmc_para_opt! through a function barrier.
+    c_timer_env = get(ENV, "MVMC_C_TIMER", "0") != "0"
+    legacy_timer_env = get(ENV, "MVMC_TIMER", "0") != "0"
+    if legacy_timer_env && !c_timer_env
+        @warn "MVMC_TIMER is deprecated; use MVMC_C_TIMER=1 for the C-compatible zvo_CalcTimer.dat timer."
+    end
+    timer_enabled = c_timer_env || legacy_timer_env
+    c_timer = CTimer(timer_enabled)
+    ctimer_reset!(c_timer)   # fresh per run, in case a timer is reused across repeats
+
+    ctimer_start!(c_timer, 0)   # [0] All
+    ctimer_start!(c_timer, 1)   # [1] Initialization
+
     # The phase ordering below mirrors C-mVMC's vmcmain.c:256-281:
     #   init_gen_rand        → seed RNG
     #   InitParameter        → init_parameter!            (random init only)
@@ -88,7 +104,9 @@ function run_para_opt_from_namelist(namelist_path::AbstractString;
     # ship initial.def / In*.def alongside random init.
 
     # 1. Parse expert-mode .def files (relative paths resolved from namelist_path).
+    ctimer_start!(c_timer, 11)   # [11] ReadDefFile
     data = MVMCExpertModeParsers.parse_expert_mode_files(namelist_str)
+    ctimer_stop!(c_timer, 11)
     effective_nsteps = Int(nsteps)
     effective_nsmp = nsmp === nothing ? data.modpara.nsr_opt_itr_smp : Int(nsmp)
     effective_nsmp > 0 || throw(ArgumentError("effective nsmp must be positive; got $effective_nsmp"))
@@ -114,6 +132,8 @@ function run_para_opt_from_namelist(namelist_path::AbstractString;
     #    `InitParameter()` performs no sync, and the only sync happens at
     #    vmcmain.c:276 after both overlays. Step 6 below is the matching
     #    sync; using `init_parameter!` here keeps that the only sync.
+    # [13] InitParameter: init_parameter! + overlays + sync (C vmcmain.c:261-277)
+    ctimer_start!(c_timer, 13)
     init_parameter!(data; rng = rng)
 
     # 4. Optional initial.def overlay (C's ReadInitParameter, vmcmain.c:265).
@@ -159,9 +179,11 @@ function run_para_opt_from_namelist(namelist_path::AbstractString;
     #    shifts Gutzwiller/Jastrow only; see parameter_sync.jl for the
     #    explicit OptTrans carve-out.
     sync_modified_parameter!(data)
+    ctimer_stop!(c_timer, 13)
 
     # 7. Quantum projection weights (C's InitQPWeight, vmcmain.c:281).
     init_qp_weight!(data)
+    ctimer_stop!(c_timer, 1)   # end [1] Initialization
 
     # Cap the optimisation length at nsteps so that test/example runs stay
     # fast. Each SR step is deterministic given the RNG state and parsed
@@ -177,7 +199,13 @@ function run_para_opt_from_namelist(namelist_path::AbstractString;
         data;
         rng = rng,
         output_dir = String(output_dir),
+        c_timer = c_timer,
     )
+
+    ctimer_stop!(c_timer, 0)   # end [0] All (post-run zvo readback below is bookkeeping, not timed)
+    if timer_enabled
+        write_ctimer_para_opt(c_timer, String(output_dir))
+    end
 
     # 5. Read back outputs for caller convenience. Julia writes zvo_out.dat
     #    (not the C-style zvo_out_001.dat).

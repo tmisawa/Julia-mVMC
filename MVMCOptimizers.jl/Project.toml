@@ -12,7 +12,6 @@ PfaPack = "fb1811a7-9b9e-407c-aa55-948d91a1aed1"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 SFMT = "f01bd734-aebb-490b-aa9b-8490e8eb2402"
-TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 
 [sources]
 MVMCExpertModeParsers = {path = "../MVMCExpertModeParsers.jl"}
@@ -22,7 +21,6 @@ SFMT = {path = "../SFMT.jl"}
 [compat]
 FastGaussQuadrature = "1.0"
 LoopVectorization = "0.12.173"
-TimerOutputs = "0.5.29"
 julia = "1.11"
 
 [extras]

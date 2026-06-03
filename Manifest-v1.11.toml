@@ -152,11 +152,6 @@ git-tree-sha1 = "7442a5dfe1ebb773c29cc2962a8980f47221d76c"
 uuid = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
 version = "0.9.5"
 
-[[deps.ExprTools]]
-git-tree-sha1 = "27415f162e6028e81c72b82ef756bf321213b6ec"
-uuid = "e2ba6199-217a-4e67-a87a-7c52f15ade04"
-version = "0.1.10"
-
 [[deps.FastGaussQuadrature]]
 deps = ["LinearAlgebra", "SpecialFunctions", "StaticArrays"]
 git-tree-sha1 = "ad29c8cb0ea5fb1816926d2a49683f890a8daf64"
@@ -266,7 +261,7 @@ uuid = "f8463493-42a4-4c1a-8bf4-93a3cbd844bc"
 version = "0.1.0"
 
 [[deps.MVMCOptimizers]]
-deps = ["FastGaussQuadrature", "LinearAlgebra", "LoopVectorization", "MVMCExpertModeParsers", "PfaPack", "Printf", "Random", "SFMT", "TimerOutputs"]
+deps = ["FastGaussQuadrature", "LinearAlgebra", "LoopVectorization", "MVMCExpertModeParsers", "PfaPack", "Printf", "Random", "SFMT"]
 path = "MVMCOptimizers.jl"
 uuid = "3516085a-728f-4003-a487-32232985ade4"
 version = "0.1.0"
@@ -515,18 +510,6 @@ deps = ["ManualMemory"]
 git-tree-sha1 = "d969183d3d244b6c33796b5ed01ab97328f2db85"
 uuid = "8290d209-cae3-49c0-8002-c8c24d57dab5"
 version = "0.5.5"
-
-[[deps.TimerOutputs]]
-deps = ["ExprTools", "Printf"]
-git-tree-sha1 = "3748bd928e68c7c346b52125cf41fff0de6937d0"
-uuid = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
-version = "0.5.29"
-
-    [deps.TimerOutputs.extensions]
-    FlameGraphsExt = "FlameGraphs"
-
-    [deps.TimerOutputs.weakdeps]
-    FlameGraphs = "08572546-2f56-4bcf-ba4e-bab62c3a3f89"
 
 [[deps.UUIDs]]
 deps = ["Random", "SHA"]
