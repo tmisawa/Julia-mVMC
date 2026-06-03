@@ -35,6 +35,45 @@ output (Python `random.seed(0)` + `uniform(-0.01, 0.01)` perturbation
 of the upstream `zqp_opt.dat`). They are committed as fixtures so the
 public CI does not depend on Python or on C-mVMC.
 
+## Integration test runners
+
+Run the strict C-reference integration test from the workspace root with:
+
+```bash
+julia --project=@. test/integration/runtests.jl
+```
+
+This runner replays the committed fixtures for `heisenberg_chain_real`,
+`heisenberg_chain_cmp`, `heisenberg_chain_fsz`, and `hubbard_chain_real`.
+It compares the first 10 SR steps of `zvo_out.dat` against the committed
+C-mVMC outputs with tight tolerances.
+
+Julia-mVMC also includes a C ctest-equivalent runner:
+
+```bash
+julia --project=@. test/integration/ctest_equivalent.jl
+```
+
+This mirrors C-mVMC's standard `test/python/runtest.py` acceptance rule for
+the supported standard models. It compares the first two final optimisation
+summary values against `ref_mean.dat` / `ref_std.dat` and fails a value only
+when both `abs(diff) >= 3 * ref_std` and `abs(diff) >= 1e-8` hold. This is
+therefore a broader C ctest-style gate, not a first-10-step bit-level
+comparison.
+
+To run only selected ctest-equivalent fixtures, pass C model names or fixture
+directory names via `JULIA_MVMC_CTEST_MODELS`:
+
+```bash
+JULIA_MVMC_CTEST_MODELS=HeisenbergChain,hubbard_chain_cmp \
+  julia --project=@. test/integration/ctest_equivalent.jl
+```
+
+Normal integration test runs do not require a local C-mVMC build because the
+C reference outputs are committed under `test/integration/reference/`. See
+[`test/integration/reference/README.md`](../../test/integration/reference/README.md)
+for provenance and regeneration instructions.
+
 ## Numerical reproducibility
 
 - C and Julia use the same SFMT19937 stream seeded by `RndSeed` from

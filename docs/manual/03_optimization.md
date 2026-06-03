@@ -13,6 +13,7 @@ result = run_para_opt_from_namelist(
     namelist_path::AbstractString;
     nsteps::Integer,
     mode::Symbol,                         # :real | :cmp | :fsz
+    nsmp::Union{Integer,Nothing} = nothing,
     output_dir::AbstractString = tempname(),
     seed::Union{Integer,Nothing} = nothing,
     initial_def::Union{AbstractString,Symbol,Nothing} = :auto,
@@ -24,12 +25,15 @@ result = run_para_opt_from_namelist(
 | `namelist_path` | Path to `namelist.def`. Other `.def` files are resolved relative to it. |
 | `nsteps` | Number of SR steps. Overrides `NSROptItrStep` from `modpara.def`. |
 | `mode` | Sanity label (one of `:real`, `:cmp`, `:fsz`); the actual run mode is determined by `complex_flag` and orbital files in the parsed input. |
+| `nsmp` | Number of final optimisation samples used for C ctest-style averaging. `nothing` preserves `NSROptItrSmp`; an integer overrides it and must satisfy `nsteps >= nsmp`. |
 | `output_dir` | Where `zvo_out.dat`, `zqp_opt.dat`, etc. are written. Defaults to a fresh tempdir. |
 | `seed` | SFMT19937 seed. `nothing` → use `RndSeed` from `modpara.def` (fallback `11272` when ≤ 0). |
 | `initial_def` | `:auto` (default) loads `inputs/initial.def` if present and aborts on a present-but-broken file; `:none` / `nothing` skips entirely; an explicit path errors if loading fails. |
 
 Returns a `NamedTuple` with `status`, `output_dir`, `zvo_first_n` (first
-`nsteps` raw lines of `zvo_out.dat`), and `final_energy_per_site`.
+`nsteps` raw lines of `zvo_out.dat`), `ctest_values` (the first two
+final-sample averages used by the C ctest-equivalent runner),
+`final_energy_per_site`, `effective_nsteps`, and `effective_nsmp`.
 
 ## Verified models (bit-level vs C reference)
 
@@ -47,6 +51,11 @@ for provenance):
 | `heisenberg_chain_cmp` | complex | spin-only, complex orbital path |
 | `heisenberg_chain_fsz` | fsz (generalised orbital) | individually-tracked spin per electron |
 | `hubbard_chain_real` | real | charge fluctuations + Gutzwiller/Jastrow |
+
+A broader C ctest-equivalent CI gate covers the 12 supported standard C
+fixtures using C's `ref_mean.dat` / `ref_std.dat` criterion rather than a
+first-10-step comparison. See [`05_compatibility.md`](05_compatibility.md)
+for the runner and model selection details.
 
 Internal smoke runs (not part of the public CI, not bundled as
 fixtures) cover additional models in the same categories — Kondo
@@ -71,6 +80,33 @@ Written under `output_dir`:
 | `zvo_var.dat` | Per-step row: parameter snapshot (Gutzwiller, Jastrow, Slater real/imag). |
 | `zqp_opt.dat` | Final optimised parameters (one column per parameter). |
 | `zqp_gutzwiller_opt.dat`, `zqp_jastrow_opt.dat`, `zqp_orbital*_opt.dat` | Per-block optimised parameter dumps (mirrors C). |
+
+## C-compatible timing output
+
+The C-compatible section timer is disabled by default. Enable it explicitly
+with the `MVMC_C_TIMER` environment variable:
+
+```bash
+MVMC_C_TIMER=1 julia --project=@. examples/heisenberg_chain_real.jl
+```
+
+When enabled, `run_para_opt_from_namelist` writes `zvo_CalcTimer.dat` under
+`output_dir`. The file uses the same timer id / label layout as C-mVMC's
+`zvo_CalcTimer.dat`, so the same comparison scripts can be used for
+section-level bottleneck analysis.
+
+Unset `MVMC_C_TIMER`, or set it to `0`, to keep the timer disabled. The
+legacy `MVMC_TIMER` environment variable is accepted as a deprecated alias
+for the same C-compatible timer:
+
+```bash
+MVMC_C_TIMER=0 MVMC_TIMER=0 julia --project=@. examples/heisenberg_chain_real.jl
+```
+
+The implementation treats an unset variable or the exact string `0` as
+disabled; any other value enables timing. Timer-enabled runs include timing
+overhead and should be used for bottleneck breakdowns, not as the primary
+elapsed-time benchmark.
 
 ## Reading variance with care
 

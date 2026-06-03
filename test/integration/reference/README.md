@@ -16,11 +16,12 @@ input fixtures used by Julia-mVMC integration tests.
   (`update cmakelists`, the head of `v1.3.0-3-g5e7ea40`).
 - **Build flags**: `cmake -DCMAKE_BUILD_TYPE=Release ..`
 - **Toolchain**: `gcc-15` (Homebrew), macOS arm64.
+- **OpenMP threads**: `OMP_NUM_THREADS=1` for C-mVMC `runtest.py` runs.
 - **Run command** (per model):
 
   ```bash
   cd mVMC/build/test/python
-  python3 runtest.py <ModelName>
+  OMP_NUM_THREADS=1 python3 runtest.py <ModelName>
   ```
 
   which writes `work/<ModelName>/output/zvo_out_001.dat` and
@@ -75,6 +76,7 @@ To regenerate this reference data from a fresh clone of the C mVMC tree:
 
    ```bash
    cd test/python
+   export OMP_NUM_THREADS=1
    python3 runtest.py HeisenbergChain
    python3 runtest.py HubbardChain
    python3 runtest.py HubbardTetragonal
