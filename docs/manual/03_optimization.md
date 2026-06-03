@@ -104,8 +104,11 @@ MVMC_C_TIMER=0 MVMC_TIMER=0 julia --project=@. examples/heisenberg_chain_real.jl
 ```
 
 The implementation treats an unset variable or the exact string `0` as
-disabled; any other value enables timing. Timer-enabled runs include timing
-overhead and should be used for bottleneck breakdowns, not as the primary
+disabled; **any other value enables timing — including intuitively "off"
+looking values such as `false`, `off`, `no`, or an empty string.** Only
+an unset variable or the literal `0` keeps the timer off; use
+`MVMC_C_TIMER=1` to enable it. Timer-enabled runs include timing overhead
+and should be used for bottleneck breakdowns, not as the primary
 elapsed-time benchmark.
 
 ## Reading variance with care

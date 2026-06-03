@@ -92,17 +92,17 @@ for provenance and regeneration instructions.
 - Tested on Linux (Ubuntu 22.04+, OpenBLAS) and macOS (Apple
   Accelerate + Homebrew gfortran).
 - Both LP64 builds. ILP64 BLAS has not been validated; treat as
-  unsupported for v0.1.
+  unsupported in this release.
 - The `PfaPack.jl` submodule ships a `blis.h` header subset
   (BSD-3-Clause; see
   [`THIRD_PARTY_LICENSES.md`](../../THIRD_PARTY_LICENSES.md) and the
   submodule's own license notes) so the build does not require an
   actual BLIS install — your system BLAS is used at link time.
 
-## Not supported in v0.1
+## Not supported in this release
 
 - **BackFlow** correlation factor (`vmc_bf_*` entry points raise an error
-  in v0.1; inputs that activate Back Flow are not supported).
+  in this release; inputs that activate Back Flow are not supported).
 - **MPI parallelisation** (`NSplitSize > 1` falls back to a single
   process; no warning).
 - **Full Lanczos** (`NLanczosMode > 0`) — only the step-0 comparison

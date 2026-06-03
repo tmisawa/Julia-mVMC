@@ -4,15 +4,15 @@
 
 The main VMC optimization package: Stochastic-Reconfiguration parameter optimization (equivalent to C mVMC's `VMCParaOpt()`) and physical-quantity calculation (equivalent to `VMCPhysCal()`). Works against `ExpertModeData` produced by [`MVMCExpertModeParsers.jl`](../MVMCExpertModeParsers.jl), with Pfaffian / inverse routines from [`PfaPack.jl`](../PfaPack.jl) and the C-compatible RNG from [`SFMT.jl`](../SFMT.jl).
 
-## Scope (v0.1)
+## Scope (v0.2)
 
 - **`VMCParaOpt` (parameter optimization)** — bit-level verified against the C reference for `HeisenbergChain` (real / cmp / fsz) and `HubbardChain` (real); see the integration tests at `../test/integration/`.
 - **`VMCPhysCal` (physical-quantity calculation)** — experimental. Direct-path one- and two-body Green functions (`zvo_cisajs.dat`, `zvo_cisajscktaltdc.dat`) are supported. The factored two-body path (`cisajscktalt.def`) is not yet ported. See [`../docs/manual/04_physics_calc.md`](../docs/manual/04_physics_calc.md).
-- **Not supported in v0.1**: BackFlow (`vmc_bf_*` entry points raise an error), full Lanczos (only step-0 is comparable), MPI parallelization (`NSplitSize > 1` falls back to single-process without warning).
+- **Not supported in this release**: BackFlow (`vmc_bf_*` entry points raise an error), full Lanczos (only step-0 is comparable), MPI parallelization (`NSplitSize > 1` falls back to single-process without warning).
 
 ## Installation
 
-This subpackage is **not** published as a standalone registered package and `Pkg.add("MVMCOptimizers")` will not work in v0.1. It is intended to be used as part of the Julia-mVMC workspace via the root [`Project.toml`](../Project.toml) `[sources]` block. From a clone of [tmisawa/Julia-mVMC](https://github.com/tmisawa/Julia-mVMC):
+This subpackage is **not** published as a standalone registered package and `Pkg.add("MVMCOptimizers")` will not work in this release. It is intended to be used as part of the Julia-mVMC workspace via the root [`Project.toml`](../Project.toml) `[sources]` block. From a clone of [tmisawa/Julia-mVMC](https://github.com/tmisawa/Julia-mVMC):
 
 ```bash
 git clone --recurse-submodules https://github.com/tmisawa/Julia-mVMC
@@ -67,7 +67,7 @@ info = vmc_para_opt!(data;
 |----------|---------|
 | `run_para_opt_from_namelist(path; nsteps, mode, nsmp=nothing, ...)` | High-level driver. Parses `.def` files, seeds the RNG, runs `nsteps` SR steps, writes `zvo_out.dat` / `zqp_opt.dat`. `nsmp` overrides `NSROptItrSmp` for final-sample averaging and must satisfy `nsteps >= nsmp`. |
 | `vmc_para_opt!(data; callback=nothing)` | Lower-level SR optimization loop (no I/O, no parser). |
-| `vmc_phys_cal!(data; rnd_seed=0)` | Physical-quantity calculation (experimental in v0.1). |
+| `vmc_phys_cal!(data; rnd_seed=0)` | Physical-quantity calculation (experimental in this release). |
 | `read_initial_def!(data, path)` | Overlay variational parameters from an `initial.def` file. |
 
 ## C mVMC compatibility
@@ -82,7 +82,7 @@ info = vmc_para_opt!(data;
 | `WeightAverageWE` / `WeightAverageSROpt` | `weight_average_we!` / `weight_average_sr_opt!` |
 | `SyncModifiedParameter` | `sync_modified_parameter!` |
 | `UpdateQPWeight` | `update_qp_weight!` |
-| `VMC_BF_MakeSample` / `_real` / `VMC_BF_MainCal` | stubs — **raise an error in v0.1** |
+| `VMC_BF_MakeSample` / `_real` / `VMC_BF_MainCal` | stubs — **raise an error in this release** |
 
 The SR step state is held in `VMCOptimizationState` (defined in `src/types.jl`),
 which bundles `EnergyData`, `SlaterMatrixData`, `ElectronConfiguration`, and
