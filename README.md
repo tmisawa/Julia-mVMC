@@ -42,6 +42,8 @@ Expected output ends with a line like `Final energy / site = -0.44...`. Each exa
 
 [`docs/manual/`](docs/manual/) — installation, input files, optimization, physics calculations, and C/Julia compatibility notes.
 
+[`CHANGELOG.md`](CHANGELOG.md) — release notes.
+
 ## Repository structure
 
 ```
