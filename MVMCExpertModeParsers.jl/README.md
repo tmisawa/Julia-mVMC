@@ -12,11 +12,11 @@ A Julia package for parsing mVMC Expert Mode definition files (`*.def`) and init
 - **Quantum-projection weight initialization** (Gauss-Legendre + Legendre polynomials, mirrors C's `InitQPWeight()` / `UpdateQPWeight()`).
 - **Validation helpers** for individual term types.
 
-Note: this v0.1 release does **not** include writers / `.def` file generation. Reading and consuming existing `.def` files is the supported path; producing new ones from scratch is a v0.2+ concern.
+Note: this release does **not** include writers / `.def` file generation. Reading and consuming existing `.def` files is the supported path; producing new ones from scratch is a v0.3+ concern.
 
 ## Installation
 
-This subpackage is **not** published as a standalone registered package and `Pkg.add("MVMCExpertModeParsers")` will not work in v0.1. It is intended to be used as part of the Julia-mVMC workspace via the root [`Project.toml`](../Project.toml) `[sources]` block. From a clone of [tmisawa/Julia-mVMC](https://github.com/tmisawa/Julia-mVMC):
+This subpackage is **not** published as a standalone registered package and `Pkg.add("MVMCExpertModeParsers")` will not work in this release. It is intended to be used as part of the Julia-mVMC workspace via the root [`Project.toml`](../Project.toml) `[sources]` block. From a clone of [tmisawa/Julia-mVMC](https://github.com/tmisawa/Julia-mVMC):
 
 ```bash
 git clone --recurse-submodules https://github.com/tmisawa/Julia-mVMC
@@ -93,7 +93,7 @@ MVMCExpertModeParsers.init_qp_weight!(data)
 | `qptransidx.def`  | ✓ |
 | `namelist.def`    | ✓ |
 
-Writing back out to `.def` files is not implemented in v0.1.
+Writing back out to `.def` files is not implemented in this release.
 
 ## Parameter initialization details
 

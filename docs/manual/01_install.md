@@ -27,7 +27,7 @@ brew install gcc gfortran openblas
 
 ## Install (clone-based, with submodules)
 
-The supported install path for v0.1 is to clone the repo **with
+The supported install path in this release is to clone the repo **with
 submodules** and activate the workspace project:
 
 ```bash
@@ -49,7 +49,7 @@ four on the load path simultaneously.
 
 ## Why no `Pkg.add(url=..., subdir=...)`?
 
-`Pkg.add(url=..., subdir="MVMCOptimizers.jl")` does **not** work for v0.1
+`Pkg.add(url=..., subdir="MVMCOptimizers.jl")` does **not** work in this release
 and is intentionally not documented as an install path. The reason is
 that `MVMCOptimizers.jl/Project.toml` declares its siblings via
 relative paths in `[sources]`:
@@ -67,7 +67,7 @@ the larger checkout, and the submodules are not pulled in either, so
 the dependency resolver fails (the subpackages are not on a registry).
 
 The clone-based workflow above sidesteps this entirely. Adding a
-URL-based install path is a v0.2+ concern and would require committing
+URL-based install path is a v0.3+ concern and would require committing
 the GitHub URL into each subpackage's `[sources]` block.
 
 ## Smoke test
