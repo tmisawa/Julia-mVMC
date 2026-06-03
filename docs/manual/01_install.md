@@ -93,6 +93,7 @@ Run all four [examples](../../examples/) the same way.
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
 | `Pkg.build` fails on `PfaPack` with `gfortran: not found` | Fortran compiler missing | Install `gfortran` (see above). |
+| `Pkg.build` fails on macOS with `ld: library 'System' not found` | Homebrew `gfortran` cannot find the macOS SDK | `export SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"`, then rerun `Pkg.build()`. |
 | Link error on `dgemm_` / `zgemm_` | BLAS/LAPACK not on the linker path | Install `libblas-dev liblapack-dev` (or equivalent), then `Pkg.build("PfaPack")`. |
 | `UndefVarError: SFMT19937RNG` | Build artifacts stale after Julia upgrade | `using Pkg; Pkg.build("SFMT")` and restart Julia. |
 | `PfaPack.jl/` or `SFMT.jl/` directories are empty after clone | Submodules not initialised | `git submodule update --init --recursive`. |
