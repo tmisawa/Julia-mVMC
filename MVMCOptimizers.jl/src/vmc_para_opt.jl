@@ -79,6 +79,9 @@ function vmc_para_opt!(
     skip_sr::Bool = false,
     c_timer::Union{CTimer,Nothing} = nothing,
 )::Int
+    # Reject unsupported ModPara inputs (e.g. NSplitSize > 1) before any work.
+    validate_supported_modpara(data.modpara)
+
     # C-compatible section timer. `nothing` -> disabled singleton (no-op
     # start/stop). When run_para_opt_from_namelist enables it, a concretely
     # typed CTimer{Val{true}} flows in; this assignment is the function-barrier

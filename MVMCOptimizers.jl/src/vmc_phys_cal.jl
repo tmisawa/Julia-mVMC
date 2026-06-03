@@ -42,6 +42,9 @@ function vmc_phys_cal!(
     callback::Union{Nothing,Function} = nothing,
     rng::Union{AbstractRNG,Nothing} = nothing,
 )::Int
+    # Reject unsupported ModPara inputs (e.g. NSplitSize > 1) before any work.
+    validate_supported_modpara(data.modpara)
+
     # Initialize RNG if not provided. Match the C-compatible seed convention
     # used by vmc_para_opt! and run_para_opt_from_namelist: when
     # data.modpara.rnd_seed <= 0, fall back to 11272.
