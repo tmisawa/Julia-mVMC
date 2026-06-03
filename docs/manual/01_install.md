@@ -70,6 +70,15 @@ The clone-based workflow above sidesteps this entirely. Adding a
 URL-based install path is a v0.3+ concern and would require committing
 the GitHub URL into each subpackage's `[sources]` block.
 
+## Manifest files
+
+`Manifest-v1.11.toml` is committed as a Julia 1.11 reproducibility snapshot.
+The root `Manifest.toml` and subpackage `Manifest.toml` files are local
+artifacts and are ignored by git. Normal installation and CI instantiate from
+the workspace `Project.toml` and its relative `[sources]` entries; Julia 1.12
+therefore resolves a compatible environment rather than using a committed
+Julia 1.12 manifest.
+
 ## Smoke test
 
 ```bash
