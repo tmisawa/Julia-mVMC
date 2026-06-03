@@ -35,6 +35,22 @@ end
         @test occursin("MPI parallelization is not supported", msg)
     end
 
+    # NSplitSize < 1 (0 or negative) is an invalid value: a process-split
+    # count must be at least 1. Rejected distinctly from the unsupported-MPI
+    # case (it is an invalid value, not a missing feature).
+    @testset "NSplitSize <= 0 is rejected as an invalid value" begin
+        for bad in (0, -1)
+            modpara = ModParaParameters(nsplit_size = bad)
+            threw, msg = capture_error_message(
+                () -> MVMCOptimizers.validate_supported_modpara(modpara),
+            )
+            @test threw
+            @test occursin(">= 1", msg)
+            # It must not be mislabeled as the MPI-unsupported case.
+            @test !occursin("MPI parallelization is not supported", msg)
+        end
+    end
+
     # The contract is enforced at the independent runtime entry points, before
     # any optimization or physical calculation proceeds. A default
     # ExpertModeData is enough because the guard is the first statement in each

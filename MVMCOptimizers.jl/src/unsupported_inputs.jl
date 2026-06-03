@@ -19,16 +19,24 @@ calculation proceeds, so unsupported runs fail fast with a clear message.
 
 Currently rejected:
 
+- `NSplitSize < 1` (i.e. `0` or negative): invalid value. NSplitSize is a
+  process-split count and must be at least 1. Thrown as `ArgumentError`,
+  matching the codebase convention for invalid parameter *values*.
 - `NSplitSize > 1`: MPI parallelization is not supported in Julia-mVMC.
-  Only single-process runs (`NSplitSize = 1`) are supported. The field is
-  parsed for input-format fidelity but has no runtime effect when `== 1`.
+  Thrown as `error(...)` / `ErrorException`, matching the codebase's
+  unsupported-*feature* convention (the BackFlow stubs).
 
-Follows the codebase's unsupported-feature convention (`error(...)` /
-`ErrorException`, matching the BackFlow stubs) rather than `ArgumentError`,
-which is reserved for invalid parameter *values*.
+`NSplitSize = 1` (single process) is the only supported setting. The field
+is parsed for input-format fidelity but has no runtime effect when `== 1`.
 """
 function validate_supported_modpara(modpara::ModParaParameters)
-    if modpara.nsplit_size > 1
+    if modpara.nsplit_size < 1
+        throw(
+            ArgumentError(
+                "NSplitSize must be >= 1; got NSplitSize = $(modpara.nsplit_size).",
+            ),
+        )
+    elseif modpara.nsplit_size > 1
         error(
             "NSplitSize > 1 is not supported: MPI parallelization is not supported " *
             "in Julia-mVMC (got NSplitSize = $(modpara.nsplit_size)). " *

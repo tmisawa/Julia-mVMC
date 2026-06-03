@@ -1,6 +1,6 @@
 # Unit Test Index (MVMCOptimizers.jl)
 
-このフォルダ配下の unit test は `test/runtests.jl` から常時実行されます。C reference との integration は subpackage には含めず、workspace root の `test/integration/runtests.jl` で別途実行します。実行には Julia 1.12 が必要です。
+このフォルダ配下の unit test は `test/runtests.jl` から常時実行されます。C reference との integration は subpackage には含めず、workspace root の `test/integration/runtests.jl` で別途実行します。対応 Julia は 1.11+（`Project.toml` compat `julia = "1.11"`、CI は 1.11 / 1.12 を検証）。`Manifest.toml` は gitignore 対象なので、ローカル実行時は使用する Julia version で resolve し直すこと。
 
 ## 実行
 - 全体: `cd MVMCOptimizers.jl && julia --project=@. -e 'import Pkg; Pkg.test()'`（リポジトリルートから）

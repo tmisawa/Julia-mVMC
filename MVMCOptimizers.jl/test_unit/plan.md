@@ -111,7 +111,9 @@
 - unit test（`test_unit/*.jl`）を常時実行。include 順は `INDEX.md` と同期する。
 - C reference との integration は subpackage には含めない。workspace root の
   `test/integration/runtests.jl` で別途実行する（`julia --project=@. test/integration/runtests.jl`）。
-- 実行には Julia 1.12 が必要（depot は 1.12 で解決済み。`juliaup default 1.12`）。
+- 対応 Julia は 1.11+（`Project.toml` compat `julia = "1.11"`、CI は 1.11 / 1.12 を検証）。
+  `Manifest.toml` は gitignore 対象。ローカルで 1.11 / 1.12 を切り替える場合は、その version で
+  resolve（`Pkg.instantiate` / `Pkg.resolve`）し直すこと。
 
 ## 状態（v0.1 計画ぶんの達成状況）
 - 上記「追加対象ファイル」の unit/contract テストは全て実装・常時実行済み:

@@ -26,9 +26,9 @@
   any `BackFlow*` keyword in `namelist.def`) are not supported; remove
   those keywords or fall back to the C reference at
   <https://github.com/issp-center-dev/mVMC>.
-- **MPI parallelisation** — `reduce_counter!` is a no-op in this release, so
-  `NSplitSize > 1` falls back to single-process behaviour without
-  warning.
+- **MPI parallelisation** — `reduce_counter!` is a no-op in this release, and
+  `NSplitSize > 1` is rejected with an unsupported-MPI error until MPI
+  support is implemented. `NSplitSize = 1` is the only supported setting.
 - **`InterAllTerm` spin metadata** — when the input does not provide
   spin information, `vmc_main_cal.jl` substitutes default values (see
   the TODO at `src/vmc_main_cal.jl` near the InterAll loop).
