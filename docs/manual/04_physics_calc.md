@@ -1,10 +1,10 @@
 # 4. Physical-quantity measurement (VMCPhysCal) — experimental
 
-> ⚠️ `VMCPhysCal` (`NVMCCalMode = 1`) is **experimental** in v0.1. Major
+> ⚠️ `VMCPhysCal` (`NVMCCalMode = 1`) is **experimental** in this release. Major
 > components are implemented and exercised against simple reference
 > data, but parts of the parsing and product-side accumulation are still
 > in flux. Treat numbers as a sanity check, not as production output,
-> until v0.2.
+> until a later release (v0.3 or later).
 
 ## What is implemented
 
@@ -22,11 +22,11 @@
   — the factored `<c†c>×<c†c>` accumulator (C path
   `CalculateGreenFunc_BF` and friends) is not yet ported.
 - **Backflow correlation factor** — the `vmc_bf_*` entry points raise
-  an error in v0.1. Inputs that activate Back Flow (`n_proj_bf > 0`, i.e.
+  an error in this release. Inputs that activate Back Flow (`n_proj_bf > 0`, i.e.
   any `BackFlow*` keyword in `namelist.def`) are not supported; remove
   those keywords or fall back to the C reference at
   <https://github.com/issp-center-dev/mVMC>.
-- **MPI parallelisation** — `reduce_counter!` is a no-op in v0.1, so
+- **MPI parallelisation** — `reduce_counter!` is a no-op in this release, so
   `NSplitSize > 1` falls back to single-process behaviour without
   warning.
 - **`InterAllTerm` spin metadata** — when the input does not provide
@@ -35,7 +35,7 @@
 
 ## When to fall back to C-mVMC
 
-For published physics results, the safest path in v0.1 is:
+For published physics results, the safest path in this release is:
 
 1. Use Julia-mVMC for `VMCParaOpt` (parameter optimisation) — verified
    bit-level for the modes listed in

@@ -16,7 +16,6 @@ using Random
 using SFMT
 
 using LoopVectorization: @turbo
-using TimerOutputs
 
 # Import ExpertModeData and update_qp_weight! from MVMCExpertModeParsers
 using MVMCExpertModeParsers: MVMCExpertModeParsers
@@ -29,6 +28,10 @@ using MVMCExpertModeParsers: initialize_parameters!, init_parameter!, read_input
 # calculate_m_all_* and PfaPackWorkspace are defined locally (GPL-bound helpers)
 # in workspace.jl and calculate_m_all.jl, included below.
 using PfaPack: julia_zsktf2!, utu2pfa, cimpl_utu2inv!
+
+# C-compatible lightweight timer (CTimer). No dependencies beyond Base/Printf;
+# included first so later files (vmc_para_opt.jl, etc.) can reference it.
+include("c_timer.jl")
 
 # Thread-local Pfaffian workspaces (GPL helpers, formerly in MVMCPfaPack).
 # Must be included before types.jl because some types reference

@@ -1158,6 +1158,7 @@ function calculate_hamiltonian(
     data::ExpertModeData,
     state::VMCOptimizationState;
     all_complex::Bool = true,
+    c_timer::CTimer = CTIMER_DISABLED,
 )::ComplexF64
     n_site = data.modpara.nsite
 
@@ -1166,6 +1167,9 @@ function calculate_hamiltonian(
     n1 = @view ele_num[(n_site+1):(2*n_site)]  # down-spin
 
     e = 0.0 + 0.0im
+
+    # [70] CalHamiltonian0: diagonal terms (CoulombIntra/CoulombInter/Hund)
+    ctimer_start!(c_timer, 70)
 
     # Debug: Track energy contributions
     e_coulomb_intra = 0.0 + 0.0im
@@ -1206,7 +1210,10 @@ function calculate_hamiltonian(
             e += contrib
         end
     end
+    ctimer_stop!(c_timer, 70)
 
+    # [71] CalHamiltonian1: one-body Transfer terms
+    ctimer_start!(c_timer, 71)
     # Transfer: -sum_{i,j,s} t_{ij} * <c†_{i,s} c_{j,s}>
     for term in data.transfer_terms
         ri = term.site1
@@ -1251,7 +1258,10 @@ function calculate_hamiltonian(
             end
         end
     end
+    ctimer_stop!(c_timer, 71)
 
+    # [72] CalHamiltonian2: two-body terms (PairHopping / Exchange / InterAll)
+    ctimer_start!(c_timer, 72)
     # PairHopping: sum_{i,j} P_{ij} * <c†_{i,↑} c_{j,↑} c†_{i,↓} c_{j,↓}>
     for term in data.pair_hop_terms
         ri = term.site1
@@ -1364,6 +1374,7 @@ function calculate_hamiltonian(
             end
         end
     end
+    ctimer_stop!(c_timer, 72)
 
     return e
 end
@@ -1393,6 +1404,7 @@ function calculate_hamiltonian_fsz(
     data::ExpertModeData,
     state::VMCOptimizationState;
     all_complex::Bool = true,
+    c_timer::CTimer = CTIMER_DISABLED,
 )::ComplexF64
     n_site = data.modpara.nsite
 
@@ -1402,6 +1414,8 @@ function calculate_hamiltonian_fsz(
 
     e = 0.0 + 0.0im
 
+    # [70] CalHamiltonian0: diagonal terms (CoulombIntra/CoulombInter/Hund)
+    ctimer_start!(c_timer, 70)
     # CoulombIntra: sum_i U_i * n0[i] * n1[i]
     for term in data.coulomb_intra_terms
         ri = term.site
@@ -1427,7 +1441,10 @@ function calculate_hamiltonian_fsz(
             e += -term.value * (n0[ri+1] * n0[rj+1] + n1[ri+1] * n1[rj+1])
         end
     end
+    ctimer_stop!(c_timer, 70)
 
+    # [71] CalHamiltonian1: one-body Transfer terms
+    ctimer_start!(c_timer, 71)
     # Transfer: -sum_{i,j,s} t_{ij} * <c†_{i,s} c_{j,s}>
     for term in data.transfer_terms
         ri = term.site1
@@ -1471,7 +1488,10 @@ function calculate_hamiltonian_fsz(
             end
         end
     end
+    ctimer_stop!(c_timer, 71)
 
+    # [72] CalHamiltonian2: two-body terms (PairHopping / Exchange / InterAll)
+    ctimer_start!(c_timer, 72)
     # PairHopping: sum_{i,j} P_{ij} * <c†_{i,↑} c_{j,↑} c†_{i,↓} c_{j,↓}>
     for term in data.pair_hop_terms
         ri = term.site1
@@ -1602,6 +1622,7 @@ function calculate_hamiltonian_fsz(
             end
         end
     end
+    ctimer_stop!(c_timer, 72)
 
     return e
 end
@@ -2459,7 +2480,7 @@ end
 Main calculation: energy expectation values and SR optimization quantities (sz-conserved).
 Equivalent to C's `VMCMainCal()`.
 """
-function vmc_main_cal!(data::ExpertModeData, state::VMCOptimizationState)
+function vmc_main_cal!(data::ExpertModeData, state::VMCOptimizationState, c_timer::CTimer = CTIMER_DISABLED)
     n_site = data.modpara.nsite
     n_elec = data.modpara.nelec
     n_size = 2 * n_elec
@@ -2491,8 +2512,10 @@ function vmc_main_cal!(data::ExpertModeData, state::VMCOptimizationState)
     # Use stored samples (NSRCG or NStoreO mode)
     use_store = true  # Default to store mode for efficiency
 
-    # Clear physical quantities
+    # Clear physical quantities ([24] cal)
+    ctimer_start!(c_timer, 24)
     clear_phys_quantity!(state)
+    ctimer_stop!(c_timer, 24)
 
     # Debug: Check slater_elm at start of vmc_main_cal!
     slater_elm_max = maximum(abs.(state.slater_matrix.slater_elm))
@@ -2563,8 +2586,10 @@ function vmc_main_cal!(data::ExpertModeData, state::VMCOptimizationState)
             ele_proj_cnt = Int[]
         end
 
-        # Calculate M inverse and Pfaffian for this sample
+        # Calculate M inverse and Pfaffian for this sample ([40] CalculateMAll;
+        # wraps the call site and the real->complex copy, as in C's vmccal.c).
         # Use real version if !all_complex, matching C implementation
+        ctimer_start!(c_timer, 40)
         if !all_complex
             info = calculate_m_all_real!(ele_idx, 1, n_qp_full + 1, data, state)
             # Copy inv_m_real to inv_m (needed for SlaterElmDiff_fcmp)
@@ -2595,6 +2620,7 @@ function vmc_main_cal!(data::ExpertModeData, state::VMCOptimizationState)
         else
             info = calculate_m_all_fcmp!(ele_idx, 1, n_qp_full + 1, data, state)
         end
+        ctimer_stop!(c_timer, 40)
 
         if info != 0
             @warn "VMCMainCal: sample=$sample info=$info (CalculateMAll)"
@@ -2647,6 +2673,8 @@ function vmc_main_cal!(data::ExpertModeData, state::VMCOptimizationState)
         # C implementation uses CalculateHamiltonian_real(creal(ip), ...) for real mode
         # For real mode, pass real part of ip to calculate_hamiltonian
         # Note: calculate_hamiltonian uses green_func1/green_func2 which need to handle real mode
+        # [41] LocEnergyCal
+        ctimer_start!(c_timer, 41)
         if !all_complex
             # Real mode: use real ip and pass all_complex flag
             e = calculate_hamiltonian(
@@ -2658,6 +2686,7 @@ function vmc_main_cal!(data::ExpertModeData, state::VMCOptimizationState)
                 data,
                 state;
                 all_complex = false,
+                c_timer = c_timer,
             )
         else
             e = calculate_hamiltonian(
@@ -2669,8 +2698,10 @@ function vmc_main_cal!(data::ExpertModeData, state::VMCOptimizationState)
                 data,
                 state;
                 all_complex = true,
+                c_timer = c_timer,
             )
         end
+        ctimer_stop!(c_timer, 41)
 
         if !isfinite(real(e) + imag(e))
             @warn "VMCMainCal: sample=$sample e=$e ip=$ip"
@@ -2727,14 +2758,17 @@ function vmc_main_cal!(data::ExpertModeData, state::VMCOptimizationState)
                 end
             end
 
-            # Set Slater element derivatives
+            # Set Slater element derivatives ([42] ReturnSlaterElmDiff)
             if n_slater > 0
                 slater_offset = 2 * (n_proj + n_rbm) + 2  # After projection + RBM factors
                 slater_view = @view sr_opt_o[(slater_offset+1):end]
+                ctimer_start!(c_timer, 42)
                 slater_elm_diff_fcmp!(slater_view, ip, ele_idx, data, state)
+                ctimer_stop!(c_timer, 42)
             end
 
-            # Accumulate OO and HO
+            # Accumulate OO and HO ([43] calculate OO and HO)
+            ctimer_start!(c_timer, 43)
             if all_complex
                 if use_store
                     calculate_oo_store!(
@@ -2773,17 +2807,20 @@ function vmc_main_cal!(data::ExpertModeData, state::VMCOptimizationState)
                     sr_opt_size,
                 )
             end
+            ctimer_stop!(c_timer, 43)
         end
     end
 
-    # Finalize OO from stored samples
+    # Finalize OO from stored samples ([45] multiply store OO)
     if nvmc_cal_mode == 0 && use_store && all_complex
+        ctimer_start!(c_timer, 45)
         finalize_oo_store!(
             state.sr_opt.sr_opt_oo,
             state.sr_opt.sr_opt_o_store,
             sr_opt_size,
             n_vmc_sample,
         )
+        ctimer_stop!(c_timer, 45)
     end
 
     # Debug: Check etot at the end of vmc_main_cal!
@@ -2839,7 +2876,7 @@ Equivalent to C's `VMCMainCal_fsz()`.
 # Reference
 - C implementation: mVMC/src/mVMC/vmccal_fsz.c:36-248 (VMCMainCal_fsz)
 """
-function vmc_main_cal_fsz!(data::ExpertModeData, state::VMCOptimizationState)
+function vmc_main_cal_fsz!(data::ExpertModeData, state::VMCOptimizationState, c_timer::CTimer = CTIMER_DISABLED)
     n_site = data.modpara.nsite
     n_site2 = 2 * n_site
     n_elec = data.modpara.nelec
@@ -2859,8 +2896,10 @@ function vmc_main_cal_fsz!(data::ExpertModeData, state::VMCOptimizationState)
     end
 
     # Clear all physical quantities (energy and SR optimization data)
-    # This is equivalent to C's clearPhysQuantity() call in VMCMainCal_fsz
+    # This is equivalent to C's clearPhysQuantity() call in VMCMainCal_fsz ([24] cal)
+    ctimer_start!(c_timer, 24)
     clear_phys_quantity!(state)
+    ctimer_stop!(c_timer, 24)
 
     # Process each sample
     for sample = 0:(n_vmc_sample-1)
@@ -2897,8 +2936,10 @@ function vmc_main_cal_fsz!(data::ExpertModeData, state::VMCOptimizationState)
         ele_spn_end = ele_spn_start + n_size - 1
         ele_spn = state.electron_config.ele_spn[ele_spn_start:ele_spn_end]
 
-        # Calculate M inverse and Pfaffian using FSZ version
+        # Calculate M inverse and Pfaffian using FSZ version ([40] CalculateMAll)
+        ctimer_start!(c_timer, 40)
         info = calculate_m_all_fsz!(ele_idx, ele_spn, 1, n_qp_full + 1, data, state)
+        ctimer_stop!(c_timer, 40)
 
         if info != 0
             @warn "VMCMainCal_fsz: sample=$sample info=$info (CalculateMAll_fsz)"
@@ -2919,7 +2960,8 @@ function vmc_main_cal_fsz!(data::ExpertModeData, state::VMCOptimizationState)
             continue
         end
 
-        # Calculate energy using FSZ version
+        # Calculate energy using FSZ version ([41] LocEnergyCal)
+        ctimer_start!(c_timer, 41)
         e = calculate_hamiltonian_fsz(
             ip,
             ele_idx,
@@ -2930,7 +2972,9 @@ function vmc_main_cal_fsz!(data::ExpertModeData, state::VMCOptimizationState)
             data,
             state;
             all_complex = all_complex,
+            c_timer = c_timer,
         )
+        ctimer_stop!(c_timer, 41)
 
         if !isfinite(real(e) + imag(e))
             @warn "VMCMainCal_fsz: sample=$sample e=$e ip=$ip"
@@ -2978,11 +3022,14 @@ function vmc_main_cal_fsz!(data::ExpertModeData, state::VMCOptimizationState)
             if n_slater > 0
                 slater_offset = 2 * n_proj + 2
                 slater_view = @view sr_opt_o[(slater_offset+1):end]
-                # Use FSZ version for Slater element derivative
+                # Use FSZ version for Slater element derivative ([42] ReturnSlaterElmDiff)
+                ctimer_start!(c_timer, 42)
                 slater_elm_diff_fsz!(slater_view, ip, ele_idx, ele_spn, data, state)
+                ctimer_stop!(c_timer, 42)
             end
 
-            # Accumulate OO and HO
+            # Accumulate OO and HO ([43] calculate OO and HO)
+            ctimer_start!(c_timer, 43)
             calculate_oo!(
                 state.sr_opt.sr_opt_oo,
                 state.sr_opt.sr_opt_ho,
@@ -2991,6 +3038,7 @@ function vmc_main_cal_fsz!(data::ExpertModeData, state::VMCOptimizationState)
                 e,
                 length(sr_opt_o) ÷ 2,
             )
+            ctimer_stop!(c_timer, 43)
         end
     end
 

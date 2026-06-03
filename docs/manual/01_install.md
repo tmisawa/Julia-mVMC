@@ -27,7 +27,7 @@ brew install gcc gfortran openblas
 
 ## Install (clone-based, with submodules)
 
-The supported install path for v0.1 is to clone the repo **with
+The supported install path in this release is to clone the repo **with
 submodules** and activate the workspace project:
 
 ```bash
@@ -49,7 +49,7 @@ four on the load path simultaneously.
 
 ## Why no `Pkg.add(url=..., subdir=...)`?
 
-`Pkg.add(url=..., subdir="MVMCOptimizers.jl")` does **not** work for v0.1
+`Pkg.add(url=..., subdir="MVMCOptimizers.jl")` does **not** work in this release
 and is intentionally not documented as an install path. The reason is
 that `MVMCOptimizers.jl/Project.toml` declares its siblings via
 relative paths in `[sources]`:
@@ -67,8 +67,17 @@ the larger checkout, and the submodules are not pulled in either, so
 the dependency resolver fails (the subpackages are not on a registry).
 
 The clone-based workflow above sidesteps this entirely. Adding a
-URL-based install path is a v0.2+ concern and would require committing
+URL-based install path is a v0.3+ concern and would require committing
 the GitHub URL into each subpackage's `[sources]` block.
+
+## Manifest files
+
+`Manifest-v1.11.toml` is committed as a Julia 1.11 reproducibility snapshot.
+The root `Manifest.toml` and subpackage `Manifest.toml` files are local
+artifacts and are ignored by git. Normal installation and CI instantiate from
+the workspace `Project.toml` and its relative `[sources]` entries; Julia 1.12
+therefore resolves a compatible environment rather than using a committed
+Julia 1.12 manifest.
 
 ## Smoke test
 
@@ -84,6 +93,7 @@ Run all four [examples](../../examples/) the same way.
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
 | `Pkg.build` fails on `PfaPack` with `gfortran: not found` | Fortran compiler missing | Install `gfortran` (see above). |
+| `Pkg.build` fails on macOS with `ld: library 'System' not found` | Homebrew `gfortran` cannot find the macOS SDK | `export SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"`, then rerun `Pkg.build()`. |
 | Link error on `dgemm_` / `zgemm_` | BLAS/LAPACK not on the linker path | Install `libblas-dev liblapack-dev` (or equivalent), then `Pkg.build("PfaPack")`. |
 | `UndefVarError: SFMT19937RNG` | Build artifacts stale after Julia upgrade | `using Pkg; Pkg.build("SFMT")` and restart Julia. |
 | `PfaPack.jl/` or `SFMT.jl/` directories are empty after clone | Submodules not initialised | `git submodule update --init --recursive`. |

@@ -1,6 +1,6 @@
 """
     run_para_opt_from_namelist(namelist_path;
-                               nsteps, mode,
+                               nsteps, mode, nsmp=nothing,
                                output_dir, seed=nothing,
                                initial_def=:auto)
 
@@ -21,6 +21,12 @@ integration tests in `test/integration/runtests.jl`.
   deterministic given the RNG state, so capturing the first `nsteps`
   outputs from an `nsteps`-step Julia run reproduces the first `nsteps`
   outputs from a longer C run that uses the same seed.
+- `nsmp::Union{Integer,Nothing} = nothing`: number of final optimisation
+  samples to average for C ctest-style checks. `nothing` preserves
+  `NSROptItrSmp` from `modpara.def`; an integer overrides it. `nsteps` must
+  be greater than or equal to the effective `nsmp`. First-N-step tests that
+  shorten `nsteps` below the fixture's `NSROptItrSmp` should pass
+  `nsmp = nsteps`.
 - `mode::Symbol`: sanity label, one of `:real`, `:cmp`, `:fsz`. The actual
   execution mode (complex flag, generalised orbital, etc.) is determined
   from the parsed `.def` files; this argument is validated for the
@@ -45,21 +51,44 @@ A `NamedTuple` with the following fields:
 | `status` | `Int` | Exit code from `vmc_para_opt!` (0 = OK). |
 | `output_dir` | `String` | Absolute path to the run outputs. |
 | `zvo_first_n` | `Vector{String}` | First `nsteps` raw lines of `zvo_out.dat`. |
+| `ctest_values` | `Vector{Float64}` | Mean of columns 1 and 2 over the final `nsmp` `zvo_out.dat` rows, matching the two values C's standard ctest compares from `zqp_opt.dat`. |
 | `final_energy_per_site` | `Float64` | First column of the last `zvo_out.dat` line divided by `data.modpara.nsite`. |
+| `effective_nsteps` | `Int` | `NSROptItrStep` used for the run. |
+| `effective_nsmp` | `Int` | `NSROptItrSmp` used for the run and `ctest_values` averaging. |
 """
 function run_para_opt_from_namelist(namelist_path::AbstractString;
                                     nsteps::Integer,
                                     mode::Symbol,
+                                    nsmp::Union{Integer,Nothing} = nothing,
                                     output_dir::AbstractString = tempname(),
                                     seed::Union{Integer,Nothing} = nothing,
                                     initial_def::Union{AbstractString,Symbol,Nothing} = :auto)
     mode in (:real, :cmp, :fsz) || throw(ArgumentError("mode must be :real, :cmp, or :fsz; got $mode"))
     nsteps > 0 || throw(ArgumentError("nsteps must be positive; got $nsteps"))
+    if nsmp !== nothing && nsmp <= 0
+        throw(ArgumentError("nsmp must be positive when provided; got $nsmp"))
+    end
     if initial_def isa Symbol && !(initial_def in (:auto, :none))
         throw(ArgumentError("initial_def Symbol must be :auto or :none; got :$initial_def"))
     end
 
     namelist_str = String(namelist_path)
+
+    # C-compatible section timer. Enabled by MVMC_C_TIMER (MVMC_TIMER kept as a
+    # deprecated alias during migration off the old TimerOutputs path). This is
+    # the single place that reads the env var and constructs the concrete
+    # CTimer; it then flows into vmc_para_opt! through a function barrier.
+    c_timer_env = get(ENV, "MVMC_C_TIMER", "0") != "0"
+    legacy_timer_env = get(ENV, "MVMC_TIMER", "0") != "0"
+    if legacy_timer_env && !c_timer_env
+        @warn "MVMC_TIMER is deprecated; use MVMC_C_TIMER=1 for the C-compatible zvo_CalcTimer.dat timer."
+    end
+    timer_enabled = c_timer_env || legacy_timer_env
+    c_timer = CTimer(timer_enabled)
+    ctimer_reset!(c_timer)   # fresh per run, in case a timer is reused across repeats
+
+    ctimer_start!(c_timer, 0)   # [0] All
+    ctimer_start!(c_timer, 1)   # [1] Initialization
 
     # The phase ordering below mirrors C-mVMC's vmcmain.c:256-281:
     #   init_gen_rand        → seed RNG
@@ -75,7 +104,15 @@ function run_para_opt_from_namelist(namelist_path::AbstractString;
     # ship initial.def / In*.def alongside random init.
 
     # 1. Parse expert-mode .def files (relative paths resolved from namelist_path).
+    ctimer_start!(c_timer, 11)   # [11] ReadDefFile
     data = MVMCExpertModeParsers.parse_expert_mode_files(namelist_str)
+    ctimer_stop!(c_timer, 11)
+    effective_nsteps = Int(nsteps)
+    effective_nsmp = nsmp === nothing ? data.modpara.nsr_opt_itr_smp : Int(nsmp)
+    effective_nsmp > 0 || throw(ArgumentError("effective nsmp must be positive; got $effective_nsmp"))
+    if effective_nsteps < effective_nsmp
+        throw(ArgumentError("nsteps ($effective_nsteps) must be >= nsmp ($effective_nsmp); smaller nsteps would zero-pad optimisation averages"))
+    end
 
     # 2. Construct and seed the SFMT19937 RNG with the C-compatible convention.
     rng = SFMT19937RNG()
@@ -95,6 +132,8 @@ function run_para_opt_from_namelist(namelist_path::AbstractString;
     #    `InitParameter()` performs no sync, and the only sync happens at
     #    vmcmain.c:276 after both overlays. Step 6 below is the matching
     #    sync; using `init_parameter!` here keeps that the only sync.
+    # [13] InitParameter: init_parameter! + overlays + sync (C vmcmain.c:261-277)
+    ctimer_start!(c_timer, 13)
     init_parameter!(data; rng = rng)
 
     # 4. Optional initial.def overlay (C's ReadInitParameter, vmcmain.c:265).
@@ -140,15 +179,18 @@ function run_para_opt_from_namelist(namelist_path::AbstractString;
     #    shifts Gutzwiller/Jastrow only; see parameter_sync.jl for the
     #    explicit OptTrans carve-out.
     sync_modified_parameter!(data)
+    ctimer_stop!(c_timer, 13)
 
     # 7. Quantum projection weights (C's InitQPWeight, vmcmain.c:281).
     init_qp_weight!(data)
+    ctimer_stop!(c_timer, 1)   # end [1] Initialization
 
     # Cap the optimisation length at nsteps so that test/example runs stay
     # fast. Each SR step is deterministic given the RNG state and parsed
     # input, so the first `nsteps` outputs from an `nsteps`-step run match
     # the first `nsteps` outputs from a longer run that uses the same seed.
-    data.modpara.nsr_opt_itr_step = Int(nsteps)
+    data.modpara.nsr_opt_itr_step = effective_nsteps
+    data.modpara.nsr_opt_itr_smp = effective_nsmp
 
     # 4. Run optimisation. `mode` is intentionally not passed downstream:
     #    real/cmp/fsz behaviour is encoded in the parsed input files.
@@ -157,22 +199,43 @@ function run_para_opt_from_namelist(namelist_path::AbstractString;
         data;
         rng = rng,
         output_dir = String(output_dir),
+        c_timer = c_timer,
     )
+
+    ctimer_stop!(c_timer, 0)   # end [0] All (post-run zvo readback below is bookkeeping, not timed)
+    if timer_enabled
+        write_ctimer_para_opt(c_timer, String(output_dir))
+    end
 
     # 5. Read back outputs for caller convenience. Julia writes zvo_out.dat
     #    (not the C-style zvo_out_001.dat).
     zvo_path = joinpath(output_dir, "zvo_out.dat")
-    zvo_lines = open(zvo_path) do io
-        [strip(readline(io)) for _ in 1:nsteps]
+    zvo_lines = strip.(readlines(zvo_path))
+    if length(zvo_lines) < effective_nsteps
+        throw(ArgumentError("expected at least $effective_nsteps zvo_out.dat rows, found $(length(zvo_lines)) at $zvo_path"))
     end
-    final_e = parse(Float64, split(zvo_lines[end])[1])
+    zvo_first_n = zvo_lines[1:effective_nsteps]
+    zvo_rows = [parse.(Float64, split(line)) for line in zvo_first_n]
+    if any(row -> length(row) < 2, zvo_rows)
+        throw(ArgumentError("zvo_out.dat must contain at least two columns for C ctest comparison: $zvo_path"))
+    end
+    ctest_start = effective_nsteps - effective_nsmp + 1
+    ctest_rows = zvo_rows[ctest_start:effective_nsteps]
+    ctest_values = [
+        sum(row[1] for row in ctest_rows) / effective_nsmp,
+        sum(row[2] for row in ctest_rows) / effective_nsmp,
+    ]
+    final_e = zvo_rows[end][1]
     nsite = data.modpara.nsite
     nsite > 0 || throw(ArgumentError("modpara.nsite must be positive to compute energy per site"))
 
     return (
         status = status,
         output_dir = abspath(output_dir),
-        zvo_first_n = zvo_lines,
+        zvo_first_n = zvo_first_n,
+        ctest_values = ctest_values,
         final_energy_per_site = final_e / nsite,
+        effective_nsteps = effective_nsteps,
+        effective_nsmp = effective_nsmp,
     )
 end

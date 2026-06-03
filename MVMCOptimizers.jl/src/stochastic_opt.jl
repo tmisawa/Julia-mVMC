@@ -203,7 +203,7 @@ Solves S*x = g where:
 # Returns
 - `info::Int`: 0 = success, non-zero = error
 """
-function stochastic_opt!(data::ExpertModeData, state::VMCOptimizationState)::Int
+function stochastic_opt!(data::ExpertModeData, state::VMCOptimizationState, c_timer::CTimer = CTIMER_DISABLED)::Int
     # Get parameters
     n_proj = length(data.gutzwiller_terms) + length(data.jastrow_terms)
 
@@ -229,6 +229,9 @@ function stochastic_opt!(data::ExpertModeData, state::VMCOptimizationState)::Int
     if isempty(data.optimization_flags)
         data.optimization_flags = fill(true, 2 * n_para)
     end
+
+    # [50] preprocess: real->complex conversion, diag/cut, smat mapping
+    ctimer_start!(c_timer, 50)
 
     # Phase 1: Handle real mode conversion (if needed)
     # In C: AllComplexFlag==0 case converts SROptOO_real to SROptOO and SROptHO_real to SROptHO
@@ -318,6 +321,7 @@ function stochastic_opt!(data::ExpertModeData, state::VMCOptimizationState)::Int
     end
 
     n_smat = length(smat_to_para_idx)
+    ctimer_stop!(c_timer, 50)
 
     # If no parameters to optimize, return success
     if n_smat == 0
@@ -325,10 +329,14 @@ function stochastic_opt!(data::ExpertModeData, state::VMCOptimizationState)::Int
         return 0
     end
 
-    # Phase 3: Build S matrix and g vector
+    # [51] stcOptMain: build S/g ([56]) + solve ([57])
+    ctimer_start!(c_timer, 51)
+
+    # Phase 3: Build S matrix and g vector ([56] calculate S and g)
     S = zeros(Float64, n_smat, n_smat)
     g = zeros(Float64, n_smat)
 
+    ctimer_start!(c_timer, 56)
     build_s_matrix_and_g_vector!(
         S,
         g,
@@ -339,9 +347,11 @@ function stochastic_opt!(data::ExpertModeData, state::VMCOptimizationState)::Int
         data.modpara.dsr_opt_sta_del,
         data.modpara.dsr_opt_step_dt,
     )
+    ctimer_stop!(c_timer, 56)
 
-    # Phase 4: Solve S*x = g using LAPACK (DPOSV equivalent)
+    # Phase 4: Solve S*x = g using LAPACK (DPOSV equivalent; [57] DPOSV)
     info = 0
+    ctimer_start!(c_timer, 57)
     try
         # Cholesky decomposition (upper triangular)
         potrf!('U', S)
@@ -352,6 +362,11 @@ function stochastic_opt!(data::ExpertModeData, state::VMCOptimizationState)::Int
         @error "DPOSV failed: $e"
         info = 1
     end
+    ctimer_stop!(c_timer, 57)
+    ctimer_stop!(c_timer, 51)
+
+    # [52] postprocess: finite check + parameter update
+    ctimer_start!(c_timer, 52)
 
     # Phase 5: Check for inf/nan
     if info == 0
@@ -381,6 +396,7 @@ function stochastic_opt!(data::ExpertModeData, state::VMCOptimizationState)::Int
             end
         end
     end
+    ctimer_stop!(c_timer, 52)
 
     return info
 end
@@ -695,7 +711,11 @@ which is more memory-efficient for large parameter spaces.
 # Returns
 - `info::Int`: 0 = success, non-zero = error (number of CG iterations if successful)
 """
-function stochastic_opt_cg!(data::ExpertModeData, state::VMCOptimizationState)::Int
+function stochastic_opt_cg!(data::ExpertModeData, state::VMCOptimizationState, c_timer::CTimer = CTIMER_DISABLED)::Int
+    # NOTE: CG-solver SR internals ([50]-[58]) are not broken down yet; the
+    # total CG time is captured by [5] StochasticOpt at the vmc_para_opt! level.
+    # The direct solver (stochastic_opt!) carries the [50]/[51]/[56]/[57]/[52]
+    # breakdown. c_timer is accepted here for a uniform call from vmc_para_opt!.
     # Get parameters
     n_proj = length(data.gutzwiller_terms) + length(data.jastrow_terms)
 

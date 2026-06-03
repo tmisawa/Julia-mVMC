@@ -2,15 +2,15 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
-    branches: [main]
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.os }}, Julia ${{ matrix.julia-version }})
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
+        os: ["ubuntu-latest", "macos-latest"]
         julia-version: ["1.11", "1.12"]
       fail-fast: false
 
@@ -24,10 +24,29 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install native prerequisites
+      - name: Install native prerequisites (Linux)
+        if: ${{ runner.os == 'Linux' }}
         run: |
           sudo apt-get update
           sudo apt-get install -y gfortran g++ make libblas-dev liblapack-dev
+
+      - name: Install native prerequisites (macOS)
+        if: ${{ runner.os == 'macOS' }}
+        shell: bash
+        run: |
+          brew install gcc
+          if ! command -v gfortran >/dev/null 2>&1; then
+            gfortran_bin="$(find "$(brew --prefix gcc)/bin" -maxdepth 1 \( -type f -o -type l \) -name 'gfortran-*' | head -n 1)"
+            if [ -z "$gfortran_bin" ]; then
+              echo "No Homebrew gfortran executable found" >&2
+              exit 1
+            fi
+            mkdir -p "$RUNNER_TEMP/gfortran-shim"
+            ln -sf "$gfortran_bin" "$RUNNER_TEMP/gfortran-shim/gfortran"
+            echo "$RUNNER_TEMP/gfortran-shim" >> "$GITHUB_PATH"
+            export PATH="$RUNNER_TEMP/gfortran-shim:$PATH"
+          fi
+          gfortran --version
 
       - uses: julia-actions/setup-julia@v2
         with:
@@ -49,6 +68,10 @@ jobs:
       - name: Run integration tests
         run: |
           julia --project=@. test/integration/runtests.jl
+
+      - name: Run C ctest-equivalent integration tests
+        run: |
+          julia --project=@. test/integration/ctest_equivalent.jl
 
       - name: Run examples (smoke test, JULIA_MVMC_EXAMPLE_STEPS=5)
         run: |

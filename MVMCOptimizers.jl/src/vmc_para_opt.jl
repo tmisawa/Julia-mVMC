@@ -77,7 +77,14 @@ function vmc_para_opt!(
     rng::Union{AbstractRNG,Nothing} = nothing,
     output_dir::Union{String,Nothing} = nothing,
     skip_sr::Bool = false,
+    c_timer::Union{CTimer,Nothing} = nothing,
 )::Int
+    # C-compatible section timer. `nothing` -> disabled singleton (no-op
+    # start/stop). When run_para_opt_from_namelist enables it, a concretely
+    # typed CTimer{Val{true}} flows in; this assignment is the function-barrier
+    # entry, after which the loop-level ctimer_* calls specialise on its type.
+    timer = c_timer === nothing ? CTIMER_DISABLED : c_timer
+
     # If no RNG was passed in, fall back to a SFMT19937RNG seeded with
     # data.modpara.rnd_seed (matches the C-compatible convention used by
     # run_para_opt_from_namelist: <= 0 → 11272 fallback).
@@ -183,6 +190,10 @@ function vmc_para_opt!(
 
     info = 0
 
+    # [2] VMCParaOpt: wraps the whole optimisation loop and final opt output
+    # (matches C's StartTimer(2)/StopTimer(2) around VMCParaOpt()).
+    ctimer_start!(timer, 2)
+
     # Optimization loop
     for step = 0:(n_steps-1)
         # Progress output
@@ -191,6 +202,8 @@ function vmc_para_opt!(
             println("Progress of Optimization: $progress %")
         end
 
+        # [20] UpdateSlaterElm: UpdateSlaterElm_* + UpdateQPWeight (C vmcmain.c:353-362)
+        ctimer_start!(timer, 20)
         # 1. Update Slater matrix elements
         if i_flg_orbital_general == 0
             update_slater_elm_fcmp!(data, state)
@@ -200,68 +213,89 @@ function vmc_para_opt!(
 
         # 2. Update quantum projection weights
         update_qp_weight!(data)
+        ctimer_stop!(timer, 20)
 
+        # [3] VMCMakeSample (C vmcmain.c:363-404)
+        ctimer_start!(timer, 3)
         # 3. VMC Sampling
         if !all_complex  # real
-            # Convert to real arrays if needed
+            # Convert to real arrays if needed ([69] MAll: real/complex copy)
             if !isempty(state.slater_matrix.slater_elm_real)
+                ctimer_start!(timer, 69)
                 convert_to_real_arrays!(state)
+                ctimer_stop!(timer, 69)
             end
 
             if i_flg_orbital_general == 0
                 if n_proj_bf == 0
-                    vmc_make_sample_real!(data, state, rng)
+                    vmc_make_sample_real!(data, state, rng, timer)
                 else
                     vmc_bf_make_sample_real!(data, state, rng)
                 end
             else
-                vmc_make_sample_fsz_real!(data, state, rng)
+                vmc_make_sample_fsz_real!(data, state, rng, timer)
             end
 
-            # Convert back to complex if needed
+            # Convert back to complex if needed ([69] MAll: real/complex copy)
             if !isempty(state.slater_matrix.inv_m_real)
+                ctimer_start!(timer, 69)
                 convert_from_real_arrays!(state)
+                ctimer_stop!(timer, 69)
             end
         else  # complex
             if n_proj_bf == 0
                 if i_flg_orbital_general == 0
-                    vmc_make_sample!(data, state, rng)
+                    vmc_make_sample!(data, state, rng, timer)
                 else
-                    vmc_make_sample_fsz!(data, state, rng)
+                    vmc_make_sample_fsz!(data, state, rng, timer)
                 end
             else
                 vmc_bf_make_sample!(data, state, rng)
             end
         end
+        ctimer_stop!(timer, 3)
 
+        # [4] VMCMainCal (C vmcmain.c:405-418)
+        ctimer_start!(timer, 4)
         # 4. Main calculation (energy and SR quantities)
         if n_proj_bf == 0
             if i_flg_orbital_general == 0
-                vmc_main_cal!(data, state)
+                vmc_main_cal!(data, state, timer)
             else
-                vmc_main_cal_fsz!(data, state)
+                vmc_main_cal_fsz!(data, state, timer)
             end
         else
             vmc_bf_main_cal!(data, state)
         end
+        ctimer_stop!(timer, 4)
 
+        # [21] WeightAverage: WeightAverageWE + [25 SR] + ReduceCounter, with
+        # [25] nested inside [21] exactly as in C (vmcmain.c:419-436).
+        ctimer_start!(timer, 21)
         # 5. Weighted averages
         weight_average_we!(state)
 
+        ctimer_start!(timer, 25)
         if !all_complex
             weight_average_sr_opt_real!(state)
         else
             weight_average_sr_opt!(state)
         end
+        ctimer_stop!(timer, 25)
 
         # 6. Reduce counters (MPI reduction in C, no-op in single process)
         reduce_counter!(state)
+        ctimer_stop!(timer, 21)
 
+        # [22] outputData (C vmcmain.c:437-440)
+        ctimer_start!(timer, 22)
         # 7. Output data (before optimization, matching C implementation order)
         output_data!(data, state, step; output_dir=output_dir)
+        ctimer_stop!(timer, 22)
 
         # If skip_sr is set, only run step 0 and return after output
         if skip_sr
+            ctimer_stop!(timer, 2)
             if callback !== nothing
                 energy = state.energy.etot
                 callback(step, data, energy, 0)
@@ -269,20 +303,27 @@ function vmc_para_opt!(
             return 0
         end
 
+        # [5] StochasticOpt: SR solver (C vmcmain.c StochasticOptDiag/CG path)
+        ctimer_start!(timer, 5)
         # 8. Stochastic optimization
         if n_sr_cg != 0
-            info = stochastic_opt_cg!(data, state)
+            info = stochastic_opt_cg!(data, state, timer)
         else
-            info = stochastic_opt!(data, state)
+            info = stochastic_opt!(data, state, timer)
         end
+        ctimer_stop!(timer, 5)
 
         if info != 0
             @error "Stochastic optimization error: info=$info at step=$step"
+            ctimer_stop!(timer, 2)
             return info
         end
 
+        # [23] SyncModifiedParameter (C vmcmain.c:507-509)
+        ctimer_start!(timer, 23)
         # 9. Sync modified parameters
         sync_modified_parameter!(data)
+        ctimer_stop!(timer, 23)
 
         # 10. Store optimization data (for averaging)
         if step >= n_steps - n_smp
@@ -300,6 +341,8 @@ function vmc_para_opt!(
     println("Start: Output opt params.")
     output_opt_data!(data; output_dir=output_dir)
     println("End: Output opt params.")
+
+    ctimer_stop!(timer, 2)
 
     return info
 end

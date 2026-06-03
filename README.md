@@ -2,21 +2,21 @@
 
 Julia port of the [mVMC](https://github.com/issp-center-dev/mVMC) (many-variable Variational Monte Carlo) solver for quantum lattice models.
 
-## Status (v0.1)
+## Status (v0.2)
 
 | Component | Status | Notes |
 |-----------|--------|-------|
 | VMCParaOpt (parameter optimization) | ✅ Verified | Bit-level match to C reference for HeisenbergChain (real / cmp / fsz) and HubbardChain (real); see `test/integration/`. |
 | VMCPhysCal (physical quantities) | 🚧 Experimental | Limited Green-function output. |
 | Lanczos | ⚠️ Step-0 only | Single-step comparison verified; full Lanczos not yet ported. |
-| BackFlow | ❌ Not supported | Planned for v0.2+. |
-| MPI parallelization | ❌ Not supported | Single-process only in v0.1. |
+| BackFlow | ❌ Not supported | Planned for v0.3+. |
+| MPI parallelization | ❌ Not supported | Single-process only in this release. |
 
 ## Installation
 
 Requires **Julia 1.11+**, `gfortran`, `g++`, `make`, BLAS/LAPACK.
 
-The supported install path for v0.1 is to clone the repo **with submodules** and activate the workspace project:
+The supported install path in this release is to clone the repo **with submodules** and activate the workspace project:
 
 ```bash
 git clone --recurse-submodules https://github.com/tmisawa/Julia-mVMC
@@ -26,7 +26,7 @@ julia --project=@. -e 'using Pkg; Pkg.instantiate(); Pkg.build()'
 
 If you cloned without `--recurse-submodules`, run `git submodule update --init --recursive` before `Pkg.instantiate()`.
 
-`Pkg.add(url=..., subdir=...)` is **not** a supported install path in v0.1 because Julia-mVMC and its dependencies are coupled via the workspace `[sources]` block in the root `Project.toml` (relative paths into the submodules, not committed URLs). See [docs/manual/01_install.md](docs/manual/01_install.md) for native prerequisites and detailed setup.
+`Pkg.add(url=..., subdir=...)` is **not** a supported install path in this release because Julia-mVMC and its dependencies are coupled via the workspace `[sources]` block in the root `Project.toml` (relative paths into the submodules, not committed URLs). See [docs/manual/01_install.md](docs/manual/01_install.md) for native prerequisites and detailed setup.
 
 ## Quickstart
 
@@ -41,6 +41,8 @@ Expected output ends with a line like `Final energy / site = -0.44...`. Each exa
 ## Documentation
 
 [`docs/manual/`](docs/manual/) — installation, input files, optimization, physics calculations, and C/Julia compatibility notes.
+
+[`CHANGELOG.md`](CHANGELOG.md) — release notes.
 
 ## Repository structure
 
@@ -72,11 +74,11 @@ GPL-3.0-or-later. See [LICENSE](LICENSE) and [THIRD_PARTY_LICENSES.md](THIRD_PAR
 
 See [CITATION.cff](CITATION.cff). Plain-text:
 
-> Misawa, T. (2026). Julia-mVMC v0.1.0. https://github.com/tmisawa/Julia-mVMC
+> Misawa, T. (2026). Julia-mVMC v0.2.0. https://github.com/tmisawa/Julia-mVMC
 
 ## Acknowledgments
 
-The [PfaPack.jl](https://github.com/tmisawa/PfaPack.jl) and [SFMT.jl](https://github.com/tmisawa/SFMT.jl) Julia wrappers used here as submodules were primarily authored by **Satoshi Terasaki** ([AtelierArith](https://atelier-arith.jp/)). Their original placement inside Julia-mVMC as `MVMCPfaPack.jl/` and `SFMT19937.jl/` predates this v0.1 release; they were extracted to standalone repositories under non-GPL open-source licenses (BSD-3-Clause for SFMT; BSD-3-Clause + MPL-2.0 for PfaPack) with Terasaki's consent.
+The [PfaPack.jl](https://github.com/tmisawa/PfaPack.jl) and [SFMT.jl](https://github.com/tmisawa/SFMT.jl) Julia wrappers used here as submodules were primarily authored by **Satoshi Terasaki** ([AtelierArith](https://atelier-arith.jp/)). Their original placement inside Julia-mVMC as `MVMCPfaPack.jl/` and `SFMT19937.jl/` predates the initial v0.1 release; they were extracted to standalone repositories under non-GPL open-source licenses (BSD-3-Clause for SFMT; BSD-3-Clause + MPL-2.0 for PfaPack) with Terasaki's consent.
 
 The mVMC C reference implementation is developed at ISSP, University of Tokyo: <https://github.com/issp-center-dev/mVMC>.
 
