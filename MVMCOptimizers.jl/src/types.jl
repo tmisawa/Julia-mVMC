@@ -277,6 +277,13 @@ mutable struct PhysicalQuantities
     local_cis_ajs_ckt_alt_dc::Vector{ComplexF64}
     phys_cis_ajs_ckt_alt_dc::Vector{ComplexF64}
 
+    # Canonical one-body Green list (ri, si, rj, sj), C-compatible order.
+    # When TwoBodyGEx is present this includes appended factored constituents
+    # (C's iOneBodyGIdx); otherwise it equals greenone.def order.
+    cis_ajs_idx::Vector{NTuple{4,Int}}
+    # Factored two-body pairs: 1-based indices into cis_ajs_idx / local_cis_ajs.
+    cis_ajs_ckt_alt_idx::Vector{Tuple{Int,Int}}
+
     function PhysicalQuantities(
         n_cis_ajs::Int,
         n_cis_ajs_ckt_alt::Int,
@@ -288,6 +295,8 @@ mutable struct PhysicalQuantities
             zeros(ComplexF64, n_cis_ajs_ckt_alt),
             zeros(ComplexF64, n_cis_ajs_ckt_alt_dc),
             zeros(ComplexF64, n_cis_ajs_ckt_alt_dc),
+            NTuple{4,Int}[],
+            Tuple{Int,Int}[],
         )
     end
 end
