@@ -90,12 +90,9 @@ function run_phys_cal_from_namelist(
 
     # 6. PhysCal. vmc_phys_cal! owns the single init_parameter! (RNG match) and
     #    init_qp_weight!; its save/restore preserves the params loaded above.
-    mkpath(output_dir)
-    status = vmc_phys_cal!(data; rng = rng, output_dir = String(output_dir))
+    out_dir = abspath(String(output_dir))  # absolute, matching run_para_opt_from_namelist
+    mkpath(out_dir)
+    status = vmc_phys_cal!(data; rng = rng, output_dir = out_dir)
 
-    return (;
-        status = status,
-        output_dir = String(output_dir),
-        n_para_consumed = n_para_consumed,
-    )
+    return (; status = status, output_dir = out_dir, n_para_consumed = n_para_consumed)
 end

@@ -119,6 +119,20 @@ function _compare_value_only(jl_path, c_path; rtol, atol)
         )
     end
 
+    # The factored file is value-only with ALL values on a single line (C's
+    # vmcmain.c writes "% .18e  % .18e " in a loop then one newline). The numeric
+    # fallback below flattens all whitespace, so it must NOT be reached for a file
+    # that drifted to one-pair-per-line: enforce the single-line invariant first,
+    # otherwise a layout regression with identical values would pass on fallback.
+    jl_nlines = length(_green_lines(raw_jl))
+    c_nlines = length(_green_lines(raw_c))
+    if jl_nlines != 1 || c_nlines != 1
+        return _green_fail(
+            "factored file must be a single line of values; julia=$jl_nlines ref=$c_nlines non-empty lines";
+            rtol, atol,
+        )
+    end
+
     jl_vals = split(strip(raw_jl))
     c_vals = split(strip(raw_c))
     if length(jl_vals) != length(c_vals)

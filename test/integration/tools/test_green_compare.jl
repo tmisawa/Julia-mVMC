@@ -77,6 +77,18 @@ end
     end
 end
 
+@testset "green_compare: factored must stay single-line (layout regression guard)" begin
+    mktempdir() do dir
+        # Same values, but the candidate drifted to one-pair-per-line. The numeric
+        # fallback would otherwise flatten whitespace and pass; the single-line
+        # invariant must hard-fail it.
+        ref = _wf(dir, "ref.dat", "2.5 -1.0 0.3 0.1 \n")            # 1 line (C format)
+        bad = _wf(dir, "bad.dat", "2.5 -1.0\n0.3 0.1\n")           # 2 lines, same values
+        r = compare_green_factored(bad, ref)
+        @test !r.ok && occursin("single line", r.detail)
+    end
+end
+
 @testset "green_compare: raw-byte check is whitespace-sensitive but numeric fallback passes" begin
     mktempdir() do dir
         # Same numeric values, but the reference drops C's trailing space / blank

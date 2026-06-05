@@ -110,6 +110,14 @@ end
         write(p, replace(_GOLDEN_OPT, "0.30" => "NaNsense"))
         threw, msg = _capture_msg(() -> MVMCOptimizers.read_opt_para_file!(_make_data(), p))
         @test threw && occursin("non-numeric token", msg)
+
+        # NaN / Inf parse as Float64 but must be rejected for a reference gate.
+        for tok in ("NaN", "Inf", "-Inf")
+            p = joinpath(dir, "nonfinite.dat")
+            write(p, replace(_GOLDEN_OPT, "0.40" => tok))
+            threw, msg = _capture_msg(() -> MVMCOptimizers.read_opt_para_file!(_make_data(), p))
+            @test threw && occursin("non-finite token", msg)
+        end
     end
 end
 

@@ -46,6 +46,10 @@ function _load_para_triples!(data::ExpertModeData, text::AbstractString)
     for (i, tok) in enumerate(tokens)
         v = tryparse(Float64, tok)
         v === nothing && return (false, 0, "non-numeric token '$(tok)' at field $i")
+        # A reference-gate parameter file must carry finite values; `tryparse`
+        # accepts "NaN"/"Inf", so reject them here rather than feeding a poisoned
+        # parameter into the deterministic comparison.
+        isfinite(v) || return (false, 0, "non-finite token '$(tok)' at field $i")
         values[i] = v
     end
 
