@@ -140,3 +140,50 @@ end
         @test split(lines[3])[1:4] == ["1", "1", "0", "1"]
     end
 end
+
+@testset "FSZ + factored is rejected before sampling" begin
+    data = ExpertModeData()
+    data.green_two_ex_terms = [GreenTwoExTerm(0, 0, 1, 0, 2, 1, 3, 1)]
+
+    # sz-conserved (i_flg_orbital_general == 0): allowed.
+    data.i_flg_orbital_general = 0
+    @test MVMCOptimizers.validate_factored_green_supported(data) === nothing
+
+    # FSZ / general-orbital (== 1): rejected with a clear message.
+    data.i_flg_orbital_general = 1
+    threw = false
+    msg = ""
+    try
+        MVMCOptimizers.validate_factored_green_supported(data)
+    catch err
+        threw = true
+        msg = sprint(showerror, err)
+    end
+    @test threw
+    @test occursin("TwoBodyGEx", msg)
+    @test occursin("FSZ", msg)
+
+    # No factored terms: FSZ is fine for the rest of PhysCal.
+    data.green_two_ex_terms = GreenTwoExTerm[]
+    @test MVMCOptimizers.validate_factored_green_supported(data) === nothing
+end
+
+@testset "vmc_phys_cal! rejects FSZ + factored before sampling" begin
+    # The guard runs before RNG / init_parameter!, so a minimal (physically
+    # incomplete) input still fails for the intended reason (Finding 2).
+    data = ExpertModeData()
+    data.green_two_ex_terms = [GreenTwoExTerm(0, 0, 1, 0, 2, 1, 3, 1)]
+    data.i_flg_orbital_general = 1
+
+    err = try
+        MVMCOptimizers.vmc_phys_cal!(data)
+        nothing
+    catch e
+        e
+    end
+
+    @test err isa ErrorException
+    msg = sprint(showerror, err)
+    @test occursin("TwoBodyGEx", msg)
+    @test occursin("FSZ", msg)
+end

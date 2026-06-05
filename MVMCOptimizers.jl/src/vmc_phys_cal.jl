@@ -45,6 +45,9 @@ function vmc_phys_cal!(
 )::Int
     # Reject unsupported ModPara inputs (e.g. NSplitSize > 1) before any work.
     validate_supported_modpara(data.modpara)
+    # Reject TwoBodyGEx in FSZ / general-orbital mode before any sampling or RNG
+    # side effects (its Green measurement path is not yet wired).
+    validate_factored_green_supported(data)
 
     # Initialize RNG if not provided. Match the C-compatible seed convention
     # used by vmc_para_opt! and run_para_opt_from_namelist: when

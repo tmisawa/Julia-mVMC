@@ -95,6 +95,26 @@ function resolve_cis_ajs_ckt_alt_idx(cis_ajs_idx, green_two_ex_terms)
 end
 
 """
+    validate_factored_green_supported(data::ExpertModeData)
+
+Reject the factored two-body Green (`TwoBodyGEx`) in FSZ / general-orbital mode.
+The FSZ measurement path is not yet wired for Green functions (a separate spec),
+so producing factored output there would be silently wrong. Non-mutating;
+returns `nothing` when supported.
+"""
+function validate_factored_green_supported(data::ExpertModeData)
+    if !isempty(data.green_two_ex_terms) && data.i_flg_orbital_general != 0
+        error(
+            "TwoBodyGEx (factored two-body Green) is not supported in FSZ / " *
+            "general-orbital mode (i_flg_orbital_general = $(data.i_flg_orbital_general)). " *
+            "The FSZ Green measurement path is not yet implemented; use sz-conserved " *
+            "mode or remove the TwoBodyGEx input.",
+        )
+    end
+    return nothing
+end
+
+"""
     initialize_phys_quantities!(state::VMCOptimizationState, data::ExpertModeData)
 
 Initialize PhysicalQuantities, including the canonical one-body list and the
