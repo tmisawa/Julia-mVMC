@@ -41,6 +41,7 @@ function vmc_phys_cal!(
     data::ExpertModeData;
     callback::Union{Nothing,Function} = nothing,
     rng::Union{AbstractRNG,Nothing} = nothing,
+    output_dir::Union{String,Nothing} = nothing,
 )::Int
     # Reject unsupported ModPara inputs (e.g. NSplitSize > 1) before any work.
     validate_supported_modpara(data.modpara)
@@ -244,8 +245,9 @@ function vmc_phys_cal!(
         # Reduce counters (no-op in single process)
         reduce_counter!(state)
 
-        # Output data
-        output_data_phys!(data, state, ismp)
+        # Output data. C names per-sampling files with idx = ismp + NDataIdxStart.
+        file_idx = physcal_output_file_index(data, ismp)
+        output_data_phys!(data, state, file_idx; output_dir = output_dir)
 
         # Close files
         close_file_phys_cal!(data, ismp)
@@ -281,15 +283,29 @@ end
 Output physical quantity data to files.
 Equivalent to C's `outputData()` in VMCPhysCal mode.
 """
-function output_data_phys!(data::ExpertModeData, state::VMCOptimizationState, ismp::Int)
+function output_data_phys!(
+    data::ExpertModeData,
+    state::VMCOptimizationState,
+    ismp::Int;
+    output_dir::Union{String,Nothing} = nothing,
+)
     # Output energy and parameters (same as optimization mode)
-    output_data!(data, state, ismp)
+    output_data!(data, state, ismp; output_dir = output_dir)
 
     # Output Green's functions
     if state.phys_quantities !== nothing
-        output_green_func!(data, state, ismp)
+        output_green_func!(data, state, ismp; output_dir = output_dir)
     end
 end
+
+"""
+    physcal_output_file_index(data::ExpertModeData, ismp::Int) -> Int
+
+C-visible PhysCal per-sampling file index: `ismp + NDataIdxStart`
+(so the usual first files are `*_001.dat`).
+"""
+physcal_output_file_index(data::ExpertModeData, ismp::Int)::Int =
+    ismp + data.modpara.n_data_idx_start
 
 """
     close_file_phys_cal!(data::ExpertModeData, ismp::Int)

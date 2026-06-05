@@ -62,3 +62,81 @@ end
     MVMCOptimizers.accumulate_factored_green!(pq, 0.5)
     @test pq.phys_cis_ajs_ckt_alt[1] ≈ (2.0 + 11.0im)
 end
+
+using MVMCOptimizers: VMCOptimizationState
+using Printf
+
+@testset "output: canonical cisajs + factored ex, with output_dir and numbering" begin
+    data = ExpertModeData()
+    data.modpara.nsite = 4
+    data.modpara.c_data_file_head = "zvo"
+    state = VMCOptimizationState(4, 2, 0, 0, 1, 4, true, false)
+
+    pq = MVMCOptimizers.PhysicalQuantities(1, 1, 0)
+    pq.cis_ajs_idx = NTuple{4,Int}[(0, 0, 1, 0)]
+    pq.cis_ajs_ckt_alt_idx = [(1, 1)]
+    pq.phys_cis_ajs[1] = 1.25 + 0.0im
+    pq.phys_cis_ajs_ckt_alt[1] = 2.5 - 1.0im
+    state.phys_quantities = pq
+
+    mktempdir() do dir
+        MVMCOptimizers.output_green_func!(data, state, 1; output_dir = dir)
+
+        cisajs = joinpath(dir, "zvo_cisajs_001.dat")
+        ex = joinpath(dir, "zvo_cisajscktaltex_001.dat")
+        @test isfile(cisajs)
+        @test isfile(ex)
+
+        line = first(filter(!isempty, split(read(cisajs, String), "\n")))
+        cols = split(line)
+        @test cols[1] == "0" && cols[2] == "0" && cols[3] == "1" && cols[4] == "0"
+
+        exline = first(filter(!isempty, split(read(ex, String), "\n")))
+        vals = parse.(Float64, split(exline))
+        @test length(vals) == 2
+        @test vals[1] ≈ 2.5
+        @test vals[2] ≈ -1.0
+    end
+end
+
+@testset "PhysCal output file index uses NDataIdxStart" begin
+    data = ExpertModeData()
+    data.modpara.n_data_idx_start = 1
+    @test MVMCOptimizers.physcal_output_file_index(data, 0) == 1
+    @test MVMCOptimizers.physcal_output_file_index(data, 3) == 4
+
+    data.modpara.n_data_idx_start = 7
+    @test MVMCOptimizers.physcal_output_file_index(data, 0) == 7
+    @test MVMCOptimizers.physcal_output_file_index(data, 2) == 9
+end
+
+@testset "no TwoBodyGEx preserves greenone order and duplicates in output" begin
+    data = ExpertModeData()
+    data.modpara.nsite = 2
+    data.modpara.c_data_file_head = "zvo"
+    data.green_one_terms = [
+        GreenOneTerm(0, 1, :up, :up),
+        GreenOneTerm(0, 1, :up, :up),
+        GreenOneTerm(1, 0, :down, :down),
+    ]
+
+    state = VMCOptimizationState(2, 2, 0, 0, 1, 2, true, false)
+    MVMCOptimizers.initialize_phys_quantities!(state, data)
+    pq = state.phys_quantities
+
+    @test pq.cis_ajs_idx == NTuple{4,Int}[
+        (0, 0, 1, 0),
+        (0, 0, 1, 0),
+        (1, 1, 0, 1),
+    ]
+
+    pq.phys_cis_ajs .= ComplexF64[1.0 + 0im, 2.0 + 0im, 3.0 + 0im]
+    mktempdir() do dir
+        MVMCOptimizers.output_green_func!(data, state, 1; output_dir = dir)
+        lines = filter(!isempty, split(read(joinpath(dir, "zvo_cisajs_001.dat"), String), "\n"))
+        @test length(lines) == 3
+        @test split(lines[1])[1:4] == ["0", "0", "1", "0"]
+        @test split(lines[2])[1:4] == ["0", "0", "1", "0"]
+        @test split(lines[3])[1:4] == ["1", "1", "0", "1"]
+    end
+end

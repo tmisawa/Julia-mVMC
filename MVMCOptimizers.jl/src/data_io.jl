@@ -241,22 +241,21 @@ function output_green_func!(data::ExpertModeData, state::VMCOptimizationState, i
         data_file_head = "zvo"
     end
 
-    # zvo_cisajs_XXX.dat (1-body Green's function)
-    if !isempty(data.green_one_terms)
+    # zvo_cisajs_XXX.dat (1-body Green's function) — written from the canonical
+    # one-body list (which, with TwoBodyGEx, includes appended factored
+    # constituents in C order), not raw data.green_one_terms.
+    if !isempty(phys.cis_ajs_idx)
         filename = _output_path(@sprintf("%s_cisajs_%03d.dat", data_file_head, ismp), output_dir)
         open(filename, "w") do f
-            for (idx, term) in enumerate(data.green_one_terms)
+            for (idx, (ri, si, rj, sj)) in enumerate(phys.cis_ajs_idx)
                 val = phys.phys_cis_ajs[idx]
-                # C format: "%d %d %d %d % .18e  % .18e \n"
-                # Format: ri, si, rj, sj, real, imag
-                si = term.spin1 == :up ? 0 : 1
-                sj = term.spin2 == :up ? 0 : 1
+                # C format: "%d %d %d %d % .18e  % .18e \n" (ri, si, rj, sj, real, imag)
                 @printf(
                     f,
                     "%d %d %d %d % .18e  % .18e \n",
-                    term.site1,
+                    ri,
                     si,
-                    term.site2,
+                    rj,
                     sj,
                     real(val),
                     imag(val)
