@@ -1,6 +1,106 @@
 using MVMCExpertModeParsers: count_rbm_parameters
 
 """
+    _load_para_triples!(data::ExpertModeData, text::AbstractString)
+        -> (ok::Bool, n_consumed::Int, reason::String)
+
+Shared core for the optimized-parameter file layout used by both
+`read_initial_def!` (warn+false on problems) and `read_opt_para_file!`
+(error on problems). Parses mVMC's `zqp_opt.dat` / `initial.def` record
+(`NSROptItrSmp > 1` layout):
+
+- 6 leading floats (energy diagnostics) skipped;
+- `NProj` triples `(real, imag, gradient)` for Gutzwiller then Jastrow;
+- `NSlater` triples for orbital parameters, scattered into `orbital_terms`
+  via each term's `idx`.
+
+Scope: **Gutzwiller + Jastrow + Slater only.** RBM and DoublonHolon are
+rejected up front: the C file carries extra triples for them (between NProj
+and NSlater) that this loader does not place, so silently reading them would
+corrupt Slater (design-review LOADER-1). SpinJastrow is not parsed by the
+toolchain at all; if a future model adds it, the float-count check below
+fails loud rather than mis-attributing.
+
+Validate-before-commit: on any problem returns `(false, 0, reason)` and
+leaves `data` untouched. On success commits and returns
+`(true, n_proj + n_slater, "")`. Non-numeric tokens are reported as a stable
+reason (not a raw `ArgumentError`) so strict callers can test for them.
+"""
+function _load_para_triples!(data::ExpertModeData, text::AbstractString)
+    n_rbm = count_rbm_parameters(data)
+    if n_rbm > 0
+        return (false, 0, "RBM-bearing models are not supported by this loader (n_rbm = $n_rbm)")
+    end
+    n_dh =
+        length(data.doublon_holon_2site_terms) + length(data.doublon_holon_4site_terms)
+    if n_dh > 0
+        return (
+            false,
+            0,
+            "DoublonHolon parameters are not supported by this loader (n_dh = $n_dh)",
+        )
+    end
+
+    tokens = split(strip(text))
+    values = Vector{Float64}(undef, length(tokens))
+    for (i, tok) in enumerate(tokens)
+        v = tryparse(Float64, tok)
+        v === nothing && return (false, 0, "non-numeric token '$(tok)' at field $i")
+        values[i] = v
+    end
+
+    n_gutzwiller = length(data.gutzwiller_terms)
+    n_jastrow = length(data.jastrow_terms)
+    n_proj = n_gutzwiller + n_jastrow
+    n_slater = data.modpara.n_orbital_idx
+
+    expected_floats = 6 + 3 * (n_proj + n_slater)  # NRBM = 0, NDH = 0 verified above
+    if length(values) < expected_floats
+        return (
+            false,
+            0,
+            "too short: got $(length(values)) floats, expected $expected_floats " *
+            "(6 + 3*(NProj=$n_proj + NSlater=$n_slater))",
+        )
+    end
+    # Trailing floats beyond the expected count indicate an OptTrans block
+    # (unsupported) or a malformed file. Compare floats, not triples, so 1–2
+    # stray tokens cannot round to zero remaining triples and slip through.
+    extra_floats = length(values) - expected_floats
+    if extra_floats > 0
+        n_extra_triples, rem = divrem(extra_floats, 3)
+        reason =
+            rem == 0 ?
+            "OptTrans-style block of $n_extra_triples triples (not supported)" :
+            "$extra_floats trailing floats (not a whole number of triples; file likely malformed)"
+        return (false, 0, reason)
+    end
+
+    # ── Commit phase: validation passed, now mutate `data`. ──────────────
+    idx = 7  # skip 6 leading floats (1-based: start at index 7)
+    @inbounds for i = 1:n_gutzwiller
+        data.gutzwiller_terms[i].value = ComplexF64(values[idx], values[idx+1])
+        idx += 3
+    end
+    @inbounds for i = 1:n_jastrow
+        data.jastrow_terms[i].value = ComplexF64(values[idx], values[idx+1])
+        idx += 3
+    end
+    slater_values = Vector{ComplexF64}(undef, n_slater)
+    @inbounds for i = 1:n_slater
+        slater_values[i] = ComplexF64(values[idx], values[idx+1])
+        idx += 3
+    end
+    @inbounds for term in data.orbital_terms
+        if term.idx >= 0 && term.idx < n_slater
+            term.value = slater_values[term.idx+1]
+        end
+    end
+
+    return (true, n_proj + n_slater, "")
+end
+
+"""
     read_initial_def!(data::ExpertModeData, initial_path::AbstractString) -> Bool
 
 Overwrite the variational parameters in `data` with values stored in
@@ -36,73 +136,40 @@ function read_initial_def!(data::ExpertModeData, initial_path::AbstractString)
         @warn "initial.def not found" path=initial_path
         return false
     end
-
-    n_rbm = count_rbm_parameters(data)
-    if n_rbm > 0
-        # An initial.def for an RBM model would carry NRBM triples between
-        # the NProj and NSlater blocks. Reading them as Slater would silently
-        # corrupt every Slater parameter, so refuse rather than guess.
-        @warn "read_initial_def!: RBM-bearing models are not yet supported by the loader; refusing to apply initial.def" n_rbm path=initial_path
+    ok, _, reason = _load_para_triples!(data, read(initial_path, String))
+    if !ok
+        @warn "read_initial_def!: $reason; refusing to apply initial.def" path=initial_path
         return false
     end
-
-    values = parse.(Float64, split(strip(read(initial_path, String))))
-
-    n_gutzwiller = length(data.gutzwiller_terms)
-    n_jastrow = length(data.jastrow_terms)
-    n_proj = n_gutzwiller + n_jastrow
-    n_slater = data.modpara.n_orbital_idx
-
-    # ── Validation phase: every check must run *before* any mutation, so a
-    # rejected file leaves the caller's `data` unchanged. ────────────────
-    expected_floats = 6 + 3 * (n_proj + n_slater)  # NRBM = 0 verified above
-    if length(values) < expected_floats
-        @warn "initial.def too short" got=length(values) expected_min=expected_floats path=initial_path
-        return false
-    end
-
-    # Any trailing floats beyond `expected_floats` indicate either an
-    # OptTrans block (C reads NOptTrans triples when FlagOptTrans > 0;
-    # Julia has no consumer for them — no OptTrans[] storage, no
-    # FlagOptTrans gate, no qp_weight_update consumption) or a malformed
-    # / truncated file. Compare floats, *not* triples: with `÷ 3`, 1 or 2
-    # stray tokens silently round to zero remaining triples and would let
-    # a malformed file pass. Refuse on any non-zero excess.
-    extra_floats = length(values) - expected_floats
-    if extra_floats > 0
-        n_extra_triples, rem = divrem(extra_floats, 3)
-        msg = if rem == 0
-            "OptTrans-style block of $n_extra_triples triples (not supported)"
-        else
-            "$extra_floats trailing floats (not a whole number of triples; file likely malformed)"
-        end
-        @warn "read_initial_def!: $msg; refusing to apply initial.def" expected_floats got=length(values) path=initial_path
-        return false
-    end
-
-    # ── Commit phase: validation passed, now mutate `data`. ──────────────
-    idx = 7  # skip 6 leading floats (1-based: start at index 7)
-
-    @inbounds for i = 1:n_gutzwiller
-        data.gutzwiller_terms[i].value = ComplexF64(values[idx], values[idx+1])
-        idx += 3
-    end
-
-    @inbounds for i = 1:n_jastrow
-        data.jastrow_terms[i].value = ComplexF64(values[idx], values[idx+1])
-        idx += 3
-    end
-
-    slater_values = Vector{ComplexF64}(undef, n_slater)
-    @inbounds for i = 1:n_slater
-        slater_values[i] = ComplexF64(values[idx], values[idx+1])
-        idx += 3
-    end
-    @inbounds for term in data.orbital_terms
-        if term.idx >= 0 && term.idx < n_slater
-            term.value = slater_values[term.idx+1]
-        end
-    end
-
     return true
+end
+
+"""
+    read_opt_para_file!(data::ExpertModeData, opt_para_path::AbstractString) -> Int
+
+Strict, non-perturbing loader for a committed C `zqp_opt.dat` (the optimized
+variational parameters), for the PhysCal reference gate. Same 6+triples layout
+as [`read_initial_def!`](@ref) (see [`_load_para_triples!`](@ref)), but built for
+a deterministic gate rather than an optional warm-start overlay:
+
+- **Fails hard** (`error`) instead of `@warn`+`false` on a missing file, a
+  non-numeric token, a too-short or trailing-garbage record, or an unsupported
+  block (RBM / DoublonHolon / OptTrans).
+- **Returns the number of parameters consumed** (`n_proj + n_slater`) so the
+  caller can assert the fixed parameters were actually applied; errors if zero.
+- Does **not** perturb (the C test driver's `random.uniform` perturbation is
+  external), so a committed unperturbed `zqp_opt.dat` loads verbatim.
+
+Scope is the `NSROptItrSmp > 1` layout for Gutzwiller + Jastrow + Slater models
+(the Plan 3 PhysCal fixtures); the `NSROptItrSmp == 1` "pairs" layout and
+RBM/DoublonHolon/OptTrans models are rejected.
+"""
+function read_opt_para_file!(data::ExpertModeData, opt_para_path::AbstractString)::Int
+    isfile(opt_para_path) ||
+        error("read_opt_para_file!: file not found: $opt_para_path")
+    ok, n_consumed, reason = _load_para_triples!(data, read(opt_para_path, String))
+    ok || error("read_opt_para_file!: $reason (path: $opt_para_path)")
+    n_consumed > 0 ||
+        error("read_opt_para_file!: no parameters consumed (no Gutzwiller/Jastrow/Slater terms) from $opt_para_path")
+    return n_consumed
 end
