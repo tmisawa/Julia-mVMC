@@ -93,6 +93,8 @@
   - `factored accumulation` → `accumulate_factored_green!`（`w·local[idx0]·conj(local[idx1])`）
   - `output: canonical cisajs + factored ex` → `output_green_func!`（canonical 出力 / output_dir / `_001` 番号）
   - `PhysCal output file index uses NDataIdxStart` → `physcal_output_file_index`
+  - `output_data_phys!: out/var truncate-on-first-sample, Green files use NDataIdxStart` → fmt-1 回帰ガード（out/var は 0-based ismp で write-mode 決定 → 初回 truncate・再実行で非汚染、Green は `ismp+NDataIdxStart` 番号）
+  - `initialize_phys_quantities! wires the factored canonical list and pairs` → factored 分岐の統合（canonical/pairs を struct へ配線・buffer サイズ、共有構成2項の dedup append + 複数ペア順序）
   - `no TwoBodyGEx preserves greenone order and duplicates` → 既存 direct 経路の互換回帰
   - `FSZ + factored is rejected` → `validate_factored_green_supported`（public path `vmc_phys_cal!` 経由も検証）
 

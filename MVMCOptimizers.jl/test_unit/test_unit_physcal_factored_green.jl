@@ -110,6 +110,44 @@ end
     @test MVMCOptimizers.physcal_output_file_index(data, 2) == 9
 end
 
+@testset "output_data_phys!: out/var truncate-on-first-sample, Green files use NDataIdxStart" begin
+    # Regression guard for the fmt-1 fix: output_data_phys! must drive the
+    # energy/param write mode from the 0-based sample index (so the first sample
+    # truncates and a re-run does not accumulate stale lines), while numbering the
+    # Green files with ismp + NDataIdxStart. Previously the C-visible file index
+    # (>= 1 for NDataIdxStart >= 1) was forwarded as the write-mode selector, so
+    # the first sample appended instead of truncating.
+    data = ExpertModeData()
+    data.modpara.nsite = 2
+    data.modpara.c_data_file_head = "zvo"
+    data.modpara.n_data_idx_start = 1
+
+    state = VMCOptimizationState(2, 2, 0, 0, 1, 2, true, false)
+    pq = MVMCOptimizers.PhysicalQuantities(1, 0, 0)
+    pq.cis_ajs_idx = NTuple{4,Int}[(0, 0, 1, 0)]
+    state.phys_quantities = pq
+
+    mktempdir() do dir
+        outpath = joinpath(dir, "zvo_out.dat")
+        varpath = joinpath(dir, "zvo_var.dat")
+
+        # One run of two samples: ismp = 0 (truncate) then 1 (append).
+        MVMCOptimizers.output_data_phys!(data, state, 0; output_dir = dir)
+        MVMCOptimizers.output_data_phys!(data, state, 1; output_dir = dir)
+        @test count(==('\n'), read(outpath, String)) == 2  # exactly 2 lines, no stale leading line
+
+        # Green files numbered ismp + NDataIdxStart (= 1, 2), not 0-based.
+        @test isfile(joinpath(dir, "zvo_cisajs_001.dat"))
+        @test isfile(joinpath(dir, "zvo_cisajs_002.dat"))
+        @test !isfile(joinpath(dir, "zvo_cisajs_000.dat"))
+
+        # A fresh run (ismp = 0 again) re-truncates out/var — no cross-run pollution.
+        MVMCOptimizers.output_data_phys!(data, state, 0; output_dir = dir)
+        @test count(==('\n'), read(outpath, String)) == 1
+        @test isfile(varpath)
+    end
+end
+
 @testset "no TwoBodyGEx preserves greenone order and duplicates in output" begin
     data = ExpertModeData()
     data.modpara.nsite = 2
@@ -139,6 +177,49 @@ end
         @test split(lines[2])[1:4] == ["0", "0", "1", "0"]
         @test split(lines[3])[1:4] == ["1", "1", "0", "1"]
     end
+end
+
+@testset "initialize_phys_quantities! wires the factored canonical list and pairs" begin
+    # Integration of build_canonical_cis_ajs_idx + resolve_cis_ajs_ckt_alt_idx
+    # through initialize_phys_quantities! (the helpers are unit-tested above, but
+    # the wiring that stores them on PhysicalQuantities and sizes the buffers was
+    # previously only exercised with an empty factored list).
+
+    # Single factored term: explicit greenone first, one appended constituent.
+    data = ExpertModeData()
+    data.modpara.nsite = 4
+    data.green_one_terms = [GreenOneTerm(0, 1, :up, :up)]            # (0,0,1,0)
+    data.green_two_ex_terms = [GreenTwoExTerm(0, 0, 1, 0, 2, 1, 3, 1)]  # c1=(0,0,1,0); c2=(2,1,3,1) new
+
+    state = VMCOptimizationState(4, 2, 0, 0, 1, 4, true, false)
+    MVMCOptimizers.initialize_phys_quantities!(state, data)
+    pq = state.phys_quantities
+
+    @test pq.cis_ajs_idx == NTuple{4,Int}[(0, 0, 1, 0), (2, 1, 3, 1)]
+    @test pq.cis_ajs_ckt_alt_idx == [(1, 2)]
+    @test length(pq.phys_cis_ajs) == 2          # canonical includes the appended constituent
+    @test length(pq.local_cis_ajs) == 2         # local buffer sized for accumulate_factored_green!
+    @test length(pq.phys_cis_ajs_ckt_alt) == 1  # == number of factored terms
+    @test length(pq.phys_cis_ajs_ckt_alt_dc) == 0
+
+    # Two factored terms sharing constituents (swapped): exercises cross-term
+    # dedup (canonical stays length 2) and ordered multi-pair resolution.
+    data2 = ExpertModeData()
+    data2.modpara.nsite = 4
+    data2.green_one_terms = [GreenOneTerm(0, 1, :up, :up)]           # (0,0,1,0)
+    data2.green_two_ex_terms = [
+        GreenTwoExTerm(0, 0, 1, 0, 2, 1, 3, 1),   # c1=(0,0,1,0)=idx1; c2=(2,1,3,1)=idx2
+        GreenTwoExTerm(2, 1, 3, 1, 0, 0, 1, 0),   # c1=(2,1,3,1)=idx2; c2=(0,0,1,0)=idx1
+    ]
+
+    state2 = VMCOptimizationState(4, 2, 0, 0, 1, 4, true, false)
+    MVMCOptimizers.initialize_phys_quantities!(state2, data2)
+    pq2 = state2.phys_quantities
+
+    @test pq2.cis_ajs_idx == NTuple{4,Int}[(0, 0, 1, 0), (2, 1, 3, 1)]  # deduped, length 2
+    @test pq2.cis_ajs_ckt_alt_idx == [(1, 2), (2, 1)]                   # ordered, shared indices
+    @test length(pq2.phys_cis_ajs) == 2
+    @test length(pq2.phys_cis_ajs_ckt_alt) == 2
 end
 
 @testset "FSZ + factored is rejected before sampling" begin
