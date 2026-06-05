@@ -135,6 +135,21 @@ function reset_phys_quantities!(state::VMCOptimizationState)
 end
 
 """
+    accumulate_factored_green!(phys::PhysicalQuantities, w::Float64)
+
+Accumulate the factored two-body Green:
+`phys_cis_ajs_ckt_alt[idx] += w * local_cis_ajs[idx0] * conj(local_cis_ajs[idx1])`,
+faithful to C's `calgrn.c` `PhysCisAjsCktAlt` loop. Indices are 1-based.
+"""
+function accumulate_factored_green!(phys::PhysicalQuantities, w::Float64)
+    @inbounds for (idx, (idx0, idx1)) in enumerate(phys.cis_ajs_ckt_alt_idx)
+        phys.phys_cis_ajs_ckt_alt[idx] +=
+            w * phys.local_cis_ajs[idx0] * conj(phys.local_cis_ajs[idx1])
+    end
+    return nothing
+end
+
+"""
     calculate_green_func!(data::ExpertModeData, state::VMCOptimizationState,
                          w::Float64, ip::ComplexF64,
                          ele_idx::Vector{Int}, ele_cfg::Vector{Int},
@@ -165,21 +180,16 @@ function calculate_green_func!(
     phys = state.phys_quantities
     all_complex = get_all_complex_flag(data)
 
-    # 1-body Green's function: <c†_{ri,s} c_{rj,s}>
-    # C implementation (sz-conserved): uses CisAjsIdx[idx][3] = sj (spin2)
-    # For sz-conserved case, spin1 == spin2, so we use spin2 to match C
-    for (idx, term) in enumerate(data.green_one_terms)
-        ri = term.site1
-        rj = term.site2
-        # Use spin2 (sj) to match C implementation
-        # C: s = CisAjsIdx[idx][3] where format is (ri, si, rj, sj)
-        s = term.spin2 == :up ? 0 : 1
-
-        # Calculate GreenFunc1
+    # 1-body Green's function: <c†_{ri,s} c_{rj,s}>, over the canonical list
+    # (which, when TwoBodyGEx is present, includes appended factored
+    # constituents in C order). C uses s = CisAjsIdx[idx][3] = sj (annihilation
+    # spin); for sz-conserved inputs si == sj.
+    for (idx, (ri, si, rj, sj)) in enumerate(phys.cis_ajs_idx)
+        # Calculate GreenFunc1 with s = sj to match C
         local_val = green_func1(
             ri,
             rj,
-            s,
+            sj,
             ip,
             ele_idx,
             ele_cfg,
@@ -225,12 +235,7 @@ function calculate_green_func!(
         phys.phys_cis_ajs_ckt_alt_dc[idx] += w * local_val
     end
 
-    # 2-body Green's function (product): <c†_i c_j> × <c†_k c_l>
-    # This requires CisAjsCktAltIdx which maps to pairs of 1-body Green's function indices
-    # For now, we'll skip this if not available
-    # TODO: Parse cisajscktalt.def to get CisAjsCktAltIdx
-    if length(phys.phys_cis_ajs_ckt_alt) > 0
-        # This will be implemented when we have CisAjsCktAltIdx
-        # For now, leave empty
-    end
+    # 2-body Green's function (product): <c†_i c_j> × conj(<c†_k c_l>)
+    # using the resolved 1-based index pairs into the one-body Greens above.
+    accumulate_factored_green!(phys, w)
 end

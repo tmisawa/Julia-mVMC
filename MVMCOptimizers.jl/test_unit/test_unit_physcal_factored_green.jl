@@ -47,3 +47,18 @@ end
     ex2 = [GreenTwoExTerm(0, 0, 0, 0, 0, 0, 0, 0)]  # both constituents = canon[1]
     @test MVMCOptimizers.resolve_cis_ajs_ckt_alt_idx(canon2, ex2) == [(1, 1)]
 end
+
+@testset "factored accumulation: w * local[idx0] * conj(local[idx1])" begin
+    pq = MVMCOptimizers.PhysicalQuantities(2, 1, 0)
+    pq.cis_ajs_ckt_alt_idx = [(1, 2)]
+    pq.local_cis_ajs[1] = 2.0 + 1.0im
+    pq.local_cis_ajs[2] = 3.0 - 4.0im
+    MVMCOptimizers.accumulate_factored_green!(pq, 0.5)
+    # 0.5 * (2+1im) * conj(3-4im) = 0.5 * (2+1im) * (3+4im) = 0.5 * (2+11im)
+    @test pq.phys_cis_ajs_ckt_alt[1] ≈ 0.5 * ((2.0 + 1.0im) * conj(3.0 - 4.0im))
+    @test pq.phys_cis_ajs_ckt_alt[1] ≈ (1.0 + 5.5im)
+
+    # Accumulates (adds), not overwrites.
+    MVMCOptimizers.accumulate_factored_green!(pq, 0.5)
+    @test pq.phys_cis_ajs_ckt_alt[1] ≈ (2.0 + 11.0im)
+end
