@@ -224,10 +224,10 @@ end
 Output Green's functions to files.
 Equivalent to C's `outputData()` Green's function output section.
 
-Output files:
+Output files (XXX = ismp + NDataIdxStart):
 - zvo_cisajs_XXX.dat: 1-body Green's function <c†_i c_j>
-- zvo_cisajscktalt_XXX.dat: 2-body correlation (product)
-- zvo_cisajscktaltdc_XXX.dat: 2-body correlation (direct)
+- zvo_cisajscktaltex_XXX.dat: factored two-body Green (product / `TwoBodyGEx`)
+- zvo_cisajscktalt_XXX.dat: direct two-body Green (`TwoBodyG`)
 If `output_dir` is set, files are written under that directory.
 """
 function output_green_func!(data::ExpertModeData, state::VMCOptimizationState, ismp::Int; output_dir::Union{String,Nothing}=nothing)
@@ -241,22 +241,21 @@ function output_green_func!(data::ExpertModeData, state::VMCOptimizationState, i
         data_file_head = "zvo"
     end
 
-    # zvo_cisajs_XXX.dat (1-body Green's function)
-    if !isempty(data.green_one_terms)
+    # zvo_cisajs_XXX.dat (1-body Green's function) — written from the canonical
+    # one-body list (which, with TwoBodyGEx, includes appended factored
+    # constituents in C order), not raw data.green_one_terms.
+    if !isempty(phys.cis_ajs_idx)
         filename = _output_path(@sprintf("%s_cisajs_%03d.dat", data_file_head, ismp), output_dir)
         open(filename, "w") do f
-            for (idx, term) in enumerate(data.green_one_terms)
+            for (idx, (ri, si, rj, sj)) in enumerate(phys.cis_ajs_idx)
                 val = phys.phys_cis_ajs[idx]
-                # C format: "%d %d %d %d % .18e  % .18e \n"
-                # Format: ri, si, rj, sj, real, imag
-                si = term.spin1 == :up ? 0 : 1
-                sj = term.spin2 == :up ? 0 : 1
+                # C format: "%d %d %d %d % .18e  % .18e \n" (ri, si, rj, sj, real, imag)
                 @printf(
                     f,
                     "%d %d %d %d % .18e  % .18e \n",
-                    term.site1,
+                    ri,
                     si,
-                    term.site2,
+                    rj,
                     sj,
                     real(val),
                     imag(val)
