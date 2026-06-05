@@ -20,6 +20,7 @@ using LoopVectorization: @turbo
 # Import ExpertModeData and update_qp_weight! from MVMCExpertModeParsers
 using MVMCExpertModeParsers: MVMCExpertModeParsers
 using MVMCExpertModeParsers: ExpertModeData
+using MVMCExpertModeParsers: ModParaParameters
 using MVMCExpertModeParsers: init_qp_weight!
 using MVMCExpertModeParsers: initialize_parameters!, init_parameter!, read_input_parameters!
 # sync_modified_parameter! is defined in parameter_sync.jl
@@ -61,6 +62,9 @@ include("stochastic_opt.jl")
 include("parameter_sync.jl")
 include("data_io.jl")
 include("initial_params.jl")
+# Runtime compatibility contract: reject unsupported ModPara inputs
+# (e.g. NSplitSize > 1). Must precede the entry points that call it below.
+include("unsupported_inputs.jl")
 include("vmc_para_opt.jl")
 include("vmc_phys_cal.jl")
 include("run_para_opt_from_namelist.jl")

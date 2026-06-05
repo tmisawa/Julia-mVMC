@@ -1,6 +1,6 @@
 # Unit Test Index (MVMCOptimizers.jl)
 
-このフォルダ配下の unit test は `test/runtests.jl` から常時実行されます（integration は別途環境変数で切替）。
+このフォルダ配下の unit test は `test/runtests.jl` から常時実行されます。C reference との integration は subpackage には含めず、workspace root の `test/integration/runtests.jl` で別途実行します。対応 Julia は 1.11+（`Project.toml` compat `julia = "1.11"`、CI は 1.11 / 1.12 を検証）。`Manifest.toml` は gitignore 対象なので、ローカル実行時は使用する Julia version で resolve し直すこと。
 
 ## 実行
 - 全体: `cd MVMCOptimizers.jl && julia --project=@. -e 'import Pkg; Pkg.test()'`（リポジトリルートから）
@@ -76,6 +76,14 @@
   - `unit/types: SROptData allocation sizes` → `SROptData(sr_opt_size, n_vmc_sample, all_complex)`
   - `unit/types: ElectronConfiguration sizes (fsz vs non-fsz)` → `ElectronConfiguration(..., use_fsz)`
   - `unit/types: SlaterMatrixData size normalization` → `SlaterMatrixData(n_qp_full, n_site, n_elec, all_complex)`
+
+### `src/unsupported_inputs.jl`（runtime contract）
+- `test_unit/test_unit_unsupported_inputs.jl`
+  - `unit/unsupported_inputs: NSplitSize contract` → `validate_supported_modpara`
+    - `NSplitSize = 1` は許容（`vmc_para_opt!` / `vmc_phys_cal!`）
+    - `NSplitSize > 1` は `error()` で reject（MPI 未サポート）
+    - エラーメッセージに `NSplitSize > 1` と `MPI parallelization is not supported` を含む
+    - 検証は型ではなくメッセージ部分文字列で行う（design review A2）
 
 ---
 

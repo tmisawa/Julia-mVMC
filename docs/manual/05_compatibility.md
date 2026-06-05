@@ -103,8 +103,9 @@ for provenance and regeneration instructions.
 
 - **BackFlow** correlation factor (`vmc_bf_*` entry points raise an error
   in this release; inputs that activate Back Flow are not supported).
-- **MPI parallelisation** (`NSplitSize > 1` falls back to a single
-  process; no warning).
+- **MPI parallelisation** (`NSplitSize > 1` raises an unsupported-MPI
+  error until MPI support is implemented; `NSplitSize = 1` is the only
+  supported setting).
 - **Full Lanczos** (`NLanczosMode > 0`) — only the step-0 comparison
   matches C. The post-Lanczos eigenvector / overlap pipeline is not
   ported.

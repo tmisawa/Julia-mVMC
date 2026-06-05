@@ -6,8 +6,10 @@
 
 ## テスト階層
 - unit: 小関数・純関数・小規模状態（外部ファイルなし、1秒以内）
-- contract: C 実装との対応仕様（小さな fixture を使用）
-- integration: 既存の `test/test_vmc_models.jl`（モデル全体比較）
+- contract: 入力仕様・runtime 互換性の固定（小さな fixture / 入力検証）
+- integration: C reference との突き合わせ。public repo では workspace root の
+  `test/integration/runtests.jl` が担当（`julia --project=@. test/integration/runtests.jl`）。
+  subpackage の `Pkg.test()` には含まれない別レイヤ。
 
 ## 追加対象ファイル（MVMCOptimizers.jl）
 
@@ -105,22 +107,36 @@
 - `make_minimal_state(data; n_sample=...)`
 
 ## 実行導線
-- `test/runtests.jl`:
-- unit test は常時実行
-- 統合テスト (`test_vmc_models.jl`) は `MVMC_INTEGRATION_TESTS=1` のときのみ実行
+- subpackage `test/runtests.jl`:
+- unit test（`test_unit/*.jl`）を常時実行。include 順は `INDEX.md` と同期する。
+- C reference との integration は subpackage には含めない。workspace root の
+  `test/integration/runtests.jl` で別途実行する（`julia --project=@. test/integration/runtests.jl`）。
+- 対応 Julia は 1.11+（`Project.toml` compat `julia = "1.11"`、CI は 1.11 / 1.12 を検証）。
+  `Manifest.toml` は gitignore 対象。ローカルで 1.11 / 1.12 を切り替える場合は、その version で
+  resolve（`Pkg.instantiate` / `Pkg.resolve`）し直すこと。
 
-## 実装順序（優先度）
-1. `test_unit_stochastic_opt.jl`
-2. `test_unit_vmc_sampling_rbm.jl`
-3. `test_trans_parser_spin_indices.jl`
-4. `test_read_input_parameters_rbm_layout.jl`
-5. `test_unit_vmc_main_cal_sr.jl`
+## 状態（v0.1 計画ぶんの達成状況）
+- 上記「追加対象ファイル」の unit/contract テストは全て実装・常時実行済み:
+  `test_unit_stochastic_opt.jl` / `test_unit_vmc_sampling_rbm.jl` /
+  `test_unit_vmc_sampling_proj.jl` / `test_unit_vmc_main_cal_sr.jl` /
+  `test_unit_parameter_sync.jl`、および parsers 側
+  `test_trans_parser_spin_indices.jl` / `test_read_input_parameters_rbm_layout.jl` /
+  `test_parameter_init_complexflag_rbm.jl`。
+- helper は `helpers/mock_state.jl`（`make_ele_num` / `apply_hop`）と
+  `helpers/mock_data.jl`（最小 `ExpertModeData` constructors）に集約済み。
+
+## v0.3 優先度
+詳細設計は `docs/superpowers/specs/2026-06-03-julia-mvmc-v0.3-unit-test-foundation-design.md`。
+
+1. [済] NSplitSize contract: runtime に `validate_supported_modpara` を追加し
+   `NSplitSize > 1` を `error()`/`ErrorException` で reject。
+   test: `test_unit/test_unit_unsupported_inputs.jl`。
+2. PhysCal production 対応 + PhysCal C-reference fixtures。
+3. DH2/DH4・InDH2/InDH4 と warn-only 入力互換。
+4. OpenMP 相当の Julia threading（thread-local accumulator / timer / RNG state）。
 
 ## 再開コマンド
 - 単体確認:
-- `julia --project=@. -e 'include("test_unit/test_unit_stochastic_opt.jl")'`
+- `julia --project=@. -e 'include("test_unit/<file>.jl")'`
 - 全体確認:
-- `julia --project=@. -e 'include("test/runtests.jl")'`
-
-## 次の着手ファイル
-- （要相談）次の unit/contract テスト対象を選定
+- `julia --project=@. -e 'using Pkg; Pkg.test()'`
