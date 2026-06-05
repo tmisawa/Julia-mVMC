@@ -85,6 +85,17 @@
     - エラーメッセージに `NSplitSize > 1` と `MPI parallelization is not supported` を含む
     - 検証は型ではなくメッセージ部分文字列で行う（design review A2）
 
+### `src/green_func_calc.jl` + `vmc_phys_cal.jl`（factored two-body Green）
+- `test_unit/test_unit_physcal_factored_green.jl`
+  - `PhysicalQuantities index fields` → `cis_ajs_idx` / `cis_ajs_ckt_alt_idx`
+  - `canonical one-body list` → `build_canonical_cis_ajs_idx`（greenone 先頭 → greentwoex 構成 append・dedup・site 範囲・spin 検証）
+  - `factored index resolution is 1-based` → `resolve_cis_ajs_ckt_alt_idx`（C index 0 → Julia 1）
+  - `factored accumulation` → `accumulate_factored_green!`（`w·local[idx0]·conj(local[idx1])`）
+  - `output: canonical cisajs + factored ex` → `output_green_func!`（canonical 出力 / output_dir / `_001` 番号）
+  - `PhysCal output file index uses NDataIdxStart` → `physcal_output_file_index`
+  - `no TwoBodyGEx preserves greenone order and duplicates` → 既存 direct 経路の互換回帰
+  - `FSZ + factored is rejected` → `validate_factored_green_supported`（public path `vmc_phys_cal!` 経由も検証）
+
 ---
 
 ## 参考: MVMCExpertModeParsers.jl 側の contract テスト
