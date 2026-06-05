@@ -7,6 +7,7 @@ using MVMCExpertModeParsers
 
 # Include test files
 include("test_parsers.jl")
+include("test_green_two_ex_parser.jl")
 include("test_integration.jl")
 include("test_validation.jl")
 include("test_utils.jl")

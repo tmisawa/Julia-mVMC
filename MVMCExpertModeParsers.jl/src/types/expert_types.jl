@@ -380,6 +380,32 @@ struct GreenTwoTerm
 end
 
 """
+    GreenTwoExTerm
+
+Factored (product-side) two-body Green's function term, `TwoBodyGEx` /
+`greentwoex.def`. Each term names two one-body Green's functions whose product
+`⟨c†_{i1} c_{j1}⟩ · conj(⟨c†_{i2} c_{j2}⟩)` is accumulated by PhysCal.
+
+The 8 input columns `x0 x1 x2 x3 x4 x5 x6 x7` map with C's reorder absorbed
+(see `GetInfoTwoBodyGEx` in mVMC `readdef.c`):
+- first one-body Green  `⟨c†_{x0,x1} c_{x2,x3}⟩`  → `(site_i1,spin_i1,site_j1,spin_j1)`
+- second one-body Green `⟨c†_{x6,x7} c_{x4,x5}⟩`  → `(site_i2,spin_i2,site_j2,spin_j2)`
+
+Spins are kept as integers (0 = up, 1 = down) to match the integer lookup used
+when resolving these to one-body Green indices (Plan 2).
+"""
+struct GreenTwoExTerm
+    site_i1::Int
+    spin_i1::Int
+    site_j1::Int
+    spin_j1::Int
+    site_i2::Int
+    spin_i2::Int
+    site_j2::Int
+    spin_j2::Int
+end
+
+"""
     QPTransTerm
 
 Quantum projection translation term.
@@ -624,6 +650,7 @@ mutable struct ExpertModeData
     # Green's function measurements
     green_one_terms::Vector{GreenOneTerm}
     green_two_terms::Vector{GreenTwoTerm}
+    green_two_ex_terms::Vector{GreenTwoExTerm}  # TwoBodyGEx / greentwoex.def (factored)
 
     # Quantum projection
     qptrans_terms::Vector{QPTransTerm}
@@ -690,6 +717,7 @@ mutable struct ExpertModeData
             0,  # gutzwiller_idx, jastrow_idx, n_gutzwiller_idx, n_jastrow_idx
             GreenOneTerm[],
             GreenTwoTerm[],
+            GreenTwoExTerm[],
             QPTransTerm[],
             ComplexF64[],
             0,
