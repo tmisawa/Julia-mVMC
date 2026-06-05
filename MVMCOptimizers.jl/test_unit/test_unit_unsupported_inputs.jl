@@ -66,3 +66,37 @@ end
         end
     end
 end
+
+@testset "unit/unsupported_inputs: NLanczosMode contract" begin
+    # NLanczosMode = 0 (variational only) is the supported setting: no-op.
+    @testset "NLanczosMode = 0 is accepted" begin
+        modpara = ModParaParameters(lanczos_mode = 0)
+        @test MVMCOptimizers.validate_supported_modpara(modpara) === nothing
+    end
+
+    # NLanczosMode > 0 (full Lanczos) is rejected: only step-0 matches C and the
+    # C indirect one-body Green list (NLanczosMode > 1) is not reproduced.
+    @testset "NLanczosMode > 0 is rejected with a clear message" begin
+        for bad in (1, 2)
+            modpara = ModParaParameters(lanczos_mode = bad)
+            threw, msg = capture_error_message(
+                () -> MVMCOptimizers.validate_supported_modpara(modpara),
+            )
+            @test threw
+            @test occursin("NLanczosMode > 0", msg)
+            # Must not be mislabeled as the MPI-unsupported case.
+            @test !occursin("MPI parallelization is not supported", msg)
+        end
+    end
+
+    # Enforced at the independent runtime entry points before any work.
+    @testset "entry points enforce the contract" begin
+        for entry in (vmc_para_opt!, vmc_phys_cal!)
+            data = ExpertModeData()
+            data.modpara.lanczos_mode = 2
+            threw, msg = capture_error_message(() -> entry(data))
+            @test threw
+            @test occursin("NLanczosMode > 0", msg)
+        end
+    end
+end

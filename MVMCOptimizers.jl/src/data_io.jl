@@ -224,10 +224,10 @@ end
 Output Green's functions to files.
 Equivalent to C's `outputData()` Green's function output section.
 
-Output files:
+Output files (XXX = ismp + NDataIdxStart):
 - zvo_cisajs_XXX.dat: 1-body Green's function <c†_i c_j>
-- zvo_cisajscktalt_XXX.dat: 2-body correlation (product)
-- zvo_cisajscktaltdc_XXX.dat: 2-body correlation (direct)
+- zvo_cisajscktaltex_XXX.dat: factored two-body Green (product / `TwoBodyGEx`)
+- zvo_cisajscktalt_XXX.dat: direct two-body Green (`TwoBodyG`)
 If `output_dir` is set, files are written under that directory.
 """
 function output_green_func!(data::ExpertModeData, state::VMCOptimizationState, ismp::Int; output_dir::Union{String,Nothing}=nothing)

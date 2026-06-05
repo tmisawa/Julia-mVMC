@@ -84,6 +84,9 @@
     - `NSplitSize > 1` は `error()` で reject（MPI 未サポート）
     - エラーメッセージに `NSplitSize > 1` と `MPI parallelization is not supported` を含む
     - 検証は型ではなくメッセージ部分文字列で行う（design review A2）
+  - `unit/unsupported_inputs: NLanczosMode contract` → `validate_supported_modpara`
+    - `NLanczosMode = 0` は許容、`> 0`（1/2）は `error()` で reject（full Lanczos 未サポート / C の indirect one-body list 非再現）
+    - `vmc_para_opt!` / `vmc_phys_cal!` の両 entry point で enforce、メッセージに `NLanczosMode > 0` を含む
 
 ### `src/green_func_calc.jl` + `vmc_phys_cal.jl`（factored two-body Green）
 - `test_unit/test_unit_physcal_factored_green.jl`
