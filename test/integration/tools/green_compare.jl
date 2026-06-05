@@ -113,23 +113,25 @@ function _compare_value_only(jl_path, c_path; rtol, atol)
     isfile(c_path) || return _green_fail("reference missing: $c_path"; rtol, atol)
     raw_jl = read(jl_path, String)
     raw_c = read(c_path, String)
-    if raw_jl == raw_c
-        return GreenCompareResult(
-            true, true, false, length(split(strip(raw_c))), 0.0, 0.0, rtol, atol, "exact",
-        )
-    end
 
     # The factored file is value-only with ALL values on a single line (C's
-    # vmcmain.c writes "% .18e  % .18e " in a loop then one newline). The numeric
-    # fallback below flattens all whitespace, so it must NOT be reached for a file
-    # that drifted to one-pair-per-line: enforce the single-line invariant first,
-    # otherwise a layout regression with identical values would pass on fallback.
+    # vmcmain.c writes "% .18e  % .18e " in a loop then one newline). Enforce that
+    # invariant *before* the raw-byte exact check, so even a byte-identical
+    # multi-line pair is rejected — the helper's contract is "factored is one
+    # line", and the numeric fallback flattens whitespace so it must not be a way
+    # in for a layout regression.
     jl_nlines = length(_green_lines(raw_jl))
     c_nlines = length(_green_lines(raw_c))
     if jl_nlines != 1 || c_nlines != 1
         return _green_fail(
             "factored file must be a single line of values; julia=$jl_nlines ref=$c_nlines non-empty lines";
             rtol, atol,
+        )
+    end
+
+    if raw_jl == raw_c
+        return GreenCompareResult(
+            true, true, false, length(split(strip(raw_c))), 0.0, 0.0, rtol, atol, "exact",
         )
     end
 

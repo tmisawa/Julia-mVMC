@@ -86,6 +86,13 @@ end
         bad = _wf(dir, "bad.dat", "2.5 -1.0\n0.3 0.1\n")           # 2 lines, same values
         r = compare_green_factored(bad, ref)
         @test !r.ok && occursin("single line", r.detail)
+
+        # Even a byte-identical multi-line pair is rejected: the single-line
+        # invariant is checked before the raw-byte exact shortcut.
+        m1 = _wf(dir, "m1.dat", "2.5 -1.0\n0.3 0.1\n")
+        m2 = _wf(dir, "m2.dat", "2.5 -1.0\n0.3 0.1\n")
+        rm = compare_green_factored(m1, m2)
+        @test !rm.ok && !rm.exact && occursin("single line", rm.detail)
     end
 end
 

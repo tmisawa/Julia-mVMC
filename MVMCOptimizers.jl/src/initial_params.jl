@@ -157,8 +157,8 @@ as [`read_initial_def!`](@ref) (see [`_load_para_triples!`](@ref)), but built fo
 a deterministic gate rather than an optional warm-start overlay:
 
 - **Fails hard** (`error`) instead of `@warn`+`false` on a missing file, a
-  non-numeric token, a too-short or trailing-garbage record, or an unsupported
-  block (RBM / DoublonHolon / OptTrans).
+  non-numeric or non-finite (`NaN`/`Inf`) token, a too-short or trailing-garbage
+  record, or an unsupported block (RBM / DoublonHolon / OptTrans).
 - **Returns the number of parameters consumed** (`n_proj + n_slater`) so the
   caller can assert the fixed parameters were actually applied; errors if zero.
 - Does **not** perturb (the C test driver's `random.uniform` perturbation is
