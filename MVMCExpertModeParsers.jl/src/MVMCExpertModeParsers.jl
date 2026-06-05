@@ -82,6 +82,10 @@ function parse_expert_mode_files(namelist_path::String)::ExpertModeData
     data = ExpertModeData()
     errors = String[]
     warnings = String[]
+    # TwoBodyGEx (factored Green) is required-if-present: record a fatal failure
+    # and rethrow AFTER the outer try/catch below, which would otherwise swallow
+    # an in-loop error and return an empty green_two_ex_terms list.
+    twobodygex_fatal = nothing
 
     try
         # Read namelist.def to get file list
@@ -93,6 +97,10 @@ function parse_expert_mode_files(namelist_path::String)::ExpertModeData
             full_path = joinpath(base_dir, file_path)
 
             if !validate_file_exists(full_path)
+                if file_type == "TwoBodyGEx"
+                    twobodygex_fatal = "Required TwoBodyGEx file not found: $full_path"
+                    break   # stop parsing; post-loop work is guarded below
+                end
                 warning_msg = "File not found: $full_path"
                 push!(warnings, warning_msg)
                 @warn warning_msg
@@ -102,6 +110,10 @@ function parse_expert_mode_files(namelist_path::String)::ExpertModeData
             try
                 parse_file_by_type!(data, file_type, full_path)
             catch e
+                if file_type == "TwoBodyGEx"
+                    twobodygex_fatal = "Error parsing required TwoBodyGEx file $full_path: $e"
+                    break   # stop parsing; post-loop work is guarded below
+                end
                 error_msg = "Error parsing $file_type file $full_path: $e"
                 push!(warnings, error_msg)  # Treat as warning, not error
                 @warn error_msg
@@ -109,6 +121,9 @@ function parse_expert_mode_files(namelist_path::String)::ExpertModeData
             end
         end
 
+        # Skip all post-loop processing when a required TwoBodyGEx file failed:
+        # the run is about to error, so avoid spurious warnings / side effects.
+        if twobodygex_fatal === nothing
         # RBM OptFlag is defined in RBM idx files and uses C-specific block offsets.
         # Apply it after all RBM files are parsed, independent of namelist order.
         apply_rbm_opt_flags_from_files!(data, file_list, base_dir)
@@ -144,11 +159,18 @@ function parse_expert_mode_files(namelist_path::String)::ExpertModeData
         else
             @info "Parsing completed successfully"
         end
+        end  # if twobodygex_fatal === nothing
 
     catch e
         error_msg = "Critical error in parse_expert_mode_files: $e"
         push!(errors, error_msg)
         @error error_msg
+    end
+
+    # TwoBodyGEx failures are fatal on the public path (spec Finding 4). Throw
+    # here — outside the outer try/catch — so the error is not swallowed.
+    if twobodygex_fatal !== nothing
+        error(twobodygex_fatal)
     end
 
     return data
@@ -517,6 +539,15 @@ function parse_file_by_type!(data::ExpertModeData, file_type::String, file_path:
         result = parse_green_two_def(file_path)
         if result.success
             data.green_two_terms = result.data
+        end
+    elseif file_type == "TwoBodyGEx"
+        result = parse_green_two_ex_def(file_path)
+        if result.success
+            data.green_two_ex_terms = result.data
+        else
+            # Fatal: a present-but-unparseable factored definition must never
+            # degrade silently into an empty list (spec Finding 4).
+            error("Failed to parse TwoBodyGEx file '$file_path': $(result.error_message)")
         end
     elseif file_type == "QPTrans"
         result = parse_qptrans_def(file_path)

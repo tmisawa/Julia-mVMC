@@ -104,3 +104,45 @@ end
             _greentwoex_raw("NCisAjsCktAlt -1", ["0 0 0 0 0 0 0 0"])).success
     end
 end
+
+using MVMCExpertModeParsers: parse_file_by_type!
+
+@testset "TwoBodyGEx dispatch" begin
+    mktempdir() do dir
+        good = joinpath(dir, "greentwoex.def")
+        write(good, _greentwoex(1, ["0 0 1 0 2 1 3 1"]))
+        data = ExpertModeData()
+        parse_file_by_type!(data, "TwoBodyGEx", good)
+        @test length(data.green_two_ex_terms) == 1
+        @test data.green_two_ex_terms[1].site_i2 == 3  # reorder preserved through dispatch
+
+        # A malformed factored file must be fatal, not silently empty.
+        bad = joinpath(dir, "bad_greentwoex.def")
+        write(bad, _greentwoex(2, ["0 0 1 0 2 1 3 1"]))  # header 2, one row
+        data2 = ExpertModeData()
+        @test_throws ErrorException parse_file_by_type!(data2, "TwoBodyGEx", bad)
+    end
+end
+
+# parse_expert_mode_files is exported; `using MVMCExpertModeParsers` (top of file)
+# brings it into scope.
+@testset "TwoBodyGEx is fatal on the public parse_expert_mode_files path" begin
+    # Valid: factored terms reach the public ExpertModeData.
+    mktempdir() do dir
+        write(joinpath(dir, "greentwoex.def"), _greentwoex(1, ["0 0 1 0 2 1 3 1"]))
+        write(joinpath(dir, "namelist.def"), "      TwoBodyGEx  greentwoex.def\n")
+        d = parse_expert_mode_files(joinpath(dir, "namelist.def"))
+        @test length(d.green_two_ex_terms) == 1
+    end
+    # Malformed greentwoex.def is fatal (not a swallowed warning).
+    mktempdir() do dir
+        write(joinpath(dir, "greentwoex.def"), _greentwoex(2, ["0 0 1 0 2 1 3 1"]))
+        write(joinpath(dir, "namelist.def"), "      TwoBodyGEx  greentwoex.def\n")
+        @test_throws ErrorException parse_expert_mode_files(joinpath(dir, "namelist.def"))
+    end
+    # Missing greentwoex.def is fatal.
+    mktempdir() do dir
+        write(joinpath(dir, "namelist.def"), "      TwoBodyGEx  greentwoex.def\n")
+        @test_throws ErrorException parse_expert_mode_files(joinpath(dir, "namelist.def"))
+    end
+end
