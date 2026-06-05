@@ -68,11 +68,14 @@ include("unsupported_inputs.jl")
 include("vmc_para_opt.jl")
 include("vmc_phys_cal.jl")
 include("run_para_opt_from_namelist.jl")
+include("run_phys_cal_from_namelist.jl")
 
 # Export main functions
 export vmc_para_opt!
 export vmc_phys_cal!
 export run_para_opt_from_namelist
+export run_phys_cal_from_namelist
 export read_initial_def!
+export read_opt_para_file!
 
 end # module MVMCOptimizers

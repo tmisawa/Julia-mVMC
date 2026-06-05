@@ -101,6 +101,24 @@
   - `no TwoBodyGEx preserves greenone order and duplicates` → 既存 direct 経路の互換回帰
   - `FSZ + factored is rejected` → `validate_factored_green_supported`（public path `vmc_phys_cal!` 経由も検証）
 
+### `src/initial_params.jl`（fixed-parameter loader, Plan 3a）
+- `test_unit/test_unit_read_opt_para.jl`
+  - `read_opt_para_file!: golden load + consumed count` → 6+triples レイアウトを Gutzwiller/Jastrow/Slater に読み込み、消費数（n_proj+n_slater）を返す
+  - `non-perturbing (idempotent) load` → 二重ロードで同一（RNG 非依存）
+  - `strict failures error with a clear message` → 欠損 / 空 / short / trailing（1 float・whole triple=OptTrans）/ non-numeric token を `error()`（メッセージ部分文字列で検証）
+  - `DoublonHolon models are rejected (scope guard)` → DH ありは reject（C は DH triple を Slater 前に並べるため・design-review LOADER-1）
+  - `read_initial_def! still loads the same layout (delegation regression)` → 共有 `_load_para_triples!` への委譲後も成功/欠損 warn+false が不変
+
+### `src/run_phys_cal_from_namelist.jl`（PhysCal runner, Plan 3a）
+- `test_unit/test_unit_run_phys_cal_runner.jl`（Pkg.test）
+  - `argument validation` → mode（:real/:cmp/:fsz）検証・`opt_para` は必須 kwarg。runner は `init_parameter!`/`init_qp_weight!` を呼ばず `vmc_phys_cal!` に委譲（RNG 二重消費回避）
+- `../../test/integration/test_run_phys_cal_contract.jl`（CI: integration runtests 経由）
+  - `errors at the loader, before sampling` → 既存 fixture(heisenberg_chain_real) で parse 成功後、欠損/short な `opt_para` を sampling 前に `read_opt_para_file!` error（出力 dir 未作成も確認）。数値 e2e は Plan 3b gate
+
+### `test/integration/tools/green_compare.jl`（Green ファイル比較 helper, Plan 3a / 3b gate 用）
+- `test/integration/tools/test_green_compare.jl`（CI: integration runtests 経由 + 単体実行可）
+  - raw-byte exact → 数値 fallback（per-quantity: one-body rtol 1e-10 / factored・DC rtol 1e-9, atol 1e-12）。index 列は厳密一致、行/列/値数不一致・tol 超過は hard fail。raw-byte は trailing 空白に敏感（strip しない）。factored は単一行フォーマットを fallback 前に強制（layout regression guard）
+
 ---
 
 ## 参考: MVMCExpertModeParsers.jl 側の contract テスト

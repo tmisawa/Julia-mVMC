@@ -92,3 +92,9 @@ end
         end
     end
 end
+
+# Plan 3a prerequisites (pure Julia, no C binary): the Green-file comparison
+# helpers and the PhysCal runner's parse->loader contract. Included here so they
+# run in the CI "Run integration tests" step alongside the fixture replay.
+include(joinpath(@__DIR__, "tools", "test_green_compare.jl"))
+include(joinpath(@__DIR__, "test_run_phys_cal_contract.jl"))
