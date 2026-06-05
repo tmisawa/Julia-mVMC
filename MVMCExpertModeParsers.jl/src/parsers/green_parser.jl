@@ -270,3 +270,116 @@ function parse_green_two_term(
 
     return GreenTwoTerm(site1, site2, site3, site4, spin1, spin2, spin3, spin4)
 end
+
+"""
+    parse_green_two_ex_def(filepath::String) -> ParseResult{Vector{GreenTwoExTerm}}
+
+Parse a `greentwoex.def` (`TwoBodyGEx`) file from a path.
+"""
+function parse_green_two_ex_def(filepath::String)::ParseResult{Vector{GreenTwoExTerm}}
+    try
+        content = read_def_file(filepath)
+        return parse_green_two_ex_content(content)
+    catch e
+        return ParseResult{Vector{GreenTwoExTerm}}(false, nothing, "Error reading file: $e", 0)
+    end
+end
+
+"""
+    parse_green_two_ex_content(content::String) -> ParseResult{Vector{GreenTwoExTerm}}
+
+Parse `greentwoex.def` content. Strict (spec Findings 3, 4):
+
+- The header count is read from line 2, token 2 (`<keyword> <count>`) and must
+  be a non-negative integer (token 2 specifically, per C's `ReadBuffInt`).
+- Each non-empty data row (from line 6) must contain exactly eight integer
+  fields; spins must be 0 or 1; sites must be non-negative. Any violation is an
+  error surfaced to the caller (rows are not silently skipped).
+- The number of parsed rows must equal the header count.
+
+Columns `x0 x1 x2 x3 x4 x5 x6 x7` map to two one-body Green specs with C's
+reorder: first `(x0,x1,x2,x3)`, second `(x6,x7,x4,x5)`.
+"""
+function parse_green_two_ex_content(content::String)::ParseResult{Vector{GreenTwoExTerm}}
+    context = ParsingContext("greentwoex.def")
+    terms = GreenTwoExTerm[]
+    lines = split(content, '\n')
+
+    # Header count from line 2: require `<keyword> <count>` with the count in
+    # token position 2, matching C's ReadBuffInt (`sscanf(ctmp2, "%s %d", ...)`).
+    # Do NOT accept "the first integer token anywhere on the line" (Finding 2).
+    header_count = -1
+    if length(lines) >= 2
+        header_tokens = split_def_line(clean_line(lines[2]))
+        if length(header_tokens) >= 2
+            parsed_count = tryparse(Int, header_tokens[2])
+            if parsed_count !== nothing && parsed_count >= 0
+                header_count = parsed_count
+            end
+        end
+    end
+    if header_count < 0
+        return ParseResult{Vector{GreenTwoExTerm}}(
+            false, nothing,
+            "greentwoex.def: missing or invalid header count on line 2 (expected `<keyword> <count>`)",
+            2,
+        )
+    end
+
+    IGNORE_LINES_IN_DEF = 5
+    for line_num = (IGNORE_LINES_IN_DEF + 1):length(lines)
+        context.line_number = line_num
+        cleaned = clean_line(lines[line_num])
+        isempty(cleaned) && continue
+
+        tokens = split_def_line(cleaned)
+        if length(tokens) != 8
+            push!(context.errors,
+                "Line $line_num: expected exactly 8 integer fields, got $(length(tokens))")
+            continue
+        end
+
+        vals = Vector{Int}(undef, 8)
+        ok = true
+        for i = 1:8
+            v = tryparse(Int, tokens[i])
+            if v === nothing
+                push!(context.errors, "Line $line_num: field $i is not an integer: '$(tokens[i])'")
+                ok = false
+                break
+            end
+            vals[i] = v
+        end
+        ok || continue
+
+        # vals = (x0,x1,x2,x3,x4,x5,x6,x7)
+        sites = (vals[1], vals[3], vals[7], vals[5])     # i1, j1, i2, j2
+        spins = (vals[2], vals[4], vals[8], vals[6])     # spins of the above
+        if any(<(0), sites)
+            push!(context.errors, "Line $line_num: negative site index in $(Tuple(vals))")
+            continue
+        end
+        if any(s -> s < 0 || s > 1, spins)
+            push!(context.errors, "Line $line_num: spin must be 0 or 1 in $(Tuple(vals))")
+            continue
+        end
+
+        push!(terms, GreenTwoExTerm(
+            vals[1], vals[2], vals[3], vals[4],   # site_i1, spin_i1, site_j1, spin_j1 = x0,x1,x2,x3
+            vals[7], vals[8], vals[5], vals[6],   # site_i2, spin_i2, site_j2, spin_j2 = x6,x7,x4,x5
+        ))
+    end
+
+    if isempty(context.errors) && length(terms) != header_count
+        push!(context.errors,
+            "greentwoex.def: header count $header_count does not match parsed rows $(length(terms))")
+    end
+
+    success = isempty(context.errors)
+    return ParseResult{Vector{GreenTwoExTerm}}(
+        success,
+        success ? terms : nothing,
+        join(context.errors, "; "),
+        context.line_number,
+    )
+end
