@@ -54,8 +54,9 @@ active is not reproducible bit-for-bit.
 | File | Status / reason |
 |------|--------|
 | `pairhop.def` (`PairHop`) | Pair-hopping interaction not wired into `CalculateHamiltonian`. |
-| `dh2.def` / `dh4.def` (`DH2`, `DH4`) | Doublon-holon correlator stubs only. |
-| `InDH2.def`, `InDH4.def` | `read_input_parameters!` emits a warning and skips (not yet wired into the `Proj` array layout). |
+| `spinjastrow.def` (`SpinJastrow`) | Not implemented; parser hard-fails if the keyword is present because it would change projection offsets. |
+| `dh2.def` / `dh4.def` (`DH2`, `DH4`) | Parsed as C-compatible doublon-holon index tables and included in projection layout, but VMC execution rejects them until DH-2 wires counters/logs/loaders. |
+| `InDH2.def`, `InDH4.def` | `read_input_parameters!` emits a warning and skips (DH parameter overlays are not executable until DH-2). |
 | `InOrbitalParallel.def` | `read_input_parameters!` emits a warning and skips (the C-side `iNOrbitalAntiParallel` offset path is not yet implemented). |
 | `InOptTrans.def` | `read_input_parameters!` emits a warning and skips. The `FlagOptTrans` gate and `OptTrans[]` storage do not exist on the Julia side yet. |
 | `OptTrans` block in `initial.def` | Refused with a warning by `read_initial_def!` because `FlagOptTrans` / `OptTrans[]` are not implemented yet. |

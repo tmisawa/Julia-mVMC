@@ -103,6 +103,10 @@ for provenance and regeneration instructions.
 
 - **BackFlow** correlation factor (`vmc_bf_*` entry points raise an error
   in this release; inputs that activate Back Flow are not supported).
+- **Doublon-holon execution** (`DH2` / `DH4` index tables are parsed and
+  laid out in the C projection order, but `vmc_para_opt!`, `vmc_phys_cal!`,
+  and initial-parameter loading reject active DH inputs until DH-2 wires the
+  remaining runtime path).
 - **MPI parallelisation** (`NSplitSize > 1` raises an unsupported-MPI
   error until MPI support is implemented; `NSplitSize = 1` is the only
   supported setting).

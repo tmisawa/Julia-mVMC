@@ -574,7 +574,8 @@ end
 """
     validate_doublon_holon_2site_terms(terms::Vector{DoublonHolon2SiteTerm}, nsite::Int) -> ValidationResult
 
-Validate Doublon-Holon 2-site terms for consistency.
+Deprecated compatibility shim for the pre-DH-1 value-bearing DH2 term API.
+Runtime data validates `DoublonHolon2SiteIndex` tables instead.
 """
 function validate_doublon_holon_2site_terms(
     terms::Vector{DoublonHolon2SiteTerm},
@@ -613,7 +614,8 @@ end
 """
     validate_doublon_holon_4site_terms(terms::Vector{DoublonHolon4SiteTerm}, nsite::Int) -> ValidationResult
 
-Validate Doublon-Holon 4-site terms for consistency.
+Deprecated compatibility shim for the pre-DH-1 value-bearing DH4 term API.
+Runtime data validates `DoublonHolon4SiteIndex` tables instead.
 """
 function validate_doublon_holon_4site_terms(
     terms::Vector{DoublonHolon4SiteTerm},
@@ -651,14 +653,64 @@ function validate_doublon_holon_4site_terms(
             )
         end
 
-        # Check for duplicate sites
-        sites = [term.site1, term.site2, term.site3, term.site4]
-        if length(unique(sites)) < length(sites)
-            push!(warnings, "DoublonHolon4Site term $i: duplicate sites detected")
+        if length(unique([term.site1, term.site2, term.site3, term.site4])) < 4
+            push!(warnings, "DoublonHolon4Site term $i: duplicate sites in 4-site term")
         end
 
         if abs(term.value) > 1e10
             push!(warnings, "DoublonHolon4Site term $i: very large value $(term.value)")
+        end
+    end
+
+    return ValidationResult(length(errors) == 0, errors, warnings)
+end
+
+function validate_doublon_holon_2site_indices(
+    indices::Vector{DoublonHolon2SiteIndex},
+    nsite::Int,
+)::ValidationResult
+    errors = String[]
+    warnings = String[]
+
+    for (idx, table) in enumerate(indices)
+        if size(table.neighbors, 1) != nsite || size(table.neighbors, 2) != 2
+            push!(errors, "DH2 index $(idx - 1): neighbors must be $nsite x 2")
+            continue
+        end
+        for site = 1:nsite, col = 1:2
+            neighbor = table.neighbors[site, col]
+            if neighbor < 0 || neighbor >= nsite
+                push!(
+                    errors,
+                    "DH2 index $(idx - 1) site $(site - 1) neighbor $(col - 1)=$neighbor out of range [0, $(nsite - 1)]",
+                )
+            end
+        end
+    end
+
+    return ValidationResult(length(errors) == 0, errors, warnings)
+end
+
+function validate_doublon_holon_4site_indices(
+    indices::Vector{DoublonHolon4SiteIndex},
+    nsite::Int,
+)::ValidationResult
+    errors = String[]
+    warnings = String[]
+
+    for (idx, table) in enumerate(indices)
+        if size(table.neighbors, 1) != nsite || size(table.neighbors, 2) != 4
+            push!(errors, "DH4 index $(idx - 1): neighbors must be $nsite x 4")
+            continue
+        end
+        for site = 1:nsite, col = 1:4
+            neighbor = table.neighbors[site, col]
+            if neighbor < 0 || neighbor >= nsite
+                push!(
+                    errors,
+                    "DH4 index $(idx - 1) site $(site - 1) neighbor $(col - 1)=$neighbor out of range [0, $(nsite - 1)]",
+                )
+            end
         end
     end
 
@@ -790,17 +842,17 @@ function validate_expert_mode_data(data::ExpertModeData)::ValidationResult
         append!(warnings, general_rbm_phys_hidden_result.warnings)
     end
 
-    # Validate Doublon-Holon terms
-    if !isempty(data.doublon_holon_2site_terms)
+    # Validate Doublon-Holon index tables
+    if !isempty(data.doublon_holon_2site_indices)
         doublon_holon_2site_result =
-            validate_doublon_holon_2site_terms(data.doublon_holon_2site_terms, nsite)
+            validate_doublon_holon_2site_indices(data.doublon_holon_2site_indices, nsite)
         append!(errors, doublon_holon_2site_result.errors)
         append!(warnings, doublon_holon_2site_result.warnings)
     end
 
-    if !isempty(data.doublon_holon_4site_terms)
+    if !isempty(data.doublon_holon_4site_indices)
         doublon_holon_4site_result =
-            validate_doublon_holon_4site_terms(data.doublon_holon_4site_terms, nsite)
+            validate_doublon_holon_4site_indices(data.doublon_holon_4site_indices, nsite)
         append!(errors, doublon_holon_4site_result.errors)
         append!(warnings, doublon_holon_4site_result.warnings)
     end

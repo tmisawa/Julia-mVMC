@@ -186,18 +186,17 @@ function read_input_parameters!(data::ExpertModeData, namelist_path::String)
         elseif file_type == "InDH2"
             full_path = joinpath(base_dir, file_path)
             if validate_file_exists(full_path)
-                params = parse_input_parameter_file(full_path)
-                # Update DH2 terms (stored in doublon_holon_2site_terms)
-                # Note: C implementation uses Proj array with offset
-                # We need to map to the appropriate terms
-                # For now, we'll skip this as it requires understanding the DH2 structure
+                parse_input_parameter_file(full_path)
+                # DH-1 parses DH index tables but does not yet consume InDH overlays.
+                # DH-2 will validate local indices and write into the DH Proj slice.
                 @warn "InDH2.def parsing not yet fully implemented"
             end
         elseif file_type == "InDH4"
             full_path = joinpath(base_dir, file_path)
             if validate_file_exists(full_path)
-                params = parse_input_parameter_file(full_path)
-                # Update DH4 terms (stored in doublon_holon_4site_terms)
+                parse_input_parameter_file(full_path)
+                # DH-1 parses DH index tables but does not yet consume InDH overlays.
+                # DH-2 will validate local indices and write into the DH Proj slice.
                 @warn "InDH4.def parsing not yet fully implemented"
             end
         elseif file_type == "InOrbital" || file_type == "InOrbitalAntiParallel"
@@ -320,9 +319,9 @@ function set_projection_opt_flags!(
         return
     end
 
-    n_gutz = max(data.n_gutzwiller_idx, length(data.gutzwiller_terms))
-    n_jast = max(data.n_jastrow_idx, length(data.jastrow_terms))
-    n_proj = n_gutz + n_jast
+    layout = projection_layout(data)
+    n_gutz = layout.n_gutzwiller
+    n_proj = layout.n_proj
 
     # Ensure size for projection parameters (orbital parameters may be added later)
     ensure_optimization_flags_size!(data, 2 * n_proj)
@@ -365,7 +364,7 @@ function set_orbital_opt_flags!(data::ExpertModeData, opt_flags::Dict{Int,Int})
     end
 
     # Calculate fidx offset: NProj + FlagRBM * NRBM
-    n_proj = length(data.gutzwiller_terms) + length(data.jastrow_terms)
+    n_proj = projection_layout(data).n_proj
     n_rbm = count_rbm_parameters(data)
     flag_rbm = n_rbm > 0 ? 1 : 0
     fidx_offset = n_proj + flag_rbm * n_rbm
@@ -406,7 +405,7 @@ function set_rbm_opt_flags!(
 )
     isempty(opt_flags) && return
 
-    n_proj = length(data.gutzwiller_terms) + length(data.jastrow_terms)
+    n_proj = projection_layout(data).n_proj
     n_rbm = count_rbm_parameters(data)
     flag_rbm = n_rbm > 0 ? 1 : 0
     n_para = n_proj + flag_rbm * n_rbm + data.modpara.n_orbital_idx
@@ -427,9 +426,12 @@ end
 
 # Helper function to get all_complex flag (local to this module)
 function _get_all_complex_flag_local(data::ExpertModeData)::Bool
-    # Check if orbital parameters are complex
-    if !isempty(data.orbital_terms)
-        return any(t -> t.is_complex, data.orbital_terms)
-    end
-    return false
+    return (
+        data.modpara.complex_flag != 0 ||
+        any(t -> t.is_complex, data.gutzwiller_terms) ||
+        any(t -> t.is_complex, data.jastrow_terms) ||
+        data.doublon_holon_2site_complex ||
+        data.doublon_holon_4site_complex ||
+        any(t -> t.is_complex, data.orbital_terms)
+    )
 end

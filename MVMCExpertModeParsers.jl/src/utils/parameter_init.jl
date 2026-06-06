@@ -45,15 +45,19 @@ function init_parameter!(data::ExpertModeData; rng::AbstractRNG = SFMT19937RNG()
     for term in data.jastrow_terms
         term.value = ComplexF64(0.0)
     end
+    fill!(data.doublon_holon_2site_params, 0.0 + 0.0im)
+    fill!(data.doublon_holon_4site_params, 0.0 + 0.0im)
 
     # C uses AllComplexFlag across variational-factor groups (not only ModPara.ComplexType).
     gutzwiller_complex_flag = any(term -> term.is_complex, data.gutzwiller_terms)
     jastrow_complex_flag = any(term -> term.is_complex, data.jastrow_terms)
+    dh_complex_flag = data.doublon_holon_2site_complex || data.doublon_holon_4site_complex
     orbital_complex_flag = any(term -> term.is_complex, data.orbital_terms)
     all_complex_flag =
         modpara.complex_flag != 0 ||
         gutzwiller_complex_flag ||
         jastrow_complex_flag ||
+        dh_complex_flag ||
         orbital_complex_flag
 
     # Initialize RBM parameters if FlagRBM > 0
@@ -71,7 +75,7 @@ function init_parameter!(data::ExpertModeData; rng::AbstractRNG = SFMT19937RNG()
     )
 
     if flag_rbm
-        n_proj = length(data.gutzwiller_terms) + length(data.jastrow_terms)
+        n_proj = projection_layout(data).n_proj
         rbm_sections = (
             data.charge_rbm_phys_layer_terms,
             data.spin_rbm_phys_layer_terms,
@@ -152,7 +156,7 @@ function init_parameter!(data::ExpertModeData; rng::AbstractRNG = SFMT19937RNG()
     # C: AllComplexFlag = iComplexFlgGutzwiller + iComplexFlgJastrow + iComplexFlgDH2 + iComplexFlgDH4 + iComplexFlgOrbital
     # iComplexFlgOrbital comes from ComplexType header in orbital files (orbitalidx.def, orbitalidxpara.def)
     # If any term-group is complex, AllComplexFlag != 0.
-    n_proj = length(data.gutzwiller_terms) + length(data.jastrow_terms)
+    n_proj = projection_layout(data).n_proj
     n_rbm = count_rbm_parameters(data)
 
     # C implementation: for(i=0;i<NSlater;i++) { Slater[i] = 2*(genrand_real2()-0.5); }

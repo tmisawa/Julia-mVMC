@@ -593,7 +593,8 @@ GeneralRBMPhysHiddenTerm(site1::Int, site2::Int, value::ComplexF64, is_complex::
 """
     DoublonHolon2SiteTerm
 
-Doublon-Holon 2-site term.
+Deprecated compatibility shim for the pre-DH-1 value-bearing DH2 term API.
+Runtime data uses `DoublonHolon2SiteIndex` plus projection parameters instead.
 """
 struct DoublonHolon2SiteTerm
     site1::Int
@@ -605,7 +606,8 @@ end
 """
     DoublonHolon4SiteTerm
 
-Doublon-Holon 4-site term.
+Deprecated compatibility shim for the pre-DH-1 value-bearing DH4 term API.
+Runtime data uses `DoublonHolon4SiteIndex` plus projection parameters instead.
 """
 struct DoublonHolon4SiteTerm
     site1::Int
@@ -614,6 +616,80 @@ struct DoublonHolon4SiteTerm
     site4::Int
     value::ComplexF64
     is_complex::Bool
+end
+
+"""
+    DoublonHolon2SiteIndex
+
+C-compatible DH2 neighbor table for one `NDoublonHolon2siteIdx` index.
+`neighbors[i+1, :]` stores the two zero-based neighbor site ids for center
+site `i`, matching C's `DoublonHolon2siteIdx[idx][2*i : 2*i+1]`.
+"""
+struct DoublonHolon2SiteIndex
+    neighbors::Matrix{Int}
+
+    function DoublonHolon2SiteIndex(neighbors::Matrix{Int})
+        size(neighbors, 2) == 2 ||
+            throw(ArgumentError("DoublonHolon2SiteIndex.neighbors must be Nsite x 2"))
+        new(neighbors)
+    end
+end
+
+"""
+    DoublonHolon4SiteIndex
+
+C-compatible DH4 neighbor table for one `NDoublonHolon4siteIdx` index.
+`neighbors[i+1, :]` stores the four zero-based neighbor site ids for center
+site `i`, matching C's `DoublonHolon4siteIdx[idx][4*i : 4*i+3]`.
+"""
+struct DoublonHolon4SiteIndex
+    neighbors::Matrix{Int}
+
+    function DoublonHolon4SiteIndex(neighbors::Matrix{Int})
+        size(neighbors, 2) == 4 ||
+            throw(ArgumentError("DoublonHolon4SiteIndex.neighbors must be Nsite x 4"))
+        new(neighbors)
+    end
+end
+
+"""
+    DoublonHolon2SiteDefinition / DoublonHolon4SiteDefinition
+
+Parsed C-compatible DH definition files. `opt_flags` stores the real-part
+optimization flags in C file order. Imaginary flags are derived from
+`is_complex` when folded into `ExpertModeData.optimization_flags`.
+"""
+struct DoublonHolon2SiteDefinition
+    indices::Vector{DoublonHolon2SiteIndex}
+    opt_flags::Vector{Bool}
+    is_complex::Bool
+end
+
+struct DoublonHolon4SiteDefinition
+    indices::Vector{DoublonHolon4SiteIndex}
+    opt_flags::Vector{Bool}
+    is_complex::Bool
+end
+
+"""
+    ProjectionLayout
+
+C-compatible projection-factor layout:
+Gutzwiller | Jastrow | SpinJastrow | DH2 | DH4.
+Offsets are zero-based C offsets into the `Proj` / `projCnt` slices.
+"""
+struct ProjectionLayout
+    n_gutzwiller::Int
+    n_jastrow::Int
+    n_spinjastrow::Int
+    n_dh2::Int
+    n_dh4::Int
+    gutzwiller_offset::Int
+    jastrow_offset::Int
+    spinjastrow_offset::Int
+    dh2_offset::Int
+    dh4_offset::Int
+    n_proj::Int
 end
 
 """
@@ -685,9 +761,15 @@ mutable struct ExpertModeData
     spin_rbm_phys_hidden_terms::Vector{SpinRBMPhysHiddenTerm}
     general_rbm_phys_hidden_terms::Vector{GeneralRBMPhysHiddenTerm}
 
-    # Doublon-Holon terms
-    doublon_holon_2site_terms::Vector{DoublonHolon2SiteTerm}
-    doublon_holon_4site_terms::Vector{DoublonHolon4SiteTerm}
+    # Doublon-Holon index tables and projection parameters
+    doublon_holon_2site_indices::Vector{DoublonHolon2SiteIndex}
+    doublon_holon_4site_indices::Vector{DoublonHolon4SiteIndex}
+    doublon_holon_2site_params::Vector{ComplexF64}
+    doublon_holon_4site_params::Vector{ComplexF64}
+    doublon_holon_2site_opt_flags::Vector{Bool}
+    doublon_holon_4site_opt_flags::Vector{Bool}
+    doublon_holon_2site_complex::Bool
+    doublon_holon_4site_complex::Bool
 
     # Optimization flags (corresponds to C implementation's OptFlag)
     optimization_flags::Vector{Bool}
@@ -740,9 +822,15 @@ mutable struct ExpertModeData
             ChargeRBMPhysHiddenTerm[],
             SpinRBMPhysHiddenTerm[],
             GeneralRBMPhysHiddenTerm[],
-            # Doublon-Holon terms
-            DoublonHolon2SiteTerm[],
-            DoublonHolon4SiteTerm[],
+            # Doublon-Holon index tables and projection parameters
+            DoublonHolon2SiteIndex[],
+            DoublonHolon4SiteIndex[],
+            ComplexF64[],
+            ComplexF64[],
+            Bool[],
+            Bool[],
+            false,
+            false,
             Bool[],
             Int[],  # Initialize empty optimization and complex flags
             0,
@@ -750,4 +838,82 @@ mutable struct ExpertModeData
             0,  # i_flg_orbital_general, i_flg_orbital_anti_parallel, i_flg_orbital_parallel (default: 0)
         )
     end
+end
+
+@inline function _projection_count_from_header_or_terms(header_count::Int, term_count::Int)
+    return header_count > 0 ? header_count : term_count
+end
+
+"""
+    projection_layout(data::ExpertModeData) -> ProjectionLayout
+
+Return C-compatible projection offsets for the currently parsed data. SpinJastrow
+is deliberately zero until the parser implements it; `parse_expert_mode_files`
+hard-fails present SpinJastrow inputs rather than silently accepting them.
+"""
+function projection_layout(data::ExpertModeData)::ProjectionLayout
+    n_gutz = _projection_count_from_header_or_terms(
+        data.n_gutzwiller_idx,
+        length(data.gutzwiller_terms),
+    )
+    n_jast = _projection_count_from_header_or_terms(
+        data.n_jastrow_idx,
+        length(data.jastrow_terms),
+    )
+    n_spinjast = 0
+    n_dh2 = length(data.doublon_holon_2site_indices)
+    n_dh4 = length(data.doublon_holon_4site_indices)
+
+    gutz_offset = 0
+    jast_offset = gutz_offset + n_gutz
+    spin_offset = jast_offset + n_jast
+    dh2_offset = spin_offset + n_spinjast
+    dh4_offset = dh2_offset + 6 * n_dh2
+    n_proj = dh4_offset + 10 * n_dh4
+
+    return ProjectionLayout(
+        n_gutz,
+        n_jast,
+        n_spinjast,
+        n_dh2,
+        n_dh4,
+        gutz_offset,
+        jast_offset,
+        spin_offset,
+        dh2_offset,
+        dh4_offset,
+        n_proj,
+    )
+end
+
+n_projection_parameters(data::ExpertModeData)::Int = projection_layout(data).n_proj
+
+function has_doublon_holon(data::ExpertModeData)::Bool
+    return !isempty(data.doublon_holon_2site_indices) ||
+           !isempty(data.doublon_holon_4site_indices) ||
+           !isempty(data.doublon_holon_2site_params) ||
+           !isempty(data.doublon_holon_4site_params)
+end
+
+function projection_parameters(
+    data::ExpertModeData,
+    layout::ProjectionLayout = projection_layout(data),
+)::Vector{ComplexF64}
+    params = Vector{ComplexF64}(undef, layout.n_proj)
+    fill!(params, 0.0 + 0.0im)
+
+    for i = 1:min(layout.n_gutzwiller, length(data.gutzwiller_terms))
+        params[layout.gutzwiller_offset+i] = data.gutzwiller_terms[i].value
+    end
+    for i = 1:min(layout.n_jastrow, length(data.jastrow_terms))
+        params[layout.jastrow_offset+i] = data.jastrow_terms[i].value
+    end
+    for i = 1:min(6 * layout.n_dh2, length(data.doublon_holon_2site_params))
+        params[layout.dh2_offset+i] = data.doublon_holon_2site_params[i]
+    end
+    for i = 1:min(10 * layout.n_dh4, length(data.doublon_holon_4site_params))
+        params[layout.dh4_offset+i] = data.doublon_holon_4site_params[i]
+    end
+
+    return params
 end

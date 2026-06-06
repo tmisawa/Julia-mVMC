@@ -205,7 +205,7 @@ Solves S*x = g where:
 """
 function stochastic_opt!(data::ExpertModeData, state::VMCOptimizationState, c_timer::CTimer = CTIMER_DISABLED)::Int
     # Get parameters
-    n_proj = length(data.gutzwiller_terms) + length(data.jastrow_terms)
+    n_proj = MVMCExpertModeParsers.projection_layout(data).n_proj
 
     # Calculate n_orbital_idx (number of unique orbital parameters)
     # C implementation: NSlater = NOrbitalIdx
@@ -717,7 +717,7 @@ function stochastic_opt_cg!(data::ExpertModeData, state::VMCOptimizationState, c
     # The direct solver (stochastic_opt!) carries the [50]/[51]/[56]/[57]/[52]
     # breakdown. c_timer is accepted here for a uniform call from vmc_para_opt!.
     # Get parameters
-    n_proj = length(data.gutzwiller_terms) + length(data.jastrow_terms)
+    n_proj = MVMCExpertModeParsers.projection_layout(data).n_proj
 
     # Calculate n_orbital_idx (number of unique orbital parameters)
     # C implementation: NSlater = NOrbitalIdx
