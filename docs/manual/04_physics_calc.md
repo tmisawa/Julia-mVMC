@@ -31,6 +31,9 @@
   any `BackFlow*` keyword in `namelist.def`) are not supported; remove
   those keywords or fall back to the C reference at
   <https://github.com/issp-center-dev/mVMC>.
+- **Doublon-holon correlation factor** — `DH2` / `DH4` index files are
+  parsed, but physics calculation rejects active DH inputs until DH-2 wires the
+  projection counters, logs, and parameter loaders.
 - **MPI parallelisation** — `reduce_counter!` is a no-op in this release, and
   `NSplitSize > 1` is rejected with an unsupported-MPI error until MPI
   support is implemented. `NSplitSize = 1` is the only supported setting.

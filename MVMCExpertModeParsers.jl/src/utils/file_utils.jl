@@ -38,10 +38,10 @@ end
 """
     validate_file_exists(filepath::String) -> Bool
 
-Check if a file exists and is readable.
+Check if a path exists as a regular file.
 """
 function validate_file_exists(filepath::String)::Bool
-    return isfile(filepath) && isreadable(filepath)
+    return isfile(filepath)
 end
 
 """

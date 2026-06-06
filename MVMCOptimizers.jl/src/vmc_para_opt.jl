@@ -81,6 +81,10 @@ function vmc_para_opt!(
 )::Int
     # Reject unsupported ModPara inputs (e.g. NSplitSize > 1) before any work.
     validate_supported_modpara(data.modpara)
+    if MVMCExpertModeParsers.has_doublon_holon(data)
+        @error "DoublonHolon (DH2/DH4) inputs are parsed but not executable until DH-2 connects projection counts/logs/loaders"
+        return 1
+    end
 
     # C-compatible section timer. `nothing` -> disabled singleton (no-op
     # start/stop). When run_para_opt_from_namelist enables it, a concretely
@@ -105,8 +109,7 @@ function vmc_para_opt!(
     all_complex = get_all_complex_flag(data)
     # i_flg_orbital_general: 0 = sz conserved, non-zero = general (fsz)
     i_flg_orbital_general = data.i_flg_orbital_general
-    n_proj_bf =
-        length(data.doublon_holon_2site_terms) + length(data.doublon_holon_4site_terms)  # Simplified
+    n_proj_bf = 0  # BackFlow only; DH is a normal projection family and is guarded above in DH-1.
 
     # Calculate NElec from NLocSpin and NCond if not set (C code: readdef.c:593)
     n_elec = data.modpara.nelec
@@ -140,7 +143,7 @@ function vmc_para_opt!(
 
     # Initialize optimization state
     n_site = data.modpara.nsite
-    n_proj = length(data.gutzwiller_terms) + length(data.jastrow_terms)
+    n_proj = MVMCExpertModeParsers.projection_layout(data).n_proj
 
     # Calculate n_orbital_idx (number of unique orbital parameters)
     # C implementation: NSlater = NOrbitalIdx (from orbitalidx.def header)
@@ -380,6 +383,14 @@ function get_all_complex_flag(data::ExpertModeData)::Bool
                 break
             end
         end
+    end
+    if !any_complex
+        any_complex = (
+            data.doublon_holon_2site_complex ||
+            data.doublon_holon_4site_complex ||
+            any(x -> imag(x) != 0.0, data.doublon_holon_2site_params) ||
+            any(x -> imag(x) != 0.0, data.doublon_holon_4site_params)
+        )
     end
     return any_complex
 end

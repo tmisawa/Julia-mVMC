@@ -22,7 +22,7 @@ Check if a Slater parameter (OrbitalTerm) is an optimization target.
 - Julia: optimization_flags[2*(i-1) + 2*n_proj + 2*flag_rbm*n_rbm + 1]
 """
 function is_slater_optimized(data::ExpertModeData, slater_idx::Int)::Bool
-    n_proj = length(data.gutzwiller_terms) + length(data.jastrow_terms)
+    n_proj = projection_layout(data).n_proj
 
     # FlagRBMの判定
     flag_rbm = (
@@ -79,7 +79,7 @@ Check if a Jastrow parameter is an optimization target.
 - Julia: optimization_flags[2*(NGutzwillerIdx + i - 1) + 1]
 """
 function is_jastrow_optimized(data::ExpertModeData, jastrow_idx::Int)::Bool
-    n_gutzwiller = length(data.gutzwiller_terms)
+    n_gutzwiller = projection_layout(data).n_gutzwiller
     opt_flag_idx = 2 * (n_gutzwiller + jastrow_idx - 1) + 1
 
     if opt_flag_idx > length(data.optimization_flags)
@@ -98,7 +98,7 @@ Get the OptFlag index for a Slater parameter.
 - `Int`: Index in optimization_flags array (1-based)
 """
 function get_slater_opt_flag_index(data::ExpertModeData, slater_idx::Int)::Int
-    n_proj = length(data.gutzwiller_terms) + length(data.jastrow_terms)
+    n_proj = projection_layout(data).n_proj
 
     flag_rbm = (
         length(data.charge_rbm_phys_layer_terms) > 0 ||
@@ -115,6 +115,42 @@ function get_slater_opt_flag_index(data::ExpertModeData, slater_idx::Int)::Int
     n_rbm = (flag_rbm ? count_rbm_parameters(data) : 0)
 
     return 2 * (slater_idx - 1) + 2 * n_proj + 2 * flag_rbm * n_rbm + 1
+end
+
+"""
+    set_dh_opt_flags!(data::ExpertModeData)
+
+Fold local DH2/DH4 real optimization flags into the global C-compatible
+`OptFlag` array. The imaginary flag mirrors the real flag only when the
+corresponding DH file has `ComplexType != 0`.
+"""
+function set_dh_opt_flags!(data::ExpertModeData)
+    layout = projection_layout(data)
+    layout.n_dh2 == 0 && layout.n_dh4 == 0 && return
+
+    ensure_optimization_flags_size!(data, 2 * layout.n_proj)
+
+    for (local_i, flag) in enumerate(data.doublon_holon_2site_opt_flags)
+        fidx = layout.dh2_offset + local_i - 1
+        real_idx = 2 * fidx + 1
+        imag_idx = real_idx + 1
+        real_idx <= length(data.optimization_flags) || continue
+        data.optimization_flags[real_idx] = flag
+        if imag_idx <= length(data.optimization_flags)
+            data.optimization_flags[imag_idx] = data.doublon_holon_2site_complex ? flag : false
+        end
+    end
+
+    for (local_i, flag) in enumerate(data.doublon_holon_4site_opt_flags)
+        fidx = layout.dh4_offset + local_i - 1
+        real_idx = 2 * fidx + 1
+        imag_idx = real_idx + 1
+        real_idx <= length(data.optimization_flags) || continue
+        data.optimization_flags[real_idx] = flag
+        if imag_idx <= length(data.optimization_flags)
+            data.optimization_flags[imag_idx] = data.doublon_holon_4site_complex ? flag : false
+        end
+    end
 end
 
 """

@@ -1,7 +1,7 @@
 using Test
 using MVMCOptimizers
 using MVMCExpertModeParsers:
-    ExpertModeData, GutzwillerTerm, JastrowTerm, OrbitalTerm, DoublonHolon2SiteTerm
+    ExpertModeData, GutzwillerTerm, JastrowTerm, OrbitalTerm, DoublonHolon2SiteIndex
 
 # Capture the showerror text of whatever `f()` throws (message is the stable
 # contract; assert on substrings, not the concrete exception type).
@@ -126,7 +126,8 @@ end
         path = joinpath(dir, "zqp_opt.dat")
         write(path, _GOLDEN_OPT)
         data = _make_data()
-        data.doublon_holon_2site_terms = [DoublonHolon2SiteTerm(0, 1, 0.0 + 0im, true)]
+        data.doublon_holon_2site_indices = [DoublonHolon2SiteIndex([1 0; 0 1])]
+        data.doublon_holon_2site_params = fill(0.0 + 0im, 6)
         threw, msg = _capture_msg(() -> MVMCOptimizers.read_opt_para_file!(data, path))
         @test threw && occursin("DoublonHolon", msg)
     end

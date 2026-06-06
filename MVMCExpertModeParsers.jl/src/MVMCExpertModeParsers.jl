@@ -58,6 +58,20 @@ export parse_expert_mode_files
 export init_qp_weight!
 export update_qp_weight!
 
+function _is_required_if_present_file_type(file_type::String)::Bool
+    return (
+        file_type == "TwoBodyGEx" ||
+        file_type == "DH2" ||
+        file_type == "DH4" ||
+        file_type == "DoublonHolon2Site" ||
+        file_type == "DoublonHolon4Site"
+    )
+end
+
+function _is_unsupported_projection_file_type(file_type::String)::Bool
+    return file_type == "SpinJastrow"
+end
+
 """
     parse_expert_mode_files(namelist_path::String) -> ExpertModeData
 
@@ -82,10 +96,10 @@ function parse_expert_mode_files(namelist_path::String)::ExpertModeData
     data = ExpertModeData()
     errors = String[]
     warnings = String[]
-    # TwoBodyGEx (factored Green) is required-if-present: record a fatal failure
-    # and rethrow AFTER the outer try/catch below, which would otherwise swallow
-    # an in-loop error and return an empty green_two_ex_terms list.
-    twobodygex_fatal = nothing
+    # Some inputs are required-if-present: record a fatal failure and rethrow
+    # AFTER the outer try/catch below, which would otherwise swallow an in-loop
+    # error and return a data object with a missing required block.
+    required_file_fatal = nothing
 
     try
         # Read namelist.def to get file list
@@ -96,9 +110,15 @@ function parse_expert_mode_files(namelist_path::String)::ExpertModeData
         for (file_type, file_path) in file_list
             full_path = joinpath(base_dir, file_path)
 
+            if _is_unsupported_projection_file_type(file_type)
+                required_file_fatal =
+                    "$file_type inputs are not supported yet; SpinJastrow must hard-fail because projection layout would otherwise be wrong"
+                break
+            end
+
             if !validate_file_exists(full_path)
-                if file_type == "TwoBodyGEx"
-                    twobodygex_fatal = "Required TwoBodyGEx file not found: $full_path"
+                if _is_required_if_present_file_type(file_type)
+                    required_file_fatal = "Required $file_type file not found: $full_path"
                     break   # stop parsing; post-loop work is guarded below
                 end
                 warning_msg = "File not found: $full_path"
@@ -110,8 +130,8 @@ function parse_expert_mode_files(namelist_path::String)::ExpertModeData
             try
                 parse_file_by_type!(data, file_type, full_path)
             catch e
-                if file_type == "TwoBodyGEx"
-                    twobodygex_fatal = "Error parsing required TwoBodyGEx file $full_path: $e"
+                if _is_required_if_present_file_type(file_type)
+                    required_file_fatal = "Error parsing required $file_type file $full_path: $e"
                     break   # stop parsing; post-loop work is guarded below
                 end
                 error_msg = "Error parsing $file_type file $full_path: $e"
@@ -121,45 +141,48 @@ function parse_expert_mode_files(namelist_path::String)::ExpertModeData
             end
         end
 
-        # Skip all post-loop processing when a required TwoBodyGEx file failed:
+        # Skip all post-loop processing when a required-if-present file failed:
         # the run is about to error, so avoid spurious warnings / side effects.
-        if twobodygex_fatal === nothing
-        # RBM OptFlag is defined in RBM idx files and uses C-specific block offsets.
-        # Apply it after all RBM files are parsed, independent of namelist order.
-        apply_rbm_opt_flags_from_files!(data, file_list, base_dir)
+        if required_file_fatal === nothing
+            # RBM OptFlag is defined in RBM idx files and uses C-specific block offsets.
+            # Apply projection-family-dependent flags after all files are parsed,
+            # independent of namelist order.
+            set_dh_opt_flags!(data)
+            apply_rbm_opt_flags_from_files!(data, file_list, base_dir)
+            apply_orbital_opt_flags_from_files!(data, file_list, base_dir)
 
-        # Judge orbital mode (equivalent to C's JudgeOrbitalMode)
-        judge_orbital_mode!(data)
+            # Judge orbital mode (equivalent to C's JudgeOrbitalMode)
+            judge_orbital_mode!(data)
 
-        # Build orbital matrices AFTER judge_orbital_mode! so i_flg_orbital_general is correctly set
-        # This ensures FSZ mode uses 2*Nsite x 2*Nsite matrices
-        if !isempty(data.orbital_terms)
-            build_orbital_sgn_matrix!(data)
-        end
-
-        # Calculate Ne from NLocSpin and NCond if NCond != -1 (C code: readdef.c:593)
-        # This matches C implementation's behavior in ReadDefFileNInt
-        if data.modpara.ncond != -1
-            if data.modpara.ncond % 2 != 0
-                push!(warnings, "NCond must be even, got $(data.modpara.ncond)")
-            elseif data.modpara.nelec == 0
-                # Calculate Ne = (NLocSpin + NCond) / 2
-                data.modpara.nelec = (data.modpara.nlocspin + data.modpara.ncond) ÷ 2
+            # Build orbital matrices AFTER judge_orbital_mode! so i_flg_orbital_general is correctly set
+            # This ensures FSZ mode uses 2*Nsite x 2*Nsite matrices
+            if !isempty(data.orbital_terms)
+                build_orbital_sgn_matrix!(data)
             end
-        end
 
-        # Read input parameter files (InGutzwiller.def, InJastrow.def, InOrbital.def, etc.)
-        # This updates parameter values in gutzwiller_terms, jastrow_terms, orbital_terms
-        # Equivalent to C's ReadInputParameters()
-        read_input_parameters!(data, namelist_path)
+            # Calculate Ne from NLocSpin and NCond if NCond != -1 (C code: readdef.c:593)
+            # This matches C implementation's behavior in ReadDefFileNInt
+            if data.modpara.ncond != -1
+                if data.modpara.ncond % 2 != 0
+                    push!(warnings, "NCond must be even, got $(data.modpara.ncond)")
+                elseif data.modpara.nelec == 0
+                    # Calculate Ne = (NLocSpin + NCond) / 2
+                    data.modpara.nelec = (data.modpara.nlocspin + data.modpara.ncond) ÷ 2
+                end
+            end
 
-        # Print summary like C implementation
-        if !isempty(warnings)
-            @info "Parsing completed with $(length(warnings)) warnings"
-        else
-            @info "Parsing completed successfully"
-        end
-        end  # if twobodygex_fatal === nothing
+            # Read input parameter files (InGutzwiller.def, InJastrow.def, InOrbital.def, etc.)
+            # This updates parameter values in gutzwiller_terms, jastrow_terms, orbital_terms
+            # Equivalent to C's ReadInputParameters()
+            read_input_parameters!(data, namelist_path)
+
+            # Print summary like C implementation
+            if !isempty(warnings)
+                @info "Parsing completed with $(length(warnings)) warnings"
+            else
+                @info "Parsing completed successfully"
+            end
+        end  # if required_file_fatal === nothing
 
     catch e
         error_msg = "Critical error in parse_expert_mode_files: $e"
@@ -167,13 +190,60 @@ function parse_expert_mode_files(namelist_path::String)::ExpertModeData
         @error error_msg
     end
 
-    # TwoBodyGEx failures are fatal on the public path (spec Finding 4). Throw
-    # here — outside the outer try/catch — so the error is not swallowed.
-    if twobodygex_fatal !== nothing
-        error(twobodygex_fatal)
+    # Required-if-present failures are fatal on the public path. Throw here,
+    # outside the outer try/catch, so the error is not swallowed.
+    if required_file_fatal !== nothing
+        error(required_file_fatal)
     end
 
     return data
+end
+
+function apply_orbital_opt_flags_from_files!(
+    data::ExpertModeData,
+    file_list::Vector{Tuple{String,String}},
+    base_dir::String,
+)
+    orbital_opt_flags = Dict{Int,Int}()
+    n_orbital_anti_parallel = 0
+
+    for (file_type, file_path) in file_list
+        if !(
+            file_type == "Orbital" ||
+            file_type == "OrbitalAntiParallel" ||
+            file_type == "OrbitalParallel" ||
+            file_type == "OrbitalGeneral"
+        )
+            continue
+        end
+
+        full_path = joinpath(base_dir, file_path)
+        validate_file_exists(full_path) || continue
+
+        result, opt_flags = parse_orbital_def(full_path)
+        result.success || continue
+        isempty(opt_flags) && continue
+
+        if file_type == "Orbital" || file_type == "OrbitalAntiParallel"
+            for (idx, opt) in opt_flags
+                orbital_opt_flags[idx] = opt
+            end
+            if !isempty(result.data)
+                n_orbital_anti_parallel = maximum(t.idx for t in result.data) + 1
+            end
+        elseif file_type == "OrbitalParallel"
+            for (idx, opt) in opt_flags
+                orbital_opt_flags[n_orbital_anti_parallel+2*idx] = opt
+                orbital_opt_flags[n_orbital_anti_parallel+2*idx+1] = opt
+            end
+        elseif file_type == "OrbitalGeneral"
+            for (idx, opt) in opt_flags
+                orbital_opt_flags[idx] = opt
+            end
+        end
+    end
+
+    set_orbital_opt_flags!(data, orbital_opt_flags)
 end
 
 function apply_rbm_opt_flags_from_files!(
@@ -225,7 +295,7 @@ function apply_rbm_opt_flags_from_files!(
         end
     end
 
-    n_proj = length(data.gutzwiller_terms) + length(data.jastrow_terms)
+    n_proj = projection_layout(data).n_proj
     n_charge_phys = _rbm_section_nparam(data.charge_rbm_phys_layer_terms)
     n_spin_phys = _rbm_section_nparam(data.spin_rbm_phys_layer_terms)
     n_general_phys = _rbm_section_nparam(data.general_rbm_phys_layer_terms)
@@ -433,8 +503,6 @@ function parse_file_by_type!(data::ExpertModeData, file_type::String, file_path:
                 max_idx = maximum(t.idx for t in data.orbital_terms)
                 data.modpara.n_orbital_idx = max_idx + 1  # 0-based to 1-based count
             end
-            # Set OptFlag for orbital parameters
-            set_orbital_opt_flags!(data, opt_flags)
         end
     elseif file_type == "OrbitalAntiParallel"
         result, opt_flags = parse_orbital_def(file_path)
@@ -447,8 +515,6 @@ function parse_file_by_type!(data::ExpertModeData, file_type::String, file_path:
                 max_idx = maximum(t.idx for t in data.orbital_terms)
                 data.modpara.n_orbital_idx = max_idx + 1  # 0-based to 1-based count
             end
-            # Set OptFlag for orbital parameters
-            set_orbital_opt_flags!(data, opt_flags)
         end
     elseif file_type == "OrbitalParallel"
         result, opt_flags = parse_orbital_def(file_path)
@@ -505,16 +571,6 @@ function parse_file_by_type!(data::ExpertModeData, file_type::String, file_path:
                 max_idx = maximum(t.idx for t in data.orbital_terms)
                 data.modpara.n_orbital_idx = max_idx + 1  # 0-based to 1-based count
             end
-            # Set OptFlag for orbital parameters with proper offset (interleaved)
-            offset_opt_flags = Dict{Int,Int}()
-            for (idx, opt) in opt_flags
-                fij_org = idx  # Original index from the file
-                # up-up orbital flag
-                offset_opt_flags[n_orbital_anti_parallel+2*fij_org] = opt
-                # down-down orbital flag (same opt_flag as up-up)
-                offset_opt_flags[n_orbital_anti_parallel+2*fij_org+1] = opt
-            end
-            set_orbital_opt_flags!(data, offset_opt_flags)
         end
     elseif file_type == "OrbitalGeneral"
         result, opt_flags = parse_orbital_def(file_path)
@@ -527,8 +583,6 @@ function parse_file_by_type!(data::ExpertModeData, file_type::String, file_path:
                 max_idx = maximum(t.idx for t in data.orbital_terms)
                 data.modpara.n_orbital_idx = max_idx + 1  # 0-based to 1-based count
             end
-            # Set OptFlag for orbital parameters
-            set_orbital_opt_flags!(data, opt_flags)
         end
     elseif file_type == "OneBodyG"
         result = parse_green_one_def(file_path)
@@ -653,15 +707,25 @@ function parse_file_by_type!(data::ExpertModeData, file_type::String, file_path:
         if result.success
             data.general_rbm_phys_hidden_terms = result.data
         end
-    elseif file_type == "DoublonHolon2Site"
-        result = parse_doublon_holon_2site_def(file_path)
+    elseif file_type == "DH2" || file_type == "DoublonHolon2Site"
+        result = parse_doublon_holon_2site_def(file_path, data.modpara.nsite)
         if result.success
-            data.doublon_holon_2site_terms = result.data
+            data.doublon_holon_2site_indices = result.data.indices
+            data.doublon_holon_2site_opt_flags = result.data.opt_flags
+            data.doublon_holon_2site_complex = result.data.is_complex
+            data.doublon_holon_2site_params = fill(0.0 + 0.0im, length(result.data.opt_flags))
+        else
+            error("Failed to parse DH2 file '$file_path': $(result.error_message)")
         end
-    elseif file_type == "DoublonHolon4Site"
-        result = parse_doublon_holon_4site_def(file_path)
+    elseif file_type == "DH4" || file_type == "DoublonHolon4Site"
+        result = parse_doublon_holon_4site_def(file_path, data.modpara.nsite)
         if result.success
-            data.doublon_holon_4site_terms = result.data
+            data.doublon_holon_4site_indices = result.data.indices
+            data.doublon_holon_4site_opt_flags = result.data.opt_flags
+            data.doublon_holon_4site_complex = result.data.is_complex
+            data.doublon_holon_4site_params = fill(0.0 + 0.0im, length(result.data.opt_flags))
+        else
+            error("Failed to parse DH4 file '$file_path': $(result.error_message)")
         end
     end
 end

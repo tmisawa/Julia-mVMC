@@ -1,4 +1,4 @@
-using MVMCExpertModeParsers: count_rbm_parameters
+using MVMCExpertModeParsers: count_rbm_parameters, has_doublon_holon, projection_layout
 
 """
     _load_para_triples!(data::ExpertModeData, text::AbstractString)
@@ -31,9 +31,9 @@ function _load_para_triples!(data::ExpertModeData, text::AbstractString)
     if n_rbm > 0
         return (false, 0, "RBM-bearing models are not supported by this loader (n_rbm = $n_rbm)")
     end
-    n_dh =
-        length(data.doublon_holon_2site_terms) + length(data.doublon_holon_4site_terms)
-    if n_dh > 0
+    if has_doublon_holon(data)
+        layout = projection_layout(data)
+        n_dh = layout.n_dh2 + layout.n_dh4
         return (
             false,
             0,
@@ -55,7 +55,7 @@ function _load_para_triples!(data::ExpertModeData, text::AbstractString)
 
     n_gutzwiller = length(data.gutzwiller_terms)
     n_jastrow = length(data.jastrow_terms)
-    n_proj = n_gutzwiller + n_jastrow
+    n_proj = projection_layout(data).n_proj
     n_slater = data.modpara.n_orbital_idx
 
     expected_floats = 6 + 3 * (n_proj + n_slater)  # NRBM = 0, NDH = 0 verified above

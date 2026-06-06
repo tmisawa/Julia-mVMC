@@ -2487,7 +2487,7 @@ function vmc_main_cal!(data::ExpertModeData, state::VMCOptimizationState, c_time
     n_site2 = 2 * n_site
     n_qp_full = get_n_qp_full(data)
     n_vmc_sample = data.modpara.nvmc_sample
-    n_proj = length(data.gutzwiller_terms) + length(data.jastrow_terms)
+    n_proj = MVMCExpertModeParsers.projection_layout(data).n_proj
     n_rbm = has_rbm_terms(data) ? MVMCExpertModeParsers.count_rbm_parameters(data) : 0
 
     # IMPORTANT: n_slater should be NOrbitalIdx (number of unique orbital parameters),
@@ -2884,7 +2884,7 @@ function vmc_main_cal_fsz!(data::ExpertModeData, state::VMCOptimizationState, c_
     n_vmc_sample = data.modpara.nvmc_sample
     n_qp_full = get_n_qp_full(data)
     nvmc_cal_mode = data.modpara.vmc_calc_mode
-    n_proj = length(data.gutzwiller_terms) + length(data.jastrow_terms)
+    n_proj = MVMCExpertModeParsers.projection_layout(data).n_proj
     n_slater = data.modpara.n_orbital_idx
 
     # Determine if using all complex or real mode

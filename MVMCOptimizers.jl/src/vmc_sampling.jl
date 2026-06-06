@@ -2517,7 +2517,7 @@ function vmc_make_sample!(
 
     n_site = data.modpara.nsite
     n_elec = data.modpara.nelec
-    n_proj = length(data.gutzwiller_terms) + length(data.jastrow_terms)
+    n_proj = MVMCExpertModeParsers.projection_layout(data).n_proj
     n_vmc_sample = data.modpara.nvmc_sample
     n_vmc_warmup = data.modpara.nvmc_warmup
     n_vmc_interval = data.modpara.nvmc_interval
@@ -5591,7 +5591,7 @@ function vmc_make_sample_real!(
     n_elec = data.modpara.nelec
     n_size = 2 * n_elec
     n_site2 = 2 * n_site
-    n_proj = length(data.gutzwiller_terms) + length(data.jastrow_terms)
+    n_proj = MVMCExpertModeParsers.projection_layout(data).n_proj
     n_qp_full = length(state.slater_matrix.pf_m)
     n_vmc_warmup = data.modpara.nvmc_warmup
     n_vmc_sample = data.modpara.nvmc_sample
