@@ -731,6 +731,8 @@ mutable struct ExpertModeData
     # Quantum projection
     qptrans_terms::Vector{QPTransTerm}
     para_qp_trans::Vector{ComplexF64}  # ParaQPTrans values from qptransidx.def
+    para_qp_opt_trans::Vector{ComplexF64}  # ParaQPOptTrans values from opttrans.def
+    opt_trans::Vector{ComplexF64}  # Runtime OptTrans values (empty when FlagOptTrans-equivalent is off)
     n_qp_trans::Int  # NQPTrans from qptransidx.def
     n_qp_opt_trans::Int  # NQPOptTrans (default: 1)
     qp_weights::Union{Nothing,Any}  # QuantumProjectionWeights (initialized by init_qp_weight!)
@@ -802,9 +804,11 @@ mutable struct ExpertModeData
             GreenTwoExTerm[],
             QPTransTerm[],
             ComplexF64[],
+            ComplexF64[],
+            ComplexF64[],
             0,
             1,
-            nothing,  # para_qp_trans, n_qp_trans, n_qp_opt_trans, qp_weights
+            nothing,  # para_qp_trans, para_qp_opt_trans, opt_trans, n_qp_trans, n_qp_opt_trans, qp_weights
             Vector{Vector{Int}}[],  # qp_trans
             Vector{Vector{Int}}[],  # qp_trans_inv
             Vector{Vector{Int}}[],  # qp_trans_sgn

@@ -150,14 +150,16 @@ function sync_modified_parameter!(data::ExpertModeData; shift_correlations::Bool
         end
     end
 
-    # OptTrans normalization (C parameter.c:163-175, gated by FlagOptTrans>0)
-    # is intentionally NOT performed here. The C code rescales the dedicated
-    # OptTrans[] array, which has no Julia counterpart yet. The previous
-    # implementation rescaled `data.para_qp_trans` instead, but that array
-    # holds the QPTrans phase factors consumed by qp_weight_update.jl — a
-    # different quantity. Rescaling it would silently corrupt the quantum
-    # projection weights. When OptTrans is added to Julia, normalize that
-    # field here (gated by an analogue of FlagOptTrans), not para_qp_trans.
+    # Normalize OptTrans (C parameter.c:163-175, gated by FlagOptTrans>0).
+    if !isempty(data.opt_trans)
+        xmax = maximum(abs, data.opt_trans)
+        if xmax > 0.0
+            ratio = 1.0 / xmax
+            for i in eachindex(data.opt_trans)
+                data.opt_trans[i] *= ratio
+            end
+        end
+    end
 
     return 0
 end

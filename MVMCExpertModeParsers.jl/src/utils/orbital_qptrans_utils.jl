@@ -284,17 +284,22 @@ function build_qp_trans_mappings!(data::ExpertModeData, file_path::String)
         line_idx += 1
     end
 
-    # QPOptTrans: identity mapping (usually NQPOptTrans = 1)
-    n_qp_opt_trans = max(1, data.n_qp_opt_trans)
-    qp_opt_trans = Vector{Vector{Int}}()
-    qp_opt_trans_sgn = Vector{Vector{Int}}()
+    # QPOptTrans: keep an already parsed OptTrans mapping. Otherwise install
+    # the C FlagOptTrans<=0 identity mapping.
+    qp_opt_trans = data.qp_opt_trans
+    qp_opt_trans_sgn = data.qp_opt_trans_sgn
+    if isempty(qp_opt_trans) || isempty(qp_opt_trans_sgn)
+        n_qp_opt_trans = max(1, data.n_qp_opt_trans)
+        qp_opt_trans = Vector{Vector{Int}}()
+        qp_opt_trans_sgn = Vector{Vector{Int}}()
 
-    for optidx = 1:n_qp_opt_trans
-        opt_trans = collect(0:(n_site-1))  # Identity mapping (0-based)
-        opt_trans_sgn = ones(Int, n_site)  # All signs are +1
+        for optidx = 1:n_qp_opt_trans
+            opt_trans = collect(0:(n_site-1))  # Identity mapping (0-based)
+            opt_trans_sgn = ones(Int, n_site)  # All signs are +1
 
-        push!(qp_opt_trans, opt_trans)
-        push!(qp_opt_trans_sgn, opt_trans_sgn)
+            push!(qp_opt_trans, opt_trans)
+            push!(qp_opt_trans_sgn, opt_trans_sgn)
+        end
     end
 
     # Apply APFlag: if APFlag == 0, set all QPTransSgn to 1 (C implementation behavior)

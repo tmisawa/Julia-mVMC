@@ -2094,6 +2094,40 @@ function slater_elm_diff_fsz!(
     end
 end
 
+function opt_trans_diff!(
+    sr_opt_o::AbstractVector{ComplexF64},
+    ip::ComplexF64,
+    data::ExpertModeData,
+    state::VMCOptimizationState,
+)
+    n_opt_trans = MVMCExpertModeParsers.count_opt_trans_parameters(data)
+    n_opt_trans == 0 && return
+    data.qp_weights === nothing && return
+
+    n_qp_fix = length(data.qp_weights.qp_fix_weight)
+    n_qp_fix > 0 || return
+    pf_values = state.slater_matrix.pf_m
+
+    for optidx = 1:n_opt_trans
+        acc = 0.0 + 0.0im
+        base = (optidx - 1) * n_qp_fix
+        for j = 1:n_qp_fix
+            pf_idx = base + j
+            if j <= length(data.qp_weights.qp_fix_weight) && pf_idx <= length(pf_values)
+                acc += data.qp_weights.qp_fix_weight[j] * pf_values[pf_idx]
+            end
+        end
+
+        val = acc / ip
+        real_idx = 2 * (optidx - 1) + 1
+        imag_idx = real_idx + 1
+        if imag_idx <= length(sr_opt_o)
+            sr_opt_o[real_idx] = val
+            sr_opt_o[imag_idx] = im * val
+        end
+    end
+end
+
 """
     find_orbital_idx(tri::Int, trj::Int, orbital_terms::Vector, n_site::Int) -> Int
 
@@ -2489,6 +2523,7 @@ function vmc_main_cal!(data::ExpertModeData, state::VMCOptimizationState, c_time
     n_vmc_sample = data.modpara.nvmc_sample
     n_proj = MVMCExpertModeParsers.projection_layout(data).n_proj
     n_rbm = has_rbm_terms(data) ? MVMCExpertModeParsers.count_rbm_parameters(data) : 0
+    n_opt_trans = MVMCExpertModeParsers.count_opt_trans_parameters(data)
 
     # IMPORTANT: n_slater should be NOrbitalIdx (number of unique orbital parameters),
     # NOT length(orbital_terms) (total number of site pairs)
@@ -2761,10 +2796,18 @@ function vmc_main_cal!(data::ExpertModeData, state::VMCOptimizationState, c_time
             # Set Slater element derivatives ([42] ReturnSlaterElmDiff)
             if n_slater > 0
                 slater_offset = 2 * (n_proj + n_rbm) + 2  # After projection + RBM factors
-                slater_view = @view sr_opt_o[(slater_offset+1):end]
+                slater_end = slater_offset + 2 * n_slater
+                slater_view = @view sr_opt_o[(slater_offset+1):slater_end]
                 ctimer_start!(c_timer, 42)
                 slater_elm_diff_fcmp!(slater_view, ip, ele_idx, data, state)
                 ctimer_stop!(c_timer, 42)
+            end
+            if n_opt_trans > 0
+                opt_offset = 2 * (n_proj + n_rbm + n_slater) + 2
+                opt_end = opt_offset + 2 * n_opt_trans
+                if opt_end <= length(sr_opt_o)
+                    opt_trans_diff!(@view(sr_opt_o[(opt_offset+1):opt_end]), ip, data, state)
+                end
             end
 
             # Accumulate OO and HO ([43] calculate OO and HO)
@@ -2886,6 +2929,7 @@ function vmc_main_cal_fsz!(data::ExpertModeData, state::VMCOptimizationState, c_
     nvmc_cal_mode = data.modpara.vmc_calc_mode
     n_proj = MVMCExpertModeParsers.projection_layout(data).n_proj
     n_slater = data.modpara.n_orbital_idx
+    n_opt_trans = MVMCExpertModeParsers.count_opt_trans_parameters(data)
 
     # Determine if using all complex or real mode
     # FSZ typically uses complex mode
@@ -3021,11 +3065,19 @@ function vmc_main_cal_fsz!(data::ExpertModeData, state::VMCOptimizationState, c_
             # TODO: Implement slater_elm_diff_fsz for full FSZ support
             if n_slater > 0
                 slater_offset = 2 * n_proj + 2
-                slater_view = @view sr_opt_o[(slater_offset+1):end]
+                slater_end = slater_offset + 2 * n_slater
+                slater_view = @view sr_opt_o[(slater_offset+1):slater_end]
                 # Use FSZ version for Slater element derivative ([42] ReturnSlaterElmDiff)
                 ctimer_start!(c_timer, 42)
                 slater_elm_diff_fsz!(slater_view, ip, ele_idx, ele_spn, data, state)
                 ctimer_stop!(c_timer, 42)
+            end
+            if n_opt_trans > 0
+                opt_offset = 2 * (n_proj + n_slater) + 2
+                opt_end = opt_offset + 2 * n_opt_trans
+                if opt_end <= length(sr_opt_o)
+                    opt_trans_diff!(@view(sr_opt_o[(opt_offset+1):opt_end]), ip, data, state)
+                end
             end
 
             # Accumulate OO and HO ([43] calculate OO and HO)

@@ -46,6 +46,8 @@ function update_parameter_value(
     layout = MVMCExpertModeParsers.projection_layout(data)
     n_proj = layout.n_proj
     n_rbm = has_rbm_terms(data) ? MVMCExpertModeParsers.count_rbm_parameters(data) : 0
+    n_orbital_idx = MVMCExpertModeParsers.count_orbital_parameters(data)
+    n_opt_trans = MVMCExpertModeParsers.count_opt_trans_parameters(data)
     delta = ComplexF64(delta_real, delta_imag)
 
     if para_idx <= n_proj
@@ -104,16 +106,25 @@ function update_parameter_value(
             section_offset += n_section
         end
     else
-        # Slater (Orbital) parameters
-        # C implementation: Para[n_proj + idx] corresponds to Slater[idx]
-        # With RBM enabled, Slater starts at Para[n_proj + n_rbm].
-        orbital_idx = para_idx - n_proj - n_rbm - 1  # 0-based orbital index
+        slater_start = n_proj + n_rbm + 1
+        opt_trans_start = n_proj + n_rbm + n_orbital_idx + 1
 
-        # Update ALL OrbitalTerms with the same idx
-        # In C, Slater[idx] is a single parameter shared by all site pairs with that idx
-        for term in data.orbital_terms
-            if term.idx == orbital_idx
-                term.value += delta
+        if slater_start <= para_idx < opt_trans_start
+            # Slater (Orbital) parameters.
+            orbital_idx = para_idx - n_proj - n_rbm - 1  # 0-based orbital index
+
+            # Update ALL OrbitalTerms with the same idx.
+            # In C, Slater[idx] is a single parameter shared by all site pairs with that idx.
+            for term in data.orbital_terms
+                if term.idx == orbital_idx
+                    term.value += delta
+                end
+            end
+        elseif opt_trans_start <= para_idx < opt_trans_start + n_opt_trans
+            opt_idx = para_idx - opt_trans_start + 1
+            data.opt_trans[opt_idx] += delta
+            if data.qp_weights !== nothing
+                MVMCExpertModeParsers.update_qp_weight!(data.qp_weights, data.opt_trans)
             end
         end
     end
@@ -227,9 +238,9 @@ function stochastic_opt!(data::ExpertModeData, state::VMCOptimizationState, c_ti
         0
     end
 
-    # C implementation: NPara = NProj + FlagRBM*NRBM + NSlater
+    # C implementation: NPara = NProj + FlagRBM*NRBM + NSlater + NOptTrans
     n_rbm = has_rbm_terms(data) ? MVMCExpertModeParsers.count_rbm_parameters(data) : 0
-    n_para = n_proj + n_rbm + n_orbital_idx
+    n_para = n_proj + n_rbm + n_orbital_idx + MVMCExpertModeParsers.count_opt_trans_parameters(data)
     sr_opt_size = state.sr_opt.sr_opt_size
     sr_opt_oo = state.sr_opt.sr_opt_oo
     sr_opt_ho = state.sr_opt.sr_opt_ho
@@ -739,9 +750,9 @@ function stochastic_opt_cg!(data::ExpertModeData, state::VMCOptimizationState, c
         0
     end
 
-    # C implementation: NPara = NProj + FlagRBM*NRBM + NSlater
+    # C implementation: NPara = NProj + FlagRBM*NRBM + NSlater + NOptTrans
     n_rbm = has_rbm_terms(data) ? MVMCExpertModeParsers.count_rbm_parameters(data) : 0
-    n_para = n_proj + n_rbm + n_orbital_idx
+    n_para = n_proj + n_rbm + n_orbital_idx + MVMCExpertModeParsers.count_opt_trans_parameters(data)
     sr_opt_size = state.sr_opt.sr_opt_size
     n_vmc_sample = data.modpara.nvmc_sample
     all_complex = get_all_complex_flag(data)

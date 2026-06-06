@@ -207,6 +207,72 @@ end
     @test [t.value for t in data.orbital_terms] == orig_orbital
 end
 
+@testset "unit/stochastic_opt: SR enumeration writes OptTrans after Slater" begin
+    data = ExpertModeData()
+    data.modpara = ModParaParameters(
+        nsite = 1,
+        nelec = 1,
+        nvmc_sample = 1,
+        n_orbital_idx = 1,
+        complex_flag = 1,
+        dsr_opt_red_cut = 0.0,
+        dsr_opt_sta_del = 0.0,
+        dsr_opt_step_dt = 0.25,
+    )
+    data.orbital_terms = [
+        OrbitalTerm(0, 0, 0, 10.0 + 0.0im, false, 1),
+    ]
+    data.opt_trans = ComplexF64[
+        1.0 + 0.0im,
+        2.0 + 0.0im,
+    ]
+    data.qp_weights = MVMCExpertModeParsers.QuantumProjectionWeights()
+    data.qp_weights.qp_fix_weight = ComplexF64[2.0 + 0.0im]
+
+    layout = MVMCExpertModeParsers.projection_layout(data)
+    n_para =
+        layout.n_proj +
+        data.modpara.n_orbital_idx +
+        MVMCExpertModeParsers.count_opt_trans_parameters(data)
+    state = MVMCOptimizers.VMCOptimizationState(
+        data.modpara.nsite,
+        data.modpara.nelec,
+        layout.n_proj,
+        n_para,
+        1,
+        data.modpara.nvmc_sample,
+        true,
+        false,
+    )
+
+    # Target OptTrans[2], after the Slater parameter:
+    # para_idx = NProj(0) + NSlater(1) + optidx(2) = 3.
+    target_para_idx = 3
+    target_pi = 2 * (target_para_idx - 1)
+    data.optimization_flags = falses(2 * n_para)
+    data.optimization_flags[target_pi + 1] = true
+
+    sr_opt_size = state.sr_opt.sr_opt_size
+    diag_idx = (target_pi + 2) * (2 * sr_opt_size) + (target_pi + 2) + 1
+    state.sr_opt.sr_opt_oo[diag_idx] = 2.0 + 0.0im
+    state.sr_opt.sr_opt_ho[target_pi + 3] = 3.0 + 0.0im
+
+    orig_orbital = [t.value for t in data.orbital_terms]
+    orig_opt_trans = copy(data.opt_trans)
+
+    info = MVMCOptimizers.stochastic_opt!(data, state)
+
+    @test info == 0
+    # g = -0.25 * 2 * 3 = -1.5; S = 2 => delta = -0.75.
+    @test data.opt_trans[1] == orig_opt_trans[1]
+    @test data.opt_trans[2] == orig_opt_trans[2] - 0.75
+    @test [t.value for t in data.orbital_terms] == orig_orbital
+    @test data.qp_weights.qp_full_weight == ComplexF64[
+        2.0 + 0.0im,
+        2.5 + 0.0im,
+    ]
+end
+
 @testset "unit/stochastic_opt: get_opt_flag_for_parameter" begin
     data = ExpertModeData()
     @test MVMCOptimizers.get_opt_flag_for_parameter(data, 0) == 0
@@ -252,6 +318,14 @@ end
 
     MVMCOptimizers.update_parameter_value(data, 13, real(delta), imag(delta))
     @test data.orbital_terms[3].value == 110.0 + 0.0im + delta
+
+    data.opt_trans = [1.0 + 0.0im, 2.0 + 0.0im]
+    MVMCOptimizers.update_parameter_value(data, 14, real(delta), imag(delta))
+    @test data.opt_trans[1] == 1.0 + 0.0im + delta
+    @test data.opt_trans[2] == 2.0 + 0.0im
+
+    MVMCOptimizers.update_parameter_value(data, 15, real(delta), imag(delta))
+    @test data.opt_trans[2] == 2.0 + 0.0im + delta
 end
 
 @testset "unit/stochastic_opt: build_s_matrix_and_g_vector!" begin

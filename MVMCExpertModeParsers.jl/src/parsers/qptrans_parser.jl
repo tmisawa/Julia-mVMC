@@ -201,3 +201,103 @@ function parse_qptransidx_content(content::String)::ParseResult{Vector{QPTransTe
         context.line_number,
     )
 end
+
+"""
+    parse_opttrans_def!(data::ExpertModeData, filepath::String) -> ExpertModeData
+
+Parse C-mVMC's `opttrans.def` / `QPOptTrans` file and initialise both
+`data.para_qp_opt_trans` and the mutable runtime `data.opt_trans`.
+"""
+function parse_opttrans_def!(data::ExpertModeData, filepath::String)
+    n_site = data.modpara.nsite
+    n_site > 0 || error("OptTrans requires ModPara/Nsite to be parsed before $filepath")
+
+    content = read_def_file(filepath)
+    lines = split(content, '\n')
+    ignore_lines = 5
+    length(lines) > ignore_lines || error("$filepath must include 5 header lines")
+
+    header_tokens = split_def_line(clean_line(lines[2]))
+    length(header_tokens) >= 2 || error("$filepath:2 missing NQPOptTrans header")
+    n_qp_opt_trans = _parse_int_strict(header_tokens[2], filepath, 2, "NQPOptTrans")
+    n_qp_opt_trans >= 1 || error("NQPOptTrans should be larger than 0 in $filepath")
+
+    para = fill(0.0 + 0.0im, n_qp_opt_trans)
+    seen_para = falses(n_qp_opt_trans)
+    line_idx = ignore_lines + 1
+
+    for _ = 1:n_qp_opt_trans
+        while line_idx <= length(lines) && isempty(clean_line(lines[line_idx]))
+            line_idx += 1
+        end
+        line_idx <= length(lines) || error("$filepath ended before ParaQPOptTrans block was complete")
+
+        tokens = split_def_line(clean_line(lines[line_idx]))
+        length(tokens) >= 2 || error("$filepath:$line_idx expected 'idx value'")
+        idx = _parse_int_strict(tokens[1], filepath, line_idx, "ParaQPOptTrans index")
+        0 <= idx < n_qp_opt_trans ||
+            error("$filepath:$line_idx ParaQPOptTrans index $idx out of range [0, $(n_qp_opt_trans - 1)]")
+        !seen_para[idx+1] || error("$filepath:$line_idx duplicated ParaQPOptTrans index $idx")
+        value = _parse_float_strict(tokens[2], filepath, line_idx, "ParaQPOptTrans value")
+        seen_para[idx+1] = true
+        para[idx+1] = ComplexF64(value, 0.0)
+        line_idx += 1
+    end
+
+    missing_para = findfirst(x -> !x, seen_para)
+    missing_para === nothing ||
+        error("$filepath missing ParaQPOptTrans index $(missing_para - 1)")
+
+    qp_opt_trans = [fill(-1, n_site) for _ = 1:n_qp_opt_trans]
+    qp_opt_trans_sgn = [ones(Int, n_site) for _ = 1:n_qp_opt_trans]
+    seen_map = falses(n_qp_opt_trans, n_site)
+
+    while line_idx <= length(lines)
+        line = clean_line(lines[line_idx])
+        if isempty(line)
+            line_idx += 1
+            continue
+        end
+
+        tokens = split_def_line(line)
+        length(tokens) >= 4 || error("$filepath:$line_idx expected 'optidx site mapped sign'")
+        optidx = _parse_int_strict(tokens[1], filepath, line_idx, "QPOptTrans index")
+        site = _parse_int_strict(tokens[2], filepath, line_idx, "site index")
+        mapped = _parse_int_strict(tokens[3], filepath, line_idx, "mapped site index")
+        sign = _parse_int_strict(tokens[4], filepath, line_idx, "QPOptTrans sign")
+
+        0 <= optidx < n_qp_opt_trans ||
+            error("$filepath:$line_idx QPOptTrans index $optidx out of range [0, $(n_qp_opt_trans - 1)]")
+        0 <= site < n_site || error("$filepath:$line_idx site index $site out of range [0, $(n_site - 1)]")
+        0 <= mapped < n_site || error("$filepath:$line_idx mapped site index $mapped out of range [0, $(n_site - 1)]")
+        sign == 1 || sign == -1 || error("$filepath:$line_idx sign must be +1 or -1")
+        !seen_map[optidx+1, site+1] || error("$filepath:$line_idx duplicated QPOptTrans entry optidx=$optidx site=$site")
+
+        seen_map[optidx+1, site+1] = true
+        qp_opt_trans[optidx+1][site+1] = mapped
+        qp_opt_trans_sgn[optidx+1][site+1] = sign
+        line_idx += 1
+    end
+
+    for optidx = 1:n_qp_opt_trans
+        for site = 1:n_site
+            if !seen_map[optidx, site]
+                error("$filepath missing QPOptTrans entry optidx=$(optidx - 1) site=$(site - 1)")
+            end
+        end
+    end
+
+    if data.modpara.nmp_trans >= 0
+        for signs in qp_opt_trans_sgn
+            fill!(signs, 1)
+        end
+    end
+
+    data.n_qp_opt_trans = n_qp_opt_trans
+    data.para_qp_opt_trans = para
+    data.opt_trans = copy(para)
+    data.qp_opt_trans = qp_opt_trans
+    data.qp_opt_trans_sgn = qp_opt_trans_sgn
+
+    return data
+end

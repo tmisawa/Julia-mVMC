@@ -174,10 +174,9 @@ function run_para_opt_from_namelist(namelist_path::AbstractString;
     read_input_parameters!(data, namelist_str)
 
     # 6. Sync / rescale parameters before InitQPWeight, mirroring
-    #    C's SyncModifiedParameter call at vmcmain.c:276. With OptTrans
-    #    not yet implemented in Julia this currently rescales Slater and
-    #    shifts Gutzwiller/Jastrow only; see parameter_sync.jl for the
-    #    explicit OptTrans carve-out.
+    #    C's SyncModifiedParameter call at vmcmain.c:276. This shifts
+    #    correlation factors, rescales Slater, and normalizes OptTrans
+    #    when the OptTrans mode is active.
     sync_modified_parameter!(data)
     ctimer_stop!(c_timer, 13)
 

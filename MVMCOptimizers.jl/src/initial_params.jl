@@ -1,4 +1,8 @@
-using MVMCExpertModeParsers: count_rbm_parameters, projection_layout
+using MVMCExpertModeParsers:
+    count_opt_trans_parameters,
+    count_orbital_parameters,
+    count_rbm_parameters,
+    projection_layout
 
 """
     _load_para_triples!(data::ExpertModeData, text::AbstractString)
@@ -13,7 +17,8 @@ Shared core for the optimized-parameter file layout used by both
 - `NProj` triples `(real, imag, gradient)` for the projection block:
   Gutzwiller, Jastrow, SpinJastrow(0), DH2, then DH4;
 - `NSlater` triples for orbital parameters, scattered into `orbital_terms`
-  via each term's `idx`.
+  via each term's `idx`;
+- `NOptTrans` triples for `OptTrans` when `opttrans.def` is active.
 
 Scope: **Projection block + Slater for `NRBM == 0` only.** RBM remains rejected
 up front because the C file places RBM triples between `NProj` and `NSlater`;
@@ -23,7 +28,7 @@ float-count check below fails loud rather than mis-attributing.
 
 Validate-before-commit: on any problem returns `(false, 0, reason)` and
 leaves `data` untouched. On success commits and returns
-`(true, n_proj + n_slater, "")`. Non-numeric tokens are reported as a stable
+`(true, n_proj + n_slater + n_opt_trans, "")`. Non-numeric tokens are reported as a stable
 reason (not a raw `ArgumentError`) so strict callers can test for them.
 """
 function _load_para_triples!(data::ExpertModeData, text::AbstractString)
@@ -46,27 +51,32 @@ function _load_para_triples!(data::ExpertModeData, text::AbstractString)
 
     layout = projection_layout(data)
     n_proj = layout.n_proj
-    n_slater = data.modpara.n_orbital_idx
+    n_slater = count_orbital_parameters(data)
+    n_opt_trans = count_opt_trans_parameters(data)
 
-    expected_floats = 6 + 3 * (n_proj + n_slater)  # NRBM = 0 verified above
+    expected_floats = 6 + 3 * (n_proj + n_slater + n_opt_trans)  # NRBM = 0 verified above
     if length(values) < expected_floats
         return (
             false,
             0,
             "too short: got $(length(values)) floats, expected $expected_floats " *
-            "(6 + 3*(NProj=$n_proj + NSlater=$n_slater))",
+            "(6 + 3*(NProj=$n_proj + NSlater=$n_slater + NOptTrans=$n_opt_trans))",
         )
     end
-    # Trailing floats beyond the expected count indicate an OptTrans block
-    # (unsupported) or a malformed file. Compare floats, not triples, so 1–2
-    # stray tokens cannot round to zero remaining triples and slip through.
+    # Trailing floats beyond the expected count indicate an OptTrans block only
+    # when OptTrans is not active; otherwise they are malformed file tail.
+    # Compare floats, not triples, so 1-2 stray tokens cannot round to zero
+    # remaining triples and slip through.
     extra_floats = length(values) - expected_floats
     if extra_floats > 0
         n_extra_triples, rem = divrem(extra_floats, 3)
-        reason =
+        reason = if n_opt_trans == 0 && rem == 0
+            "OptTrans-style block of $n_extra_triples triples but OptTrans is not active"
+        else
             rem == 0 ?
-            "OptTrans-style block of $n_extra_triples triples (not supported)" :
+            "$extra_floats trailing floats (file likely malformed)" :
             "$extra_floats trailing floats (not a whole number of triples; file likely malformed)"
+        end
         return (false, 0, reason)
     end
 
@@ -106,8 +116,12 @@ function _load_para_triples!(data::ExpertModeData, text::AbstractString)
             term.value = slater_values[term.idx+1]
         end
     end
+    @inbounds for i = 1:n_opt_trans
+        data.opt_trans[i] = ComplexF64(values[idx], values[idx+1])
+        idx += 3
+    end
 
-    return (true, n_proj + n_slater, "")
+    return (true, n_proj + n_slater + n_opt_trans, "")
 end
 
 """
@@ -133,11 +147,11 @@ Layout (whitespace-separated, all on a single record):
 3. NRBM triples for RBM (only when FlagRBM > 0). **Not yet supported.**
 4. NSlater triples for orbital parameters; values are scattered into
    `data.orbital_terms` via each term's `idx`.
-5. NOptTrans triples for OptTrans (`FlagOptTrans > 0`). **Not yet supported.**
+5. NOptTrans triples for OptTrans (`FlagOptTrans > 0`).
 
 Returns `true` on success, `false` on a recoverable problem (missing file,
-file too short for the parameter count, or unsupported block present such
-as RBM or OptTrans). On `false` an `@warn` is emitted **and `data` is left
+file too short for the parameter count, or unsupported RBM block present).
+On `false` an `@warn` is emitted **and `data` is left
 untouched** — all validation runs before any mutation, so a refused load
 never leaves a partial overlay behind. The caller (e.g.
 `run_para_opt_from_namelist`) decides whether to abort or continue.
@@ -165,15 +179,15 @@ a deterministic gate rather than an optional warm-start overlay:
 
 - **Fails hard** (`error`) instead of `@warn`+`false` on a missing file, a
   non-numeric or non-finite (`NaN`/`Inf`) token, a too-short or trailing-garbage
-  record, or an unsupported block (RBM / OptTrans).
-- **Returns the number of parameters consumed** (`n_proj + n_slater`) so the
+  record, or an unsupported RBM block.
+- **Returns the number of parameters consumed** (`n_proj + n_slater + n_opt_trans`) so the
   caller can assert the fixed parameters were actually applied; errors if zero.
 - Does **not** perturb (the C test driver's `random.uniform` perturbation is
   external), so a committed unperturbed `zqp_opt.dat` loads verbatim.
 
 Scope is the `NSROptItrSmp > 1` layout for `NRBM == 0` projection + Slater
-models; the `NSROptItrSmp == 1` "pairs" layout and RBM/OptTrans models are
-rejected.
+models, with optional OptTrans tail when `opttrans.def` is active; the
+`NSROptItrSmp == 1` "pairs" layout and RBM models are rejected.
 """
 function read_opt_para_file!(data::ExpertModeData, opt_para_path::AbstractString)::Int
     isfile(opt_para_path) ||

@@ -21,11 +21,6 @@ function update_qp_weight!(data::ExpertModeData)
         return
     end
 
-    # Get OptTrans values if available
-    # OptTrans is stored in data.orbital_terms or as a separate field
-    # For now, use empty vector (no OptTrans)
-    opt_trans = ComplexF64[]
-
     # Use MVMCExpertModeParsers function
-    MVMCExpertModeParsers.update_qp_weight!(data.qp_weights, opt_trans)
+    MVMCExpertModeParsers.update_qp_weight!(data.qp_weights, data.opt_trans)
 end

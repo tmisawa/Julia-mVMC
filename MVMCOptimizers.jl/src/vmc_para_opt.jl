@@ -153,10 +153,11 @@ function vmc_para_opt!(
         0
     end
 
-    # C implementation: NPara = NProj + FlagRBM*NRBM + NSlater
+    # C implementation: NPara = NProj + FlagRBM*NRBM + NSlater + NOptTrans
     n_rbm = has_rbm_terms(data) ? MVMCExpertModeParsers.count_rbm_parameters(data) : 0
-    n_para = n_proj + n_rbm + n_orbital_idx
-    @info "NPara=$n_para (NProj=$n_proj + NRBM=$n_rbm + NOrbitalIdx=$n_orbital_idx)"
+    n_opt_trans = MVMCExpertModeParsers.count_opt_trans_parameters(data)
+    n_para = n_proj + n_rbm + n_orbital_idx + n_opt_trans
+    @info "NPara=$n_para (NProj=$n_proj + NRBM=$n_rbm + NOrbitalIdx=$n_orbital_idx + NOptTrans=$n_opt_trans)"
 
     # Initialize optimization flags if empty
     # C: OptFlag[2*i] = 1 for parameters to optimize

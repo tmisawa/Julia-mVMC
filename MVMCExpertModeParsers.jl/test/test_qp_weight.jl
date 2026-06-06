@@ -116,6 +116,27 @@ function test_init_qp_weight_nsp_gauss_leg_1()
     end
 end
 
+function test_init_qp_weight_data_opttrans()
+    @testset "init_qp_weight! uses ExpertModeData.opt_trans" begin
+        data = ExpertModeData()
+        data.modpara.nsp_gauss_leg = 1
+        data.modpara.nsp_stot = 0
+        data.modpara.nmp_trans = 2
+        data.para_qp_trans = [1.0 + 0.0im, 2.0 + 0.0im]
+        data.opt_trans = [0.5 + 0.0im, 1.5 + 0.0im]
+
+        init_qp_weight!(data)
+
+        @test data.qp_weights.qp_fix_weight == ComplexF64[1.0 + 0.0im, 2.0 + 0.0im]
+        @test data.qp_weights.qp_full_weight == ComplexF64[
+            0.5 + 0.0im,
+            1.0 + 0.0im,
+            1.5 + 0.0im,
+            3.0 + 0.0im,
+        ]
+    end
+end
+
 """
     test_update_qp_weight()
 
@@ -185,6 +206,7 @@ end
     test_legendre_poly()
     test_init_qp_weight_basic()
     test_init_qp_weight_nsp_gauss_leg_1()
+    test_init_qp_weight_data_opttrans()
     test_update_qp_weight()
     test_init_qp_weight_trigonometric()
 end

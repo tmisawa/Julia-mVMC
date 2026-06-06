@@ -10,9 +10,9 @@
 | `VMCMainCal_fsz` | `vmc_main_cal_fsz!` | ✅ |
 | `VMCMakeSample` | `vmc_make_sample!` | ✅ |
 | `InitParameter` | `init_parameter!` (MVMCExpertModeParsers) | ✅ |
-| `ReadInitParameter` | `read_initial_def!` (MVMCOptimizers) | ✅ (RBM and OptTrans blocks refused; see manual §2) |
+| `ReadInitParameter` | `read_initial_def!` (MVMCOptimizers) | ✅ (RBM block refused; OptTrans tail consumed when active) |
 | `ReadInputParameters` | `read_input_parameters!` (MVMCExpertModeParsers) | ✅ (In*.def parser; consumption depends on the block) |
-| `SyncModifiedParameter` | `sync_modified_parameter!` (MVMCOptimizers) | ✅ Slater rescale + GJ shift; OptTrans normalisation pending |
+| `SyncModifiedParameter` | `sync_modified_parameter!` (MVMCOptimizers) | ✅ Slater rescale + GJ/DH shift + OptTrans normalization |
 | `InitQPWeight` | `init_qp_weight!` (MVMCExpertModeParsers) | ✅ |
 | `CalculateHamiltonian` | `calculate_hamiltonian` | ✅ |
 | `CalculateHamiltonian_fsz` | `calculate_hamiltonian_fsz` | ✅ |
@@ -112,8 +112,7 @@ for provenance and regeneration instructions.
 - **`InterAllTerm` full spin metadata** — when `interall.def` omits
   per-term spin info, defaults are substituted (see
   `src/vmc_main_cal.jl`).
-- Selected `.def` overlay files: `InOrbitalParallel`, `InOptTrans`, and `OptTrans`-bearing
-  `initial.def` are recognised but not consumed (warn-only). The
-  Gutzwiller / Jastrow / DH2 / DH4 / Orbital / OrbitalGeneral / 9-channel RBM
-  `In*` overlays **are** consumed. See
-  [`02_input_files.md`](02_input_files.md) for the full table.
+- `initial.def` layouts with RBM triples are still refused because the C file
+  places RBM between `NProj` and `NSlater`; reading that block without full RBM
+  support would corrupt the Slater slice. See
+  [`02_input_files.md`](02_input_files.md) for the full input table.

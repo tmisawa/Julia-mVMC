@@ -75,6 +75,42 @@ end
     end
 end
 
+@testset "unit/vmc_main_cal: opt_trans_diff!" begin
+    data = ExpertModeData()
+    data.modpara = ModParaParameters(complex_flag = 1)
+    data.opt_trans = [1.0 + 0.0im, 2.0 + 0.0im]
+    data.qp_weights = MVMCExpertModeParsers.QuantumProjectionWeights()
+    data.qp_weights.qp_fix_weight = ComplexF64[
+        2.0 + 0.0im,
+        3.0 + 0.0im,
+    ]
+
+    state = MVMCOptimizers.VMCOptimizationState(1, 1, 0, 2, 4, 1, true, false)
+    state.slater_matrix.pf_m .= ComplexF64[
+        1.0 + 1.0im,
+        2.0 - 1.0im,
+        -1.0 + 0.5im,
+        0.25 - 2.0im,
+    ]
+
+    ip = 5.0 - 2.0im
+    sr_opt_o = fill(99.0 + 99.0im, 2 * length(data.opt_trans))
+
+    MVMCOptimizers.opt_trans_diff!(sr_opt_o, ip, data, state)
+
+    expected1 =
+        (data.qp_weights.qp_fix_weight[1] * state.slater_matrix.pf_m[1] +
+         data.qp_weights.qp_fix_weight[2] * state.slater_matrix.pf_m[2]) / ip
+    expected2 =
+        (data.qp_weights.qp_fix_weight[1] * state.slater_matrix.pf_m[3] +
+         data.qp_weights.qp_fix_weight[2] * state.slater_matrix.pf_m[4]) / ip
+
+    @test sr_opt_o[1] == expected1
+    @test sr_opt_o[2] == im * expected1
+    @test sr_opt_o[3] == expected2
+    @test sr_opt_o[4] == im * expected2
+end
+
 @testset "unit/vmc_main_cal: calculate_oo!" begin
     sr_opt_size = 3
     size_2 = 2 * sr_opt_size

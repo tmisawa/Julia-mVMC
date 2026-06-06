@@ -150,6 +150,7 @@ function parse_expert_mode_files(namelist_path::String)::ExpertModeData
             set_dh_opt_flags!(data)
             apply_rbm_opt_flags_from_files!(data, file_list, base_dir)
             apply_orbital_opt_flags_from_files!(data, file_list, base_dir)
+            set_opt_trans_opt_flags!(data)
 
             # Judge orbital mode (equivalent to C's JudgeOrbitalMode)
             judge_orbital_mode!(data)
@@ -662,6 +663,8 @@ function parse_file_by_type!(data::ExpertModeData, file_type::String, file_path:
                 build_qp_trans_mappings!(data, file_path)
             end
         end
+    elseif file_type == "OptTrans"
+        parse_opttrans_def!(data, file_path)
     elseif file_type == "ChargeRBM_PhysLayer"
         result = parse_charge_rbm_phys_layer_def(file_path)
         if result.success
