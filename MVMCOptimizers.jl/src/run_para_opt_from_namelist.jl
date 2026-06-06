@@ -95,7 +95,7 @@ function run_para_opt_from_namelist(namelist_path::AbstractString;
     #   InitParameter        → init_parameter!            (random init only)
     #   ReadInitParameter    → read_initial_def!          (initial.def overlay)
     #   ReadInputParameters  → read_input_parameters!     (In*.def overlay)
-    #   SyncModifiedParameter→ sync_modified_parameter!   (Slater rescale + GJ shift)
+    #   SyncModifiedParameter→ sync_modified_parameter!   (Slater rescale + DH/GJ shift)
     #   InitQPWeight         → init_qp_weight!
     # NOTE: we deliberately call `init_parameter!`, NOT `initialize_parameters!`
     # — the latter wraps a parser-side sync that would rescale Slater values

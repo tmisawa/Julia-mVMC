@@ -68,65 +68,69 @@ function shift_dh4!(data::ExpertModeData, layout = MVMCExpertModeParsers.project
 end
 
 """
-    sync_modified_parameter!(data::ExpertModeData)
+    sync_modified_parameter!(data::ExpertModeData; shift_correlations::Bool = true)
 
 Sync modified parameters.
 Equivalent to C's `SyncModifiedParameter()`.
 
 This function:
+- Shifts DH/Gutzwiller/Jastrow parameters when `shift_correlations` is true
 - Rescales Slater parameters to ensure maximum amplitude <= D_AMP_MAX (4.0)
 - Similar to C implementation's SyncModifiedParameter() after parameter updates
 
 # Arguments
 - `data::ExpertModeData`: Expert Mode data structure to modify
+- `shift_correlations::Bool`: apply DH/Gutzwiller/Jastrow gauge shifts
 
 # Notes
-- Only rescales Slater (Orbital) parameters
+- C enables DH/Gutzwiller/Jastrow shift flags only in optimization mode
 - Finds maximum absolute value and scales all parameters proportionally
 - Ensures max(|Slater[i]|) <= D_AMP_MAX
 """
-function sync_modified_parameter!(data::ExpertModeData)
+function sync_modified_parameter!(data::ExpertModeData; shift_correlations::Bool = true)
     layout = MVMCExpertModeParsers.projection_layout(data)
 
-    g_shift = 0.0
-    flag_shift_dh2(data, layout) && (g_shift += shift_dh2!(data, layout))
-    flag_shift_dh4(data, layout) && (g_shift += shift_dh4!(data, layout))
-    if g_shift != 0.0
-        for term in data.gutzwiller_terms
-            term.value += g_shift
-        end
-    end
-
-    # Shift Gutzwiller/Jastrow if all are optimized (C: FlagShiftGJ / shiftGJ)
-    n_gutz = length(data.gutzwiller_terms)
-    n_jast = length(data.jastrow_terms)
-    flag_shift_gj = false
-    if n_gutz > 0 && n_jast > 0
-        if isempty(data.optimization_flags)
-            # Default: treat all parameters as optimized
-            flag_shift_gj = true
-        else
-            all_gutz = all(i -> is_gutzwiller_optimized(data, i), 1:n_gutz)
-            all_jast = all(i -> is_jastrow_optimized(data, i), 1:n_jast)
-            flag_shift_gj = all_gutz && all_jast
-        end
-    end
-    if flag_shift_gj
-        shift = 0.0
-        n_all = n_gutz + n_jast
-        for term in data.gutzwiller_terms
-            shift += real(term.value)
-        end
-        for term in data.jastrow_terms
-            shift += real(term.value)
-        end
-        if n_all > 0
-            shift /= n_all
+    if shift_correlations
+        g_shift = 0.0
+        flag_shift_dh2(data, layout) && (g_shift += shift_dh2!(data, layout))
+        flag_shift_dh4(data, layout) && (g_shift += shift_dh4!(data, layout))
+        if g_shift != 0.0
             for term in data.gutzwiller_terms
-                term.value -= shift
+                term.value += g_shift
+            end
+        end
+
+        # Shift Gutzwiller/Jastrow if all are optimized (C: FlagShiftGJ / shiftGJ)
+        n_gutz = length(data.gutzwiller_terms)
+        n_jast = length(data.jastrow_terms)
+        flag_shift_gj = false
+        if n_gutz > 0 && n_jast > 0
+            if isempty(data.optimization_flags)
+                # Default: treat all parameters as optimized
+                flag_shift_gj = true
+            else
+                all_gutz = all(i -> is_gutzwiller_optimized(data, i), 1:n_gutz)
+                all_jast = all(i -> is_jastrow_optimized(data, i), 1:n_jast)
+                flag_shift_gj = all_gutz && all_jast
+            end
+        end
+        if flag_shift_gj
+            shift = 0.0
+            n_all = n_gutz + n_jast
+            for term in data.gutzwiller_terms
+                shift += real(term.value)
             end
             for term in data.jastrow_terms
-                term.value -= shift
+                shift += real(term.value)
+            end
+            if n_all > 0
+                shift /= n_all
+                for term in data.gutzwiller_terms
+                    term.value -= shift
+                end
+                for term in data.jastrow_terms
+                    term.value -= shift
+                end
             end
         end
     end
