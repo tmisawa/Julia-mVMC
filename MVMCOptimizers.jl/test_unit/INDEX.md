@@ -132,8 +132,8 @@
 
 ### `test/integration/phys_cal_equivalent.jl`（PhysCal e2e gate, Plan 3b）
 - CI: 専用 step `julia --project=@. test/integration/phys_cal_equivalent.jl`（`JULIA_MVMC_PHYS_CAL_MODELS` で subset 可）。subpackage の Pkg.test には含めない（explicit file invocation, ctest_equivalent.jl と同方式）
-  - 4 系（heisenberg_chain_real/cmp, hubbard_chain_real, kondo_chain_real）の `reference/<sys>/physcal_ref/`（NVMCCalMode=1 + 手書き `greentwoex.def`）に対し `run_phys_cal_from_namelist` を tempdir で実行 → `status==0`・`n_para_consumed` 厳密一致・3 Green 出力（one-body/direct/factored）を committed C reference と green_compare（`test_run_phys_cal_contract.jl` が defer した数値 e2e の実体）
-  - C reference は mVMC develop @ 66f1742 を Apple Clang + gfortran で build（USE_GEMMT=OFF）。Julia–C は機械精度一致（factored は 3/4 系で byte-exact）
+  - 5 系（heisenberg_chain_real/cmp, hubbard_chain_real, hubbard_chain_dh_real, kondo_chain_real）の `reference/<sys>/physcal_ref/`（NVMCCalMode=1 + 手書き `greentwoex.def`、DH 系は `dh2.def`/`dh4.def` も含む）に対し `run_phys_cal_from_namelist` を tempdir で実行 → `status==0`・`n_para_consumed` 厳密一致・3 Green 出力（one-body/direct/factored）を committed C reference と green_compare（`test_run_phys_cal_contract.jl` が defer した数値 e2e の実体）
+  - C reference は主に mVMC develop @ 66f1742 を Apple Clang + gfortran で build（USE_GEMMT=OFF）。DH fixture は同 commit ベースの local benchmark branch @ 622166a で生成
 
 ---
 

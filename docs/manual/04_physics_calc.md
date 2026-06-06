@@ -16,6 +16,7 @@
 | 1-body Green function `<c†_i c_j>` | ✅ | Matches C reference for HeisenbergChain. |
 | 2-body Green function (direct), `<c†_i c_j c†_k c_l>` (`TwoBodyG`/`greentwo.def`) | ✅ | Output `zvo_cisajscktalt_*.dat`. |
 | 2-body Green function (factored/product), `<c†_i c_j>·<c†_k c_l>` (`TwoBodyGEx`/`greentwoex.def`) | ✅ (non-FSZ) | Output `zvo_cisajscktaltex_*.dat`. Matches C to the gate tolerance for real, complex (cmp) and Kondo systems. FSZ is rejected at runtime (see below). |
+| Doublon-holon projection (`DH2`/`DH4`) | ✅ | DH-present PhysCal fixture is gated against C reference data. |
 | Weighted average over QP weights (`weight_average_green_func!`) | ✅ | Same convention as C (Σ w_i G_i / Σ w_i). |
 | Output to `zvo_cisajs_*.dat`, `zvo_cisajscktalt_*.dat`, `zvo_cisajscktaltex_*.dat` | ✅ | C-compatible per-row / value-only format. |
 
@@ -31,9 +32,6 @@
   any `BackFlow*` keyword in `namelist.def`) are not supported; remove
   those keywords or fall back to the C reference at
   <https://github.com/issp-center-dev/mVMC>.
-- **Doublon-holon correlation factor** — `DH2` / `DH4` index files are
-  parsed, but physics calculation rejects active DH inputs until DH-2 wires the
-  projection counters, logs, and parameter loaders.
 - **MPI parallelisation** — `reduce_counter!` is a no-op in this release, and
   `NSplitSize > 1` is rejected with an unsupported-MPI error until MPI
   support is implemented. `NSplitSize = 1` is the only supported setting.

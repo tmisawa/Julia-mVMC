@@ -20,6 +20,7 @@ relative to its own directory.
 | `interall.def` (`InterAll`) | general 4-fermion interaction | ✅ |
 | `gutzwilleridx.def` (`Gutzwiller`) | Gutzwiller correlator indexing | ✅ |
 | `jastrowidx.def` (`Jastrow`) | Jastrow indexing | ✅ |
+| `dh2.def` / `dh4.def` (`DH2`, `DH4`) | doublon-holon index tables and projection slices | ✅ |
 | `orbitalidx.def` (`Orbital`) | Slater orbital indexing | ✅ |
 | `orbitalidxgen.def` (`OrbitalGeneral`) | fsz mode generalised orbital | ✅ |
 | `orbitalidxpara.def` (`OrbitalParallel`) | parallel-orbital block | ✅ |
@@ -40,6 +41,7 @@ value wins.
 |------|------|------|
 | `InGutzwiller.def` (`InGutzwiller`) | `gutzwiller_terms[i].value` | ✅ |
 | `InJastrow.def` (`InJastrow`) | `jastrow_terms[i].value` | ✅ |
+| `InDH2.def`, `InDH4.def` | doublon-holon projection parameter vectors | ✅ |
 | `InOrbital.def` / `InOrbitalAntiParallel.def` | `orbital_terms[i].value` | ✅ |
 | `InOrbitalGeneral.def` | `orbital_terms[i].value` (fsz layout) | ✅ |
 | `InChargeRBM_PhysLayer.def`, `_HiddenLayer.def`, `_PhysHidden.def` | corresponding RBM term arrays | ✅ |
@@ -55,8 +57,6 @@ active is not reproducible bit-for-bit.
 |------|--------|
 | `pairhop.def` (`PairHop`) | Pair-hopping interaction not wired into `CalculateHamiltonian`. |
 | `spinjastrow.def` (`SpinJastrow`) | Not implemented; parser hard-fails if the keyword is present because it would change projection offsets. |
-| `dh2.def` / `dh4.def` (`DH2`, `DH4`) | Parsed as C-compatible doublon-holon index tables and included in projection layout, but VMC execution rejects them until DH-2 wires counters/logs/loaders. |
-| `InDH2.def`, `InDH4.def` | `read_input_parameters!` emits a warning and skips (DH parameter overlays are not executable until DH-2). |
 | `InOrbitalParallel.def` | `read_input_parameters!` emits a warning and skips (the C-side `iNOrbitalAntiParallel` offset path is not yet implemented). |
 | `InOptTrans.def` | `read_input_parameters!` emits a warning and skips. The `FlagOptTrans` gate and `OptTrans[]` storage do not exist on the Julia side yet. |
 | `OptTrans` block in `initial.def` | Refused with a warning by `read_initial_def!` because `FlagOptTrans` / `OptTrans[]` are not implemented yet. |
@@ -82,8 +82,9 @@ active is not reproducible bit-for-bit.
 
 ## Generating inputs
 
-The samples in [`examples/inputs/`](../../examples/inputs/) and
+Most samples in [`examples/inputs/`](../../examples/inputs/) and
 [`test/integration/reference/`](../../test/integration/reference/) were
-all produced by C-mVMC's StdFace. To create new inputs, use C-mVMC's
-StdFace generator and copy the resulting `.def` files into a directory;
-Julia-mVMC will read them as-is.
+produced by C-mVMC's StdFace. DH2/DH4 fixtures add hand-authored DH index
+tables on top because StdFace does not emit DH files. To create new non-DH
+inputs, use C-mVMC's StdFace generator and copy the resulting `.def` files into
+a directory; Julia-mVMC will read them as-is.
