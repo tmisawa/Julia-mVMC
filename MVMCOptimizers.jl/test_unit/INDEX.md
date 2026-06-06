@@ -103,10 +103,11 @@
 
 ### `src/initial_params.jl`（fixed-parameter loader, Plan 3a）
 - `test_unit/test_unit_read_opt_para.jl`
-  - `read_opt_para_file!: golden load + consumed count` → 6+triples レイアウトを Gutzwiller/Jastrow/Slater に読み込み、消費数（n_proj+n_slater）を返す
+  - `read_opt_para_file!: golden load + consumed count` → 6+triples レイアウトを Gutzwiller/Jastrow/Slater（no-DH）に読み込み、消費数（n_proj+n_slater）を返す
   - `non-perturbing (idempotent) load` → 二重ロードで同一（RNG 非依存）
   - `strict failures error with a clear message` → 欠損 / 空 / short / trailing（1 float・whole triple=OptTrans）/ non-numeric token を `error()`（メッセージ部分文字列で検証）
-  - `DoublonHolon models are rejected (scope guard)` → DH ありは reject（C は DH triple を Slater 前に並べるため・design-review LOADER-1）
+  - `DH projection block loads before Slater` → `NProj` 内の DH2 block を読み込み、Slater が DH の後ろから正しく scatter されることを検証
+  - `RBM-bearing models still fail loud` → 将来 RBM block を Slater と誤読しないため、`NRBM > 0` は DH-2 でも loader reject
   - `read_initial_def! still loads the same layout (delegation regression)` → 共有 `_load_para_triples!` への委譲後も成功/欠損 warn+false が不変
 
 ### `src/run_phys_cal_from_namelist.jl`（PhysCal runner, Plan 3a）
@@ -132,4 +133,3 @@
   - `contract/trans.def: spin1/spin2 are preserved`
 - `../MVMCExpertModeParsers.jl/test/test_read_input_parameters_rbm_layout.jl`
   - `contract/read_input_parameters: RBM layout (count/offsets)`
-

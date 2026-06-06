@@ -7,6 +7,7 @@ using MVMCExpertModeParsers:
     GutzwillerTerm,
     JastrowTerm,
     OrbitalTerm,
+    DoublonHolon2SiteIndex,
     ChargeRBMPhysLayerTerm,
     SpinRBMPhysLayerTerm,
     GeneralRBMPhysLayerTerm,
@@ -55,6 +56,41 @@ function make_mock_data_for_stochastic_opt_tests()
     data.modpara = ModParaParameters(n_orbital_idx = 2)
 
     return data
+end
+
+@testset "unit/stochastic_opt: update_parameter_value DH write-back and shifted offsets" begin
+    data = make_mock_data_for_stochastic_opt_tests()
+    data.doublon_holon_2site_indices = [
+        DoublonHolon2SiteIndex([
+            1 0
+            0 1
+        ]),
+    ]
+    data.doublon_holon_2site_params = [ComplexF64(1000 + i, 0) for i = 1:6]
+    data.doublon_holon_2site_opt_flags = fill(true, 6)
+
+    delta = -0.125 + 0.375im
+    orig_charge_phys = [t.value for t in data.charge_rbm_phys_layer_terms]
+    orig_orbital = [t.value for t in data.orbital_terms]
+
+    # NProj = Gutz(1) + Jastrow(1) + DH2(6) = 8. DH occupies para_idx 3..8.
+    MVMCOptimizers.update_parameter_value(data, 3, real(delta), imag(delta))
+    @test data.doublon_holon_2site_params[1] == 1001.0 + 0.0im + delta
+    @test [t.value for t in data.charge_rbm_phys_layer_terms] == orig_charge_phys
+    @test [t.value for t in data.orbital_terms] == orig_orbital
+
+    MVMCOptimizers.update_parameter_value(data, 8, real(delta), imag(delta))
+    @test data.doublon_holon_2site_params[6] == 1006.0 + 0.0im + delta
+
+    # RBM and Slater offsets move after the DH projection slice.
+    MVMCOptimizers.update_parameter_value(data, 9, real(delta), imag(delta))
+    @test data.charge_rbm_phys_layer_terms[1].value == orig_charge_phys[1] + delta
+    @test data.charge_rbm_phys_layer_terms[2].value == orig_charge_phys[2] + delta
+
+    MVMCOptimizers.update_parameter_value(data, 18, real(delta), imag(delta))
+    @test data.orbital_terms[1].value == orig_orbital[1] + delta
+    @test data.orbital_terms[2].value == orig_orbital[2] + delta
+    @test data.orbital_terms[3].value == orig_orbital[3]
 end
 
 @testset "unit/stochastic_opt: get_opt_flag_for_parameter" begin

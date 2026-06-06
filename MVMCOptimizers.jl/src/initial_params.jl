@@ -1,4 +1,4 @@
-using MVMCExpertModeParsers: count_rbm_parameters, has_doublon_holon, projection_layout
+using MVMCExpertModeParsers: count_rbm_parameters, projection_layout
 
 """
     _load_para_triples!(data::ExpertModeData, text::AbstractString)
@@ -10,16 +10,16 @@ Shared core for the optimized-parameter file layout used by both
 (`NSROptItrSmp > 1` layout):
 
 - 6 leading floats (energy diagnostics) skipped;
-- `NProj` triples `(real, imag, gradient)` for Gutzwiller then Jastrow;
+- `NProj` triples `(real, imag, gradient)` for the projection block:
+  Gutzwiller, Jastrow, SpinJastrow(0), DH2, then DH4;
 - `NSlater` triples for orbital parameters, scattered into `orbital_terms`
   via each term's `idx`.
 
-Scope: **Gutzwiller + Jastrow + Slater only.** RBM and DoublonHolon are
-rejected up front: the C file carries extra triples for them (between NProj
-and NSlater) that this loader does not place, so silently reading them would
-corrupt Slater (design-review LOADER-1). SpinJastrow is not parsed by the
-toolchain at all; if a future model adds it, the float-count check below
-fails loud rather than mis-attributing.
+Scope: **Projection block + Slater for `NRBM == 0` only.** RBM remains rejected
+up front because the C file places RBM triples between `NProj` and `NSlater`;
+silently reading that future block as Slater would corrupt Slater. SpinJastrow
+is not parsed by the toolchain at all; if a future model adds it, the
+float-count check below fails loud rather than mis-attributing.
 
 Validate-before-commit: on any problem returns `(false, 0, reason)` and
 leaves `data` untouched. On success commits and returns
@@ -30,15 +30,6 @@ function _load_para_triples!(data::ExpertModeData, text::AbstractString)
     n_rbm = count_rbm_parameters(data)
     if n_rbm > 0
         return (false, 0, "RBM-bearing models are not supported by this loader (n_rbm = $n_rbm)")
-    end
-    if has_doublon_holon(data)
-        layout = projection_layout(data)
-        n_dh = layout.n_dh2 + layout.n_dh4
-        return (
-            false,
-            0,
-            "DoublonHolon parameters are not supported by this loader (n_dh = $n_dh)",
-        )
     end
 
     tokens = split(strip(text))
@@ -53,12 +44,11 @@ function _load_para_triples!(data::ExpertModeData, text::AbstractString)
         values[i] = v
     end
 
-    n_gutzwiller = length(data.gutzwiller_terms)
-    n_jastrow = length(data.jastrow_terms)
-    n_proj = projection_layout(data).n_proj
+    layout = projection_layout(data)
+    n_proj = layout.n_proj
     n_slater = data.modpara.n_orbital_idx
 
-    expected_floats = 6 + 3 * (n_proj + n_slater)  # NRBM = 0, NDH = 0 verified above
+    expected_floats = 6 + 3 * (n_proj + n_slater)  # NRBM = 0 verified above
     if length(values) < expected_floats
         return (
             false,
@@ -82,12 +72,28 @@ function _load_para_triples!(data::ExpertModeData, text::AbstractString)
 
     # ── Commit phase: validation passed, now mutate `data`. ──────────────
     idx = 7  # skip 6 leading floats (1-based: start at index 7)
-    @inbounds for i = 1:n_gutzwiller
-        data.gutzwiller_terms[i].value = ComplexF64(values[idx], values[idx+1])
+    @inbounds for i = 1:layout.n_gutzwiller
+        if i <= length(data.gutzwiller_terms)
+            data.gutzwiller_terms[i].value = ComplexF64(values[idx], values[idx+1])
+        end
         idx += 3
     end
-    @inbounds for i = 1:n_jastrow
-        data.jastrow_terms[i].value = ComplexF64(values[idx], values[idx+1])
+    @inbounds for i = 1:layout.n_jastrow
+        if i <= length(data.jastrow_terms)
+            data.jastrow_terms[i].value = ComplexF64(values[idx], values[idx+1])
+        end
+        idx += 3
+    end
+    @inbounds for i = 1:(6 * layout.n_dh2)
+        if i <= length(data.doublon_holon_2site_params)
+            data.doublon_holon_2site_params[i] = ComplexF64(values[idx], values[idx+1])
+        end
+        idx += 3
+    end
+    @inbounds for i = 1:(10 * layout.n_dh4)
+        if i <= length(data.doublon_holon_4site_params)
+            data.doublon_holon_4site_params[i] = ComplexF64(values[idx], values[idx+1])
+        end
         idx += 3
     end
     slater_values = Vector{ComplexF64}(undef, n_slater)
@@ -122,7 +128,8 @@ any `In*.def` files, matching C's order in `vmcmain.c:264-272`
 
 Layout (whitespace-separated, all on a single record):
 1. 6 leading floats are skipped (energy diagnostics written by C).
-2. NProj triples `(real, imag, gradient)` for Gutzwiller + Jastrow.
+2. NProj triples `(real, imag, gradient)` for the projection block
+   (`Gutzwiller | Jastrow | SpinJastrow(0) | DH2 | DH4`).
 3. NRBM triples for RBM (only when FlagRBM > 0). **Not yet supported.**
 4. NSlater triples for orbital parameters; values are scattered into
    `data.orbital_terms` via each term's `idx`.
@@ -158,15 +165,15 @@ a deterministic gate rather than an optional warm-start overlay:
 
 - **Fails hard** (`error`) instead of `@warn`+`false` on a missing file, a
   non-numeric or non-finite (`NaN`/`Inf`) token, a too-short or trailing-garbage
-  record, or an unsupported block (RBM / DoublonHolon / OptTrans).
+  record, or an unsupported block (RBM / OptTrans).
 - **Returns the number of parameters consumed** (`n_proj + n_slater`) so the
   caller can assert the fixed parameters were actually applied; errors if zero.
 - Does **not** perturb (the C test driver's `random.uniform` perturbation is
   external), so a committed unperturbed `zqp_opt.dat` loads verbatim.
 
-Scope is the `NSROptItrSmp > 1` layout for Gutzwiller + Jastrow + Slater models
-(the Plan 3 PhysCal fixtures); the `NSROptItrSmp == 1` "pairs" layout and
-RBM/DoublonHolon/OptTrans models are rejected.
+Scope is the `NSROptItrSmp > 1` layout for `NRBM == 0` projection + Slater
+models; the `NSROptItrSmp == 1` "pairs" layout and RBM/OptTrans models are
+rejected.
 """
 function read_opt_para_file!(data::ExpertModeData, opt_para_path::AbstractString)::Int
     isfile(opt_para_path) ||

@@ -8,6 +8,65 @@ using MVMCExpertModeParsers: is_gutzwiller_optimized, is_jastrow_optimized
 
 const D_AMP_MAX = 4.0  # Maximum amplitude for Slater parameters (D_AmpMax)
 
+function _real_opt_flag(data::ExpertModeData, fidx0::Int)::Bool
+    isempty(data.optimization_flags) && return true
+    flag_idx = 2 * fidx0 + 1
+    return flag_idx <= length(data.optimization_flags) && data.optimization_flags[flag_idx]
+end
+
+function _all_gutzwiller_real_optimized(data::ExpertModeData, layout)::Bool
+    layout.n_gutzwiller > 0 || return false
+    return all(i -> _real_opt_flag(data, layout.gutzwiller_offset + i - 1), 1:layout.n_gutzwiller)
+end
+
+function flag_shift_dh2(data::ExpertModeData, layout = MVMCExpertModeParsers.projection_layout(data))::Bool
+    layout.n_dh2 > 0 || return false
+    _all_gutzwiller_real_optimized(data, layout) || return false
+    return all(i -> _real_opt_flag(data, layout.dh2_offset + i - 1), 1:(6 * layout.n_dh2))
+end
+
+function flag_shift_dh4(data::ExpertModeData, layout = MVMCExpertModeParsers.projection_layout(data))::Bool
+    layout.n_dh4 > 0 || return false
+    _all_gutzwiller_real_optimized(data, layout) || return false
+    return all(i -> _real_opt_flag(data, layout.dh4_offset + i - 1), 1:(10 * layout.n_dh4))
+end
+
+function shift_dh2!(data::ExpertModeData, layout = MVMCExpertModeParsers.projection_layout(data))::Float64
+    layout.n_dh2 == 0 && return 0.0
+    params = data.doublon_holon_2site_params
+    g_shift = 0.0
+    for group0 = 0:(2 * layout.n_dh2 - 1)
+        i0 = group0 + 1
+        i1 = group0 + 2 * layout.n_dh2 + 1
+        i2 = group0 + 4 * layout.n_dh2 + 1
+        if i2 <= length(params)
+            shift = (real(params[i0]) + real(params[i1]) + real(params[i2])) / 3.0
+            params[i0] -= shift
+            params[i1] -= shift
+            params[i2] -= shift
+            g_shift += shift
+        end
+    end
+    return g_shift
+end
+
+function shift_dh4!(data::ExpertModeData, layout = MVMCExpertModeParsers.projection_layout(data))::Float64
+    layout.n_dh4 == 0 && return 0.0
+    params = data.doublon_holon_4site_params
+    g_shift = 0.0
+    for group0 = 0:(2 * layout.n_dh4 - 1)
+        indices = ntuple(k -> group0 + 2 * (k - 1) * layout.n_dh4 + 1, 5)
+        if indices[end] <= length(params)
+            shift = sum(real(params[i]) for i in indices) / 5.0
+            for i in indices
+                params[i] -= shift
+            end
+            g_shift += shift
+        end
+    end
+    return g_shift
+end
+
 """
     sync_modified_parameter!(data::ExpertModeData)
 
@@ -27,6 +86,17 @@ This function:
 - Ensures max(|Slater[i]|) <= D_AMP_MAX
 """
 function sync_modified_parameter!(data::ExpertModeData)
+    layout = MVMCExpertModeParsers.projection_layout(data)
+
+    g_shift = 0.0
+    flag_shift_dh2(data, layout) && (g_shift += shift_dh2!(data, layout))
+    flag_shift_dh4(data, layout) && (g_shift += shift_dh4!(data, layout))
+    if g_shift != 0.0
+        for term in data.gutzwiller_terms
+            term.value += g_shift
+        end
+    end
+
     # Shift Gutzwiller/Jastrow if all are optimized (C: FlagShiftGJ / shiftGJ)
     n_gutz = length(data.gutzwiller_terms)
     n_jast = length(data.jastrow_terms)

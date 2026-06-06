@@ -46,10 +46,6 @@ function vmc_phys_cal!(
 )::Int
     # Reject unsupported ModPara inputs (e.g. NSplitSize > 1) before any work.
     validate_supported_modpara(data.modpara)
-    if MVMCExpertModeParsers.has_doublon_holon(data)
-        @error "DoublonHolon (DH2/DH4) inputs are parsed but not executable until DH-2 connects projection counts/logs/loaders"
-        return 1
-    end
     # Reject TwoBodyGEx in FSZ / general-orbital mode before any sampling or RNG
     # side effects (its Green measurement path is not yet wired).
     validate_factored_green_supported(data)
@@ -74,6 +70,8 @@ function vmc_phys_cal!(
     saved_orbital_values = [term.value for term in data.orbital_terms]
     saved_gutzwiller_values = [term.value for term in data.gutzwiller_terms]
     saved_jastrow_values = [term.value for term in data.jastrow_terms]
+    saved_dh2_values = copy(data.doublon_holon_2site_params)
+    saved_dh4_values = copy(data.doublon_holon_4site_params)
 
     # Call init_parameter! to consume RNG (matches C's InitParameter())
     init_parameter!(data; rng = rng)
@@ -88,12 +86,14 @@ function vmc_phys_cal!(
     for (i, term) in enumerate(data.jastrow_terms)
         term.value = saved_jastrow_values[i]
     end
+    copyto!(data.doublon_holon_2site_params, saved_dh2_values)
+    copyto!(data.doublon_holon_4site_params, saved_dh4_values)
 
     # Get parameters
     n_data_qty_smp = data.modpara.n_data_qty_smp  # Number of sampling runs
     all_complex = get_all_complex_flag(data)
     i_flg_orbital_general = data.i_flg_orbital_general
-    n_proj_bf = 0  # BackFlow only; DH is a normal projection family and is guarded above in DH-1.
+    n_proj_bf = 0  # BackFlow only; DH is a normal projection family in NProj.
 
     # Calculate NElec from NLocSpin and NCond if not set
     n_elec = data.modpara.nelec
