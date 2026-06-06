@@ -125,6 +125,35 @@ end
     @test proj4 == [0, 0, 0, 0, 2, 2, 0, 0, 0, 0]
 end
 
+@testset "unit/vmc_sampling: multiple DH2 indices keep independent strides" begin
+    data = MVMCExpertModeParsers.ExpertModeData()
+    data.modpara = MVMCExpertModeParsers.ModParaParameters(nsite = 4)
+    data.doublon_holon_2site_indices = [
+        DoublonHolon2SiteIndex([
+            1 2
+            0 2
+            0 1
+            0 1
+        ]),
+        DoublonHolon2SiteIndex([
+            2 3
+            2 3
+            0 1
+            0 1
+        ]),
+    ]
+    data.doublon_holon_2site_params = [ComplexF64(i, 100 + i) for i = 1:12]
+    data.doublon_holon_2site_opt_flags = fill(true, 12)
+
+    ele_num = make_ele_num(4; up_sites = [0, 2], down_sites = [0, 3])
+    proj = zeros(Int, projection_layout(data).n_proj)
+
+    MVMCOptimizers.make_proj_cnt!(proj, ele_num, data)
+
+    # DH index 1 contributes to xn0=0 slots; DH index 2 contributes to xn0=1 slots.
+    @test proj == [0, 1, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0]
+end
+
 @testset "unit/vmc_sampling: DH update paths match fresh recompute" begin
     data = make_mock_data_for_proj_tests(nsite = 4)
     data.gutzwiller_terms = [
@@ -158,9 +187,17 @@ end
     MVMCOptimizers.update_proj_cnt!(ri, rj, s, proj1_inc, proj0, ele_num1, data)
     @test proj1_inc == proj1_full
 
+    proj1_alias = copy(proj0)
+    MVMCOptimizers.update_proj_cnt!(ri, rj, s, proj1_alias, proj1_alias, ele_num1, data)
+    @test proj1_alias == proj1_full
+
     proj1_fsz = similar(proj0)
     MVMCOptimizers.update_proj_cnt_fsz!(ri, rj, s, 1 - s, proj1_fsz, proj0, ele_num1, data)
     @test proj1_fsz == proj1_full
+
+    proj1_fsz_alias = copy(proj0)
+    MVMCOptimizers.update_proj_cnt_fsz!(ri, rj, s, 1 - s, proj1_fsz_alias, proj1_fsz_alias, ele_num1, data)
+    @test proj1_fsz_alias == proj1_full
 
     # On-site spin flip leaves occupancy class unchanged, so FSZ keeps the old DH tail.
     ele_num_flip = make_ele_num(nsite; up_sites = Int[], down_sites = [0, 3])
@@ -202,9 +239,17 @@ end
     MVMCOptimizers.update_proj_cnt!(ri, rj, s, proj1_inc, proj0, ele_num1, data)
     @test proj1_inc == proj1_full
 
+    proj1_alias = copy(proj0)
+    MVMCOptimizers.update_proj_cnt!(ri, rj, s, proj1_alias, proj1_alias, ele_num1, data)
+    @test proj1_alias == proj1_full
+
     proj1_fsz = similar(proj0)
     MVMCOptimizers.update_proj_cnt_fsz!(ri, rj, s, 1 - s, proj1_fsz, proj0, ele_num1, data)
     @test proj1_fsz == proj1_full
+
+    proj1_fsz_alias = copy(proj0)
+    MVMCOptimizers.update_proj_cnt_fsz!(ri, rj, s, 1 - s, proj1_fsz_alias, proj1_fsz_alias, ele_num1, data)
+    @test proj1_fsz_alias == proj1_full
 end
 
 @testset "unit/vmc_sampling: DH log projection uses real parameter parts" begin
