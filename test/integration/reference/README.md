@@ -105,3 +105,56 @@ To regenerate this reference data from a fresh clone of the C mVMC tree:
      `<model>/inputs/`.
    - Take the first 10 lines of `work/<Model>/output/zvo_out_001.dat` and
      save them as `<model>/zvo_out_first10.dat`.
+
+## PhysCal e2e fixtures (`<model>/physcal_ref/`)
+
+`test/integration/phys_cal_equivalent.jl` runs `run_phys_cal_from_namelist`
+(`NVMCCalMode = 1`) for the systems below and compares the three produced Green
+files against committed C references with the per-quantity tolerances of
+`tools/green_compare.jl` (one-body `rtol = 1e-10`; direct + factored
+`rtol = 1e-9`; `atol = 1e-12`).
+
+| Subdirectory | Mode | Fixed params (`zqp_opt.dat`) |
+|--------------|------|------------------------------|
+| `heisenberg_chain_real/physcal_ref` | real | freshly optimised (NVMCCalMode=0) |
+| `heisenberg_chain_cmp/physcal_ref`  | cmp  | freshly optimised (NVMCCalMode=0) |
+| `hubbard_chain_real/physcal_ref`    | real | reused `../inputs/zqp_opt.dat` |
+| `kondo_chain_real/physcal_ref`      | real | reused `../inputs/zqp_opt.dat` |
+
+Each `physcal_ref/` contains:
+
+- `inputs/` — the PhysCal input set: the optimisation `.def` files plus a
+  hand-authored `greentwoex.def` (factored `TwoBodyGEx` terms over constituents
+  already present in `greenone.def`), `modpara.def` with `NVMCCalMode = 1`, and a
+  `namelist.def` that adds the `TwoBodyGEx greentwoex.def` line. Isolated from the
+  committed optimisation `inputs/` (`NVMCCalMode = 0`), so a PhysCal fixture
+  cannot regress the optimisation suite.
+- `zqp_opt.dat` — the fixed variational parameters fed to the runner (`opt_para`).
+- `expected/zvo_cisajs_001.dat`, `zvo_cisajscktalt_001.dat`,
+  `zvo_cisajscktaltex_001.dat` — the committed C Green references.
+- `metadata.txt` — per-system provenance (commands, params, Julia-vs-C result).
+
+### PhysCal reference provenance
+
+- **C source**: `issp-center-dev/mVMC`, branch `develop` @
+  `66f17422968009f8cc70f1dec94b2f52e562d344` (the canonical integration head).
+- **Build**: `cmake -DCONFIG=apple -DCMAKE_BUILD_TYPE=Release -DUSE_GEMMT=OFF
+  -DUSE_SCALAPACK=OFF -DTesting=OFF` — no BLIS (reference `dskr2k`/`zskr2k`).
+- **Toolchain**: Apple Clang 15.0.0 (C/C++) + gfortran 15.2.0 (Homebrew) + libomp,
+  Apple Accelerate BLAS, macOS arm64. (The opt-side `ctest_ref` above used gcc-15
+  @ master `5e7ea40`; this differs only at ~1e-12, far below the gate tolerance.
+  Apple Clang was used because gcc-15.2's fixincludes headers had drifted ahead of
+  the installed CommandLineTools SDK on the build host.)
+- **OpenMP**: `OMP_NUM_THREADS=1`, single MPI rank.
+
+### Regenerating PhysCal references (per model)
+
+```bash
+export OMP_NUM_THREADS=1
+VMC=<mVMC-develop-build>/src/mVMC/vmc.out
+# (A) fixed params: reuse <model>/inputs/zqp_opt.dat, or optimise (NVMCCalMode=0):
+( cd opt_stage && "$VMC" -e namelist.def )          # -> output/zqp_opt.dat
+# (B) PhysCal: NVMCCalMode=1 input set incl. greentwoex.def, params as 2nd arg:
+( cd phys_stage && "$VMC" -e namelist.def zqp_opt.dat )
+# -> output/{zvo_cisajs,zvo_cisajscktalt,zvo_cisajscktaltex}_001.dat
+```

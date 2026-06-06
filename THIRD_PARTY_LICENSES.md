@@ -59,14 +59,24 @@ to verify bit-level agreement with the C mVMC reference implementation:
 - `**/inputs/initial.def` (HeisenbergChain_fsz and HubbardChain only) —
   initial variational parameters used by the C run, mirrored so
   Julia-mVMC starts from the same state.
+- `**/physcal_ref/` (PhysCal e2e gate, Plan 3b) — a separate PhysCal input
+  set (`inputs/*.def` incl. a hand-authored `greentwoex.def`, `NVMCCalMode=1`),
+  the fixed `physcal_ref/zqp_opt.dat`, and the C-mVMC Green-function outputs
+  `physcal_ref/expected/zvo_cisajs_001.dat`, `zvo_cisajscktalt_001.dat`,
+  `zvo_cisajscktaltex_001.dat`. Output snapshots of a C reference run.
 
 The full C mVMC source itself is **not** bundled.
 
 - **Upstream**: <https://github.com/issp-center-dev/mVMC>
 - **C reference commit used to regenerate these fixtures**:
-  `5e7ea400ae35b566cfa2de6e342efe962f179a41` (see
-  [test/integration/reference/README.md](test/integration/reference/README.md)
-  for the regeneration procedure).
+  - opt / ctest-equivalent fixtures (`zvo_out_first10.dat`, `ctest_ref/`,
+    `inputs/`): `5e7ea400ae35b566cfa2de6e342efe962f179a41` (master), gcc-15.
+  - PhysCal e2e fixtures (`physcal_ref/`):
+    `66f17422968009f8cc70f1dec94b2f52e562d344` (`develop`), Apple Clang 15 +
+    gfortran (`USE_GEMMT=OFF`); see each `physcal_ref/metadata.txt`.
+
+  See [test/integration/reference/README.md](test/integration/reference/README.md)
+  for the regeneration procedure.
 - **License**: GPL-3.0-or-later. The bundled fixtures inherit the
   upstream license; combination with the rest of Julia-mVMC
   (also GPL-3.0-or-later) is straightforward.
