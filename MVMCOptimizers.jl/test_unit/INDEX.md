@@ -46,7 +46,7 @@
   - DH projection count / update / log coverage
     - `unit/vmc_sampling: DH2/DH4 projection counts` → `make_proj_cnt!` / `set_projection_diff!`
     - `unit/vmc_sampling: multiple DH2 indices keep independent strides` → `make_proj_cnt!`（`n_dh2 >= 2` stride）
-    - `unit/vmc_sampling: DH update paths match fresh recompute` → `update_proj_cnt!` / `update_proj_cnt_fsz!`（DH2, alias buffer）
+    - `unit/vmc_sampling: DH update paths match fresh recompute` → `update_proj_cnt!` / `update_proj_cnt_fsz!`（DH2, alias buffer, double-hop alias）
     - `unit/vmc_sampling: DH4 update paths match fresh recompute` → `update_proj_cnt!` / `update_proj_cnt_fsz!`（DH4, alias buffer）
     - `unit/vmc_sampling: DH log projection uses real parameter parts` → `log_proj_val` / `log_proj_ratio`
 
@@ -78,7 +78,8 @@
     - shift（Gutzwiller/Jastrow）
     - shift（DH2/DH4, Gutzwiller write-back, OptFlag guard）
     - rescale（`D_AMP_MAX`）
-    - normalize（`para_qp_trans`）
+    - normalize（`opt_trans`、`para_qp_trans` 非正規化ガード）
+    - shift（DH2+DH4 同時 config）
 
 ### `src/types.jl`
 - `test_unit/test_unit_types.jl`
@@ -115,8 +116,9 @@
 - `test_unit/test_unit_read_opt_para.jl`
   - `read_opt_para_file!: golden load + consumed count` → 6+triples レイアウトを Gutzwiller/Jastrow/Slater（no-DH）に読み込み、消費数（n_proj+n_slater）を返す
   - `non-perturbing (idempotent) load` → 二重ロードで同一（RNG 非依存）
-  - `strict failures error with a clear message` → 欠損 / 空 / short / trailing（1 float・whole triple=OptTrans）/ non-numeric token を `error()`（メッセージ部分文字列で検証）
+  - `strict failures error with a clear message` → 欠損 / 空 / short / trailing（1 float・inactive OptTrans whole triple）/ non-numeric token を `error()`（メッセージ部分文字列で検証）
   - `DH projection block loads before Slater` → `NProj` 内の DH2 block を読み込み、Slater が DH の後ろから正しく scatter されることを検証
+  - `OptTrans tail loads when active` → `opttrans.def` active 相当の `data.opt_trans` がある場合、Slater 後ろの `NOptTrans` triple を消費
   - `RBM-bearing models still fail loud` → 将来 RBM block を Slater と誤読しないため、`NRBM > 0` は DH-2 でも loader reject
   - `read_initial_def! still loads the same layout (delegation regression)` → 共有 `_load_para_triples!` への委譲後も成功/欠損 warn+false が不変
 

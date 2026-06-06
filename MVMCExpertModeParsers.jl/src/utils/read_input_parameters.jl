@@ -148,6 +148,26 @@ function count_rbm_parameters(data::ExpertModeData)::Int
            _rbm_section_nparam(data.general_rbm_phys_hidden_terms)
 end
 
+function count_orbital_parameters(data::ExpertModeData)::Int
+    if data.modpara.n_orbital_idx > 0
+        return data.modpara.n_orbital_idx
+    elseif !isempty(data.orbital_terms)
+        return maximum(t.idx for t in data.orbital_terms) + 1
+    else
+        return 0
+    end
+end
+
+count_opt_trans_parameters(data::ExpertModeData)::Int = length(data.opt_trans)
+
+function count_variational_parameters(data::ExpertModeData)::Int
+    n_rbm = count_rbm_parameters(data)
+    return projection_layout(data).n_proj +
+           n_rbm +
+           count_orbital_parameters(data) +
+           count_opt_trans_parameters(data)
+end
+
 function _set_rbm_terms_from_params!(terms, params::Dict{Int, ComplexF64})
     isempty(params) && return
     for term in terms
@@ -155,6 +175,28 @@ function _set_rbm_terms_from_params!(terms, params::Dict{Int, ComplexF64})
             term.value = params[term.idx]
         end
     end
+end
+
+function _orbital_parallel_offset(data::ExpertModeData)::Int
+    data.i_flg_orbital_parallel == 1 || return count_orbital_parameters(data)
+    data.i_flg_orbital_anti_parallel == 1 || return 0
+
+    pair_min = typemax(Int)
+    idx_map = Dict{Tuple{Int,Int,Int},Vector{Int}}()
+    for term in data.orbital_terms
+        key = (term.site1, term.site2, term.sign)
+        push!(get!(idx_map, key, Int[]), term.idx)
+    end
+    for idxs in values(idx_map)
+        sort!(idxs)
+        for i = 1:(length(idxs)-1)
+            if idxs[i+1] == idxs[i] + 1
+                pair_min = min(pair_min, idxs[i])
+            end
+        end
+    end
+
+    return pair_min == typemax(Int) ? 0 : pair_min
 end
 
 """
@@ -174,18 +216,14 @@ keyword argument.
 | `InGutzwiller` | `data.gutzwiller_terms[i].value` |
 | `InJastrow` | `data.jastrow_terms[i].value` |
 | `InOrbital` / `InOrbitalAntiParallel` | `data.orbital_terms[i].value` |
+| `InOrbitalParallel` | `data.orbital_terms[i].value` after the anti-parallel offset |
 | `InOrbitalGeneral` | `data.orbital_terms[i].value` (fsz layout) |
+| `InOptTrans` | `data.opt_trans` |
 | `InDH2` | `data.doublon_holon_2site_params` |
 | `InDH4` | `data.doublon_holon_4site_params` |
 | `InChargeRBM_PhysLayer` / `_HiddenLayer` / `_PhysHidden` | `charge_rbm_*_terms` |
 | `InSpinRBM_PhysLayer` / `_HiddenLayer` / `_PhysHidden` | `spin_rbm_*_terms` |
 | `InGeneralRBM_PhysLayer` / `_HiddenLayer` / `_PhysHidden` | `general_rbm_*_terms` |
-
-# Recognised but not yet wired (warn-only stubs)
-
-`InOrbitalParallel`, `InOptTrans` — these emit an `@warn` and skip. The
-corresponding C-side data structures (parallel-orbital offset path, OptTrans +
-FlagOptTrans) are not yet implemented in Julia.
 
 # Phase ordering
 
@@ -289,15 +327,22 @@ function read_input_parameters!(data::ExpertModeData, namelist_path::String)
         elseif file_type == "InOrbitalParallel"
             full_path = joinpath(base_dir, file_path)
             if validate_file_exists(full_path)
-                params = parse_input_parameter_file(full_path)
-                # Update OrbitalParallel terms
-                # Note: C implementation uses offset iNOrbitalAntiParallel
-                # For now, we'll update orbital_terms directly
-                for (idx, value) in params
-                    # C: Slater[iNOrbitalAntiParallel + idx] = value
-                    # We need to find the appropriate orbital term
-                    # This is complex and depends on the orbital structure
-                    @warn "InOrbitalParallel.def parsing not yet fully implemented"
+                offset = _orbital_parallel_offset(data)
+                n_orbital = count_orbital_parameters(data)
+                expected = n_orbital - offset
+                expected > 0 ||
+                    error("InOrbitalParallel target parameter length mismatch: got $expected from NOrbitalIdx=$n_orbital and offset=$offset")
+                params = parse_indexed_input_parameter_file_strict(
+                    full_path,
+                    expected,
+                    expected,
+                    "InOrbitalParallel",
+                )
+                for term in data.orbital_terms
+                    rel_idx = term.idx - offset
+                    if 0 <= rel_idx < expected
+                        term.value = params[rel_idx+1]
+                    end
                 end
             end
         elseif file_type == "InOrbitalGeneral"
@@ -316,11 +361,16 @@ function read_input_parameters!(data::ExpertModeData, namelist_path::String)
         elseif file_type == "InOptTrans"
             full_path = joinpath(base_dir, file_path)
             if validate_file_exists(full_path)
-                params = parse_input_parameter_file(full_path)
-                # Update OptTrans parameters
-                # Note: OptTrans is stored in data.para_qp_opt_trans or similar
-                # We need to check the data structure
-                @warn "InOptTrans.def parsing not yet fully implemented"
+                expected = count_opt_trans_parameters(data)
+                expected > 0 ||
+                    error("InOptTrans target parameter length mismatch: OptTrans is not active")
+                params = parse_indexed_input_parameter_file_strict(
+                    full_path,
+                    expected,
+                    expected,
+                    "InOptTrans",
+                )
+                copyto!(data.opt_trans, params)
             end
         elseif startswith(file_type, "InChargeRBM_") ||
                startswith(file_type, "InSpinRBM_") ||
@@ -447,7 +497,11 @@ function set_orbital_opt_flags!(data::ExpertModeData, opt_flags::Dict{Int,Int})
     is_complex = _get_all_complex_flag_local(data)
 
     # Initialize or resize optimization_flags
-    n_para = n_proj + flag_rbm * n_rbm + data.modpara.n_orbital_idx
+    n_para =
+        n_proj +
+        flag_rbm * n_rbm +
+        count_orbital_parameters(data) +
+        count_opt_trans_parameters(data)
     n_para_full = 2 * n_para  # Always 2*NPara (real and imaginary)
     ensure_optimization_flags_size!(data, n_para_full)
 
@@ -461,6 +515,27 @@ function set_orbital_opt_flags!(data::ExpertModeData, opt_flags::Dict{Int,Int})
                 # C: OptFlag[2*fidx+1] = opt_flag (imaginary part)
                 data.optimization_flags[2*fidx+2] = (opt_flag != 0)  # Imaginary part (1-based)
             end
+        end
+    end
+end
+
+function set_opt_trans_opt_flags!(data::ExpertModeData)
+    n_opt_trans = count_opt_trans_parameters(data)
+    n_opt_trans == 0 && return
+
+    n_proj = projection_layout(data).n_proj
+    n_rbm = count_rbm_parameters(data)
+    n_orbital = count_orbital_parameters(data)
+    n_para = n_proj + n_rbm + n_orbital + n_opt_trans
+    ensure_optimization_flags_size!(data, 2 * n_para)
+
+    fidx_offset = n_proj + n_rbm + n_orbital
+    for i = 0:(n_opt_trans-1)
+        real_idx = 2 * (fidx_offset + i) + 1
+        imag_idx = real_idx + 1
+        data.optimization_flags[real_idx] = true
+        if imag_idx <= length(data.optimization_flags)
+            data.optimization_flags[imag_idx] = false
         end
     end
 end
@@ -482,7 +557,11 @@ function set_rbm_opt_flags!(
     n_proj = projection_layout(data).n_proj
     n_rbm = count_rbm_parameters(data)
     flag_rbm = n_rbm > 0 ? 1 : 0
-    n_para = n_proj + flag_rbm * n_rbm + data.modpara.n_orbital_idx
+    n_para =
+        n_proj +
+        flag_rbm * n_rbm +
+        count_orbital_parameters(data) +
+        count_opt_trans_parameters(data)
     ensure_optimization_flags_size!(data, 2 * n_para)
 
     for (idx, opt_flag) in opt_flags

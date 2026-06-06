@@ -235,10 +235,11 @@ function init_parameter!(data::ExpertModeData; rng::AbstractRNG = SFMT19937RNG()
         end
     end
 
-    # Initialize OptTrans parameters from ParaQPOptTrans
+    # Initialize OptTrans parameters from ParaQPOptTrans.
     # In C: for(i=0;i<NOptTrans;i++) OptTrans[i] = ParaQPOptTrans[i];
-    # Note: OptTrans is typically handled separately in the C implementation
-    # This would require additional fields in ExpertModeData
+    if !isempty(data.para_qp_opt_trans)
+        data.opt_trans = copy(data.para_qp_opt_trans)
+    end
 
     return data
 end

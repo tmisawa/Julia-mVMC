@@ -12,6 +12,7 @@ import MVMCExpertModeParsers:
     GutzwillerTerm,
     JastrowTerm,
     OrbitalTerm,
+    ModParaParameters,
     DoublonHolon2SiteIndex,
     DoublonHolon4SiteIndex
 import MVMCExpertModeParsers: read_input_parameters!
@@ -183,6 +184,98 @@ function test_read_input_parameters_missing_file()
         @test data.gutzwiller_terms[1].value == ComplexF64(0.0, 0.0)
 
         rm(test_dir, recursive = true)
+    end
+end
+
+function test_read_input_parameters_orbital_parallel_and_opttrans()
+    @testset "read_input_parameters! OrbitalParallel and OptTrans overlays" begin
+        mktempdir() do test_dir
+            namelist_path = joinpath(test_dir, "namelist.def")
+            write(
+                namelist_path,
+                "InOrbitalParallel inorbitalparallel.def\nInOptTrans inopttrans.def\n",
+            )
+
+            data = ExpertModeData()
+            data.i_flg_orbital_anti_parallel = 1
+            data.i_flg_orbital_parallel = 1
+            data.modpara.n_orbital_idx = 5
+            data.orbital_terms = [
+                OrbitalTerm(0, 1, 0, 0.0 + 0.0im, false, 1),
+                OrbitalTerm(0, 0, 1, 0.0 + 0.0im, false, 1),
+                OrbitalTerm(0, 0, 2, 0.0 + 0.0im, false, 1),
+                OrbitalTerm(1, 1, 3, 0.0 + 0.0im, false, 1),
+                OrbitalTerm(1, 1, 4, 0.0 + 0.0im, false, 1),
+            ]
+            data.opt_trans = [1.0 + 0.0im, 2.0 + 0.0im]
+
+            _write_indexed_input_parameter_file(
+                joinpath(test_dir, "inorbitalparallel.def"),
+                "NOrbitalParallel",
+                4,
+                [
+                    "0 10.0 0.1",
+                    "1 20.0 0.2",
+                    "2 30.0 0.3",
+                    "3 40.0 0.4",
+                ],
+            )
+            _write_indexed_input_parameter_file(
+                joinpath(test_dir, "inopttrans.def"),
+                "NQPOptTrans",
+                2,
+                [
+                    "1 0.25 -0.25",
+                    "0 0.50 -0.50",
+                ],
+            )
+
+            read_input_parameters!(data, namelist_path)
+
+            @test data.orbital_terms[1].value == 0.0 + 0.0im
+            @test [t.value for t in data.orbital_terms[2:end]] == ComplexF64[
+                10.0 + 0.1im,
+                20.0 + 0.2im,
+                30.0 + 0.3im,
+                40.0 + 0.4im,
+            ]
+            @test data.opt_trans == ComplexF64[
+                0.50 - 0.50im,
+                0.25 - 0.25im,
+            ]
+        end
+    end
+end
+
+function test_parse_opttrans_def()
+    @testset "OptTrans definition parser" begin
+        mktempdir() do test_dir
+            data = ExpertModeData()
+            data.modpara = ModParaParameters(nsite = 2, nmp_trans = 1)
+            path = joinpath(test_dir, "opttrans.def")
+            open(path, "w") do f
+                write(f, "=============================================\n")
+                write(f, "NQPOptTrans          2\n")
+                write(f, "=============================================\n")
+                write(f, "=============================================\n")
+                write(f, "=============================================\n")
+                write(f, "0 0.25\n")
+                write(f, "1 0.75\n")
+                write(f, "0 0 1 -1\n")
+                write(f, "0 1 0 -1\n")
+                write(f, "1 0 0 1\n")
+                write(f, "1 1 1 -1\n")
+            end
+
+            MVMCExpertModeParsers.parse_file_by_type!(data, "OptTrans", path)
+
+            @test data.n_qp_opt_trans == 2
+            @test data.para_qp_opt_trans == ComplexF64[0.25 + 0.0im, 0.75 + 0.0im]
+            @test data.opt_trans == data.para_qp_opt_trans
+            @test data.qp_opt_trans == [[1, 0], [0, 1]]
+            # APFlag is off when NMPTrans >= 0, so C forces all signs to +1.
+            @test data.qp_opt_trans_sgn == [[1, 1], [1, 1]]
+        end
     end
 end
 
@@ -368,5 +461,7 @@ end
     test_read_input_parameters_orbital()
     test_read_input_parameters_complex()
     test_read_input_parameters_missing_file()
+    test_read_input_parameters_orbital_parallel_and_opttrans()
+    test_parse_opttrans_def()
     test_read_input_parameters_dh_overlays()
 end

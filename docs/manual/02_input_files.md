@@ -25,6 +25,7 @@ relative to its own directory.
 | `orbitalidxgen.def` (`OrbitalGeneral`) | fsz mode generalised orbital | ✅ |
 | `orbitalidxpara.def` (`OrbitalParallel`) | parallel-orbital block | ✅ |
 | `qptransidx.def` (`TransSym`) | quantum projection symmetry | ✅ |
+| `opttrans.def` (`OptTrans`) | optional QPOptTrans mapping and OptTrans weights | ✅ |
 | `greenone.def` (`OneBodyG`) | one-body Green-function targets | ✅ |
 | `greentwo.def` (`TwoBodyG`) | two-body Green-function targets (direct mode) | ✅ |
 | `initial.def` (CLI 2nd argument in C) | starting variational parameters | ✅ auto-detected from namelist dir |
@@ -43,7 +44,9 @@ value wins.
 | `InJastrow.def` (`InJastrow`) | `jastrow_terms[i].value` | ✅ |
 | `InDH2.def`, `InDH4.def` | doublon-holon projection parameter vectors | ✅ |
 | `InOrbital.def` / `InOrbitalAntiParallel.def` | `orbital_terms[i].value` | ✅ |
+| `InOrbitalParallel.def` | `orbital_terms[i].value` after the anti-parallel offset | ✅ |
 | `InOrbitalGeneral.def` | `orbital_terms[i].value` (fsz layout) | ✅ |
+| `InOptTrans.def` | `opt_trans` | ✅ |
 | `InChargeRBM_PhysLayer.def`, `_HiddenLayer.def`, `_PhysHidden.def` | corresponding RBM term arrays | ✅ |
 | `InSpinRBM_*` and `InGeneralRBM_*` (3 layers each) | corresponding RBM term arrays | ✅ |
 
@@ -57,9 +60,6 @@ active is not reproducible bit-for-bit.
 |------|--------|
 | `pairhop.def` (`PairHop`) | Pair-hopping interaction not wired into `CalculateHamiltonian`. |
 | `spinjastrow.def` (`SpinJastrow`) | Not implemented; parser hard-fails if the keyword is present because it would change projection offsets. |
-| `InOrbitalParallel.def` | `read_input_parameters!` emits a warning and skips (the C-side `iNOrbitalAntiParallel` offset path is not yet implemented). |
-| `InOptTrans.def` | `read_input_parameters!` emits a warning and skips. The `FlagOptTrans` gate and `OptTrans[]` storage do not exist on the Julia side yet. |
-| `OptTrans` block in `initial.def` | Refused with a warning by `read_initial_def!` because `FlagOptTrans` / `OptTrans[]` are not implemented yet. |
 
 > Note: the factored/product two-body Green (`TwoBodyGEx` / `greentwoex.def` →
 > `zvo_cisajscktaltex`) **is** supported (non-FSZ) and gated against C; see

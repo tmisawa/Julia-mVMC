@@ -308,19 +308,15 @@ Convenience wrapper that uses data.modpara and data.para_qp_trans.
 - Creates QuantumProjectionWeights if not already created
 - Uses data.modpara.nsp_gauss_leg, data.modpara.nsp_stot, data.modpara.nmp_trans
 - Uses data.para_qp_trans for ParaQPTrans values
-- OptTrans values are extracted from data if available
+- Uses data.opt_trans for OptTrans values when FlagOptTrans-equivalent inputs
+  are active
 """
 function init_qp_weight!(data::ExpertModeData)
     if data.qp_weights === nothing
         data.qp_weights = QuantumProjectionWeights()
     end
 
-    # Extract OptTrans values if available
-    opt_trans = ComplexF64[]
-    # Note: OptTrans would need to be stored in ExpertModeData if needed
-    # For now, we use empty array (FlagOptTrans == 0 case)
-
-    init_qp_weight!(data.qp_weights, data.modpara, data.para_qp_trans, opt_trans)
+    init_qp_weight!(data.qp_weights, data.modpara, data.para_qp_trans, data.opt_trans)
 
     return data
 end

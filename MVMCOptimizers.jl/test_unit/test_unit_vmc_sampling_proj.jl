@@ -64,10 +64,20 @@ end
     MVMCOptimizers.update_proj_cnt!(ri2, rj2, s2, proj2_inc, proj2_inc, ele_num2, data)
     @test proj2_inc == proj2_full
 
+    proj2_alias = copy(proj0)
+    MVMCOptimizers.update_proj_cnt!(ri, rj, s, proj2_alias, proj2_alias, ele_num1, data)
+    MVMCOptimizers.update_proj_cnt!(ri2, rj2, s2, proj2_alias, proj2_alias, ele_num2, data)
+    @test proj2_alias == proj2_full
+
     proj2_inc_fsz = similar(proj0)
     MVMCOptimizers.update_proj_cnt_fsz!(ri, rj, s, 1 - s, proj2_inc_fsz, proj0, ele_num1, data)
     MVMCOptimizers.update_proj_cnt_fsz!(ri2, rj2, s2, 1 - s2, proj2_inc_fsz, proj2_inc_fsz, ele_num2, data)
     @test proj2_inc_fsz == proj2_full
+
+    proj2_fsz_alias = copy(proj0)
+    MVMCOptimizers.update_proj_cnt_fsz!(ri, rj, s, 1 - s, proj2_fsz_alias, proj2_fsz_alias, ele_num1, data)
+    MVMCOptimizers.update_proj_cnt_fsz!(ri2, rj2, s2, 1 - s2, proj2_fsz_alias, proj2_fsz_alias, ele_num2, data)
+    @test proj2_fsz_alias == proj2_full
 end
 
 function _dh_only_data(; nsite::Int, dh2 = nothing, dh4 = nothing)

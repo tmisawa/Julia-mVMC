@@ -135,7 +135,11 @@ function vmc_phys_cal!(
     end
 
     n_rbm = has_rbm_terms(data) ? MVMCExpertModeParsers.count_rbm_parameters(data) : 0
-    n_para = n_proj + n_rbm + n_orbital_idx
+    n_para =
+        n_proj +
+        n_rbm +
+        n_orbital_idx +
+        MVMCExpertModeParsers.count_opt_trans_parameters(data)
     n_qp_full = get_n_qp_full(data)
     n_vmc_sample = data.modpara.nvmc_sample
 

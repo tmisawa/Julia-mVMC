@@ -169,6 +169,22 @@ end
     end
 end
 
+@testset "read_opt_para_file!: OptTrans tail loads when active" begin
+    mktempdir() do dir
+        path = joinpath(dir, "zqp_opt.dat")
+        write(path, strip(_GOLDEN_OPT) * " 0.70 -0.80 9.9\n")
+        data = _make_data()
+        data.para_qp_opt_trans = [1.0 + 0.0im]
+        data.opt_trans = [1.0 + 0.0im]
+
+        n = MVMCOptimizers.read_opt_para_file!(data, path)
+
+        @test n == 6  # NProj (3) + NSlater (2) + NOptTrans (1)
+        @test data.opt_trans == ComplexF64[0.70 - 0.80im]
+        @test data.orbital_terms[2].value ≈ 0.50 - 0.20im
+    end
+end
+
 @testset "read_opt_para_file!: RBM-bearing models still fail loud" begin
     mktempdir() do dir
         path = joinpath(dir, "zqp_opt.dat")

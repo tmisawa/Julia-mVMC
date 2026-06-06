@@ -138,6 +138,28 @@ using MVMCExpertModeParsers:
         @test data.para_qp_trans == orig
     end
 
+    @testset "OptTrans is normalized separately from ParaQPTrans" begin
+        data = ExpertModeData()
+        data.para_qp_trans = ComplexF64[
+            1.0 + 0.0im,
+            -2.0 + 2.0im,
+        ]
+        data.opt_trans = ComplexF64[
+            3.0 + 4.0im,
+            1.0 + 0.0im,
+        ]
+
+        orig_para = copy(data.para_qp_trans)
+
+        MVMCOptimizers.sync_modified_parameter!(data)
+
+        @test data.para_qp_trans == orig_para
+        @test data.opt_trans ≈ ComplexF64[
+            0.6 + 0.8im,
+            0.2 + 0.0im,
+        ] atol = 1e-14
+    end
+
     @testset "DH2 shift subtracts bin averages and shifts Gutzwiller" begin
         data = ExpertModeData()
         data.gutzwiller_terms = [GutzwillerTerm(0, 10.0 + 0.25im, true)]
@@ -187,6 +209,22 @@ using MVMCExpertModeParsers:
 
         @test real.(data.doublon_holon_4site_params) ≈ [-4, -4, -2, -2, 0, 0, 2, 2, 4, 4]
         @test data.gutzwiller_terms[1].value == 12.0 + 0.0im
+    end
+
+    @testset "DH2 and DH4 shifts compose in one config" begin
+        data = ExpertModeData()
+        data.gutzwiller_terms = [GutzwillerTerm(0, 0.0 + 0.0im, true)]
+        data.doublon_holon_2site_indices = [DoublonHolon2SiteIndex([1 0; 0 1])]
+        data.doublon_holon_2site_params = ComplexF64[i + 0im for i = 1:6]
+        data.doublon_holon_4site_indices = [DoublonHolon4SiteIndex([1 0 1 0; 0 1 0 1])]
+        data.doublon_holon_4site_params = ComplexF64[10 + i + 0im for i = 1:10]
+        data.optimization_flags = fill(true, 2 * projection_layout(data).n_proj)
+
+        MVMCOptimizers.sync_modified_parameter!(data)
+
+        @test real.(data.doublon_holon_2site_params) ≈ [-2, -2, 0, 0, 2, 2]
+        @test real.(data.doublon_holon_4site_params) ≈ [-4, -4, -2, -2, 0, 0, 2, 2, 4, 4]
+        @test data.gutzwiller_terms[1].value == 38.0 + 0.0im
     end
 
     @testset "DH shift is disabled when any Gutzwiller real flag is fixed" begin
