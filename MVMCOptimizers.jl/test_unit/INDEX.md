@@ -45,8 +45,9 @@
     - `update_proj_cnt_fsz!`
   - DH projection count / update / log coverage
     - `unit/vmc_sampling: DH2/DH4 projection counts` → `make_proj_cnt!` / `set_projection_diff!`
-    - `unit/vmc_sampling: DH update paths match fresh recompute` → `update_proj_cnt!` / `update_proj_cnt_fsz!`（DH2）
-    - `unit/vmc_sampling: DH4 update paths match fresh recompute` → `update_proj_cnt!` / `update_proj_cnt_fsz!`（DH4）
+    - `unit/vmc_sampling: multiple DH2 indices keep independent strides` → `make_proj_cnt!`（`n_dh2 >= 2` stride）
+    - `unit/vmc_sampling: DH update paths match fresh recompute` → `update_proj_cnt!` / `update_proj_cnt_fsz!`（DH2, alias buffer）
+    - `unit/vmc_sampling: DH4 update paths match fresh recompute` → `update_proj_cnt!` / `update_proj_cnt_fsz!`（DH4, alias buffer）
     - `unit/vmc_sampling: DH log projection uses real parameter parts` → `log_proj_val` / `log_proj_ratio`
 
 - `test_unit/test_unit_vmc_sampling_misc.jl`

@@ -304,6 +304,61 @@ function test_read_input_parameters_dh_overlays()
                 @test data.doublon_holon_2site_params == fill(0.0 + 0.0im, 6)
             end
         end
+
+        mktempdir() do test_dir
+            dh_specs = (
+                (
+                    file_type = "InDH2",
+                    file_name = "indh2.def",
+                    header_name = "NDoublonHolon2siteIdx",
+                    n_index = 1,
+                    n_param = 6,
+                    setup! = data -> begin
+                        data.doublon_holon_2site_indices = [DoublonHolon2SiteIndex([1 0; 0 1])]
+                        data.doublon_holon_2site_params = fill(0.0 + 0.0im, 6)
+                    end,
+                    params = data -> data.doublon_holon_2site_params,
+                ),
+                (
+                    file_type = "InDH4",
+                    file_name = "indh4.def",
+                    header_name = "NDoublonHolon4siteIdx",
+                    n_index = 1,
+                    n_param = 10,
+                    setup! = data -> begin
+                        data.doublon_holon_4site_indices = [DoublonHolon4SiteIndex([1 0 1 0; 0 1 0 1])]
+                        data.doublon_holon_4site_params = fill(0.0 + 0.0im, 10)
+                    end,
+                    params = data -> data.doublon_holon_4site_params,
+                ),
+            )
+
+            for spec in dh_specs
+                namelist_path = joinpath(test_dir, "namelist.def")
+                write(namelist_path, "$(spec.file_type) $(spec.file_name)\n")
+                def_path = joinpath(test_dir, spec.file_name)
+                good_rows = ["$(i - 1) $(i).0 -$(i).0" for i = 1:spec.n_param]
+                bad_cases = (
+                    (header_count = 2, rows = good_rows),
+                    (header_count = spec.n_index, rows = vcat(["0 0.0"], good_rows[2:end])),
+                    (header_count = spec.n_index, rows = vcat(["0 NaN 0.0"], good_rows[2:end])),
+                    (header_count = spec.n_index, rows = vcat(["bad-index 0.0 0.0"], good_rows[2:end])),
+                )
+
+                for case in bad_cases
+                    data = ExpertModeData()
+                    spec.setup!(data)
+                    _write_indexed_input_parameter_file(
+                        def_path,
+                        spec.header_name,
+                        case.header_count,
+                        case.rows,
+                    )
+                    @test_throws ErrorException read_input_parameters!(data, namelist_path)
+                    @test spec.params(data) == fill(0.0 + 0.0im, spec.n_param)
+                end
+            end
+        end
     end
 end
 
