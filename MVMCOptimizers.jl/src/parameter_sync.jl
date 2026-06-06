@@ -9,9 +9,9 @@ using MVMCExpertModeParsers: is_gutzwiller_optimized, is_jastrow_optimized
 const D_AMP_MAX = 4.0  # Maximum amplitude for Slater parameters (D_AmpMax)
 
 function _real_opt_flag(data::ExpertModeData, fidx0::Int)::Bool
-    isempty(data.optimization_flags) && return true
     flag_idx = 2 * fidx0 + 1
-    return flag_idx <= length(data.optimization_flags) && data.optimization_flags[flag_idx]
+    flag_idx <= length(data.optimization_flags) || return false
+    return data.optimization_flags[flag_idx]
 end
 
 function _all_gutzwiller_real_optimized(data::ExpertModeData, layout)::Bool
