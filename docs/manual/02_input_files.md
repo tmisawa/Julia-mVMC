@@ -58,8 +58,11 @@ active is not reproducible bit-for-bit.
 | `InDH2.def`, `InDH4.def` | `read_input_parameters!` emits a warning and skips (not yet wired into the `Proj` array layout). |
 | `InOrbitalParallel.def` | `read_input_parameters!` emits a warning and skips (the C-side `iNOrbitalAntiParallel` offset path is not yet implemented). |
 | `InOptTrans.def` | `read_input_parameters!` emits a warning and skips. The `FlagOptTrans` gate and `OptTrans[]` storage do not exist on the Julia side yet. |
-| `cisajscktalt.def` (TwoBodyG product side) | Direct two-body Green is supported; the `<c†c>×<c†c>` factorisation path is not. |
 | `OptTrans` block in `initial.def` | Refused with a warning by `read_initial_def!` because `FlagOptTrans` / `OptTrans[]` are not implemented yet. |
+
+> Note: the factored/product two-body Green (`TwoBodyGEx` / `greentwoex.def` →
+> `zvo_cisajscktaltex`) **is** supported (non-FSZ) and gated against C; see
+> [`04_physics_calc.md`](04_physics_calc.md).
 
 ## Compatibility notes
 

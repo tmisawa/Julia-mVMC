@@ -7,7 +7,7 @@ The main VMC optimization package: Stochastic-Reconfiguration parameter optimiza
 ## Scope (v0.2)
 
 - **`VMCParaOpt` (parameter optimization)** — bit-level verified against the C reference for `HeisenbergChain` (real / cmp / fsz) and `HubbardChain` (real); see the integration tests at `../test/integration/`.
-- **`VMCPhysCal` (physical-quantity calculation)** — experimental. Direct-path one- and two-body Green functions (`zvo_cisajs.dat`, `zvo_cisajscktaltdc.dat`) are supported. The factored two-body path (`cisajscktalt.def`) is not yet ported. See [`../docs/manual/04_physics_calc.md`](../docs/manual/04_physics_calc.md).
+- **`VMCPhysCal` (physical-quantity calculation)** — experimental. One-body (`zvo_cisajs`), direct two-body (`TwoBodyG` → `zvo_cisajscktalt`), and factored/product two-body (`TwoBodyGEx`/`greentwoex.def` → `zvo_cisajscktaltex`) Green functions are supported (factored is non-FSZ) and gated against C references via [`../test/integration/phys_cal_equivalent.jl`](../test/integration/phys_cal_equivalent.jl); run through [`run_phys_cal_from_namelist`](src/run_phys_cal_from_namelist.jl). See [`../docs/manual/04_physics_calc.md`](../docs/manual/04_physics_calc.md).
 - **Not supported in this release**: BackFlow (`vmc_bf_*` entry points raise an error), full Lanczos (only step-0 is comparable), MPI parallelization (`NSplitSize > 1` raises an unsupported-MPI error until MPI support is implemented).
 
 ## Installation

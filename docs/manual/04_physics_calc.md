@@ -1,10 +1,12 @@
 # 4. Physical-quantity measurement (VMCPhysCal) — experimental
 
 > ⚠️ `VMCPhysCal` (`NVMCCalMode = 1`) is **experimental** in this release. Major
-> components are implemented and exercised against simple reference
-> data, but parts of the parsing and product-side accumulation are still
-> in flux. Treat numbers as a sanity check, not as production output,
-> until a later release (v0.3 or later).
+> components are implemented and exercised against C reference data — the
+> one-body, direct two-body, and factored/product two-body Green functions now
+> all match C-mVMC to the per-quantity gate tolerance (see
+> [`../../test/integration/phys_cal_equivalent.jl`](../../test/integration/phys_cal_equivalent.jl)).
+> Treat numbers as a sanity check, not as production output, until a later
+> release, and note the FSZ caveat on the factored path below.
 
 ## What is implemented
 
@@ -12,15 +14,18 @@
 |----------|--------|-------|
 | `vmc_phys_cal!` (entry point, `src/vmc_phys_cal.jl`) | ✅ wired | Drives sampling and Green-function accumulation. |
 | 1-body Green function `<c†_i c_j>` | ✅ | Matches C reference for HeisenbergChain. |
-| 2-body Green function (direct), `<c†_i c_j c†_k c_l>` | ✅ | Direct path only; the product path is not yet implemented. |
+| 2-body Green function (direct), `<c†_i c_j c†_k c_l>` (`TwoBodyG`/`greentwo.def`) | ✅ | Output `zvo_cisajscktalt_*.dat`. |
+| 2-body Green function (factored/product), `<c†_i c_j>·<c†_k c_l>` (`TwoBodyGEx`/`greentwoex.def`) | ✅ (non-FSZ) | Output `zvo_cisajscktaltex_*.dat`. Matches C to the gate tolerance for real, complex (cmp) and Kondo systems. FSZ is rejected at runtime (see below). |
 | Weighted average over QP weights (`weight_average_green_func!`) | ✅ | Same convention as C (Σ w_i G_i / Σ w_i). |
-| Output to `zvo_cisajs.dat` and `zvo_cisajscktaltdc.dat` | ✅ | C-compatible per-row format. |
+| Output to `zvo_cisajs_*.dat`, `zvo_cisajscktalt_*.dat`, `zvo_cisajscktaltex_*.dat` | ✅ | C-compatible per-row / value-only format. |
 
 ## Known limitations
 
-- **Product-side two-body Green functions** (`cisajscktalt.def`)
-  — the factored `<c†c>×<c†c>` accumulator (C path
-  `CalculateGreenFunc_BF` and friends) is not yet ported.
+- **Factored two-body Green under FSZ** — the product-side `TwoBodyGEx`
+  (`greentwoex.def` → `zvo_cisajscktaltex_*.dat`) path is supported for the
+  spin-conserving (`mode = :real` / `:cmp`) sector and is rejected at runtime
+  (`validate_factored_green_supported`) when combined with the FSZ generalised
+  orbital. Use the C reference for factored Green under FSZ.
 - **Backflow correlation factor** — the `vmc_bf_*` entry points raise
   an error in this release. Inputs that activate Back Flow (`n_proj_bf > 0`, i.e.
   any `BackFlow*` keyword in `namelist.def`) are not supported; remove
@@ -40,8 +45,13 @@ For published physics results, the safest path in this release is:
 1. Use Julia-mVMC for `VMCParaOpt` (parameter optimisation) — verified
    bit-level for the modes listed in
    [`03_optimization.md`](03_optimization.md).
-2. Hand off the optimised `zqp_opt.dat` to C-mVMC for `VMCPhysCal`
-   (physical-quantity measurement) until the product-side path lands.
+2. For `VMCPhysCal` (physical-quantity measurement), the one-body, direct and
+   factored two-body Green functions are gated against C references
+   ([`phys_cal_equivalent.jl`](../../test/integration/phys_cal_equivalent.jl)) and
+   can be run via
+   [`run_phys_cal_from_namelist`](../../MVMCOptimizers.jl/src/run_phys_cal_from_namelist.jl);
+   still fall back to C-mVMC for FSZ factored Green, Backflow, Lanczos
+   (`NLanczosMode > 0`), or MPI (`NSplitSize > 1`).
 
 The output formats of `zqp_opt.dat` are byte-compatible (same column
 layout), so the hand-off requires no conversion script.

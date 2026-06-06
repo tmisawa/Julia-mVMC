@@ -1,0 +1,29 @@
+# PhysCal e2e reference provenance (Plan 3b)
+
+## C-mVMC binary
+- Source: issp-center-dev/mVMC, branch `develop` @ 66f17422968009f8cc70f1dec94b2f52e562d344
+  ("Merge pull request #95 ... update_actions"); the canonical integration head
+  that the omp-simd benchmark branch is based on.
+- Build: `cmake -DCONFIG=apple -DCMAKE_BUILD_TYPE=Release -DUSE_GEMMT=OFF
+  -DUSE_SCALAPACK=OFF -DTesting=OFF` (no BLIS; reference dskr2k/zskr2k).
+- Compilers: Apple Clang 15.0.0 (clang-1500.1.0.2.5) for C/C++; GNU gfortran 15.2.0
+  (Homebrew) for Fortran; libomp. BLAS: Apple Accelerate. Target: macOS arm64
+  (Darwin 24.6.0).
+- Note on compiler choice: the project's existing ctest_ref data was generated
+  with gcc-15 @ mVMC master 5e7ea40. On this host gcc-15.2's fixincludes headers
+  had drifted ahead of the installed CommandLineTools SDK (missing _bounds.h /
+  quick_exit), so the canonical build used Apple Clang instead. The C-vs-Julia
+  contract is the per-quantity rtol/atol gate (see expected/ + green_compare.jl),
+  not byte-level cross-toolchain identity; Clang vs gcc differ only at ~1e-12.
+- Threads: OMP_NUM_THREADS=1, single MPI rank.
+
+## Run (from a staging copy of physcal_ref/inputs/ with the params below)
+- Fixed params: the committed reference/hubbard_chain_real/inputs/zqp_opt.dat
+  (generated for the optimization ctest; 63 tokens = 6 + 3*19, NSROptItrSmp>1
+  layout) reused verbatim. No re-optimization.
+- PhysCal: `vmc.out -e namelist.def zqp_opt.dat` (NVMCCalMode=1) -> expected/*.
+- greentwoex.def: 3 factored terms over constituents present in greenone.def:
+  n_{0up}*conj(n_{0dn}) (on-site doublon), |G(0up,1up)|^2 and |G(0dn,1dn)|^2
+  (nearest-neighbour hops). mode=:real, itinerant chain.
+- Julia vs C: one-body max_abs 1.1e-16, direct 8.3e-17, factored 1.7e-16.
+  n_para_consumed=19.

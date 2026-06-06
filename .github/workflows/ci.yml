@@ -73,6 +73,10 @@ jobs:
         run: |
           julia --project=@. test/integration/ctest_equivalent.jl
 
+      - name: Run PhysCal e2e integration tests (factored two-body Green)
+        run: |
+          julia --project=@. test/integration/phys_cal_equivalent.jl
+
       - name: Run examples (smoke test, JULIA_MVMC_EXAMPLE_STEPS=5)
         run: |
           for f in examples/*.jl; do

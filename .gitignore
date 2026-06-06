@@ -47,6 +47,9 @@ zqp_*.dat
 !test/integration/reference/**/zvo_out_first10.dat
 !test/integration/reference/**/inputs/zqp_opt.dat
 !test/integration/reference/**/inputs/initial.def
+# PhysCal e2e gate fixtures (Plan 3b): committed fixed params + C Green references.
+!test/integration/reference/**/physcal_ref/zqp_opt.dat
+!test/integration/reference/**/physcal_ref/expected/zvo_*.dat
 !examples/inputs/**/zqp_opt.dat
 !examples/inputs/**/initial.def
 
