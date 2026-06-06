@@ -8,6 +8,7 @@ using MVMCExpertModeParsers:
     JastrowTerm,
     OrbitalTerm,
     DoublonHolon2SiteIndex,
+    DoublonHolon4SiteIndex,
     ChargeRBMPhysLayerTerm,
     SpinRBMPhysLayerTerm,
     GeneralRBMPhysLayerTerm,
@@ -91,6 +92,119 @@ end
     @test data.orbital_terms[1].value == orig_orbital[1] + delta
     @test data.orbital_terms[2].value == orig_orbital[2] + delta
     @test data.orbital_terms[3].value == orig_orbital[3]
+end
+
+@testset "unit/stochastic_opt: update_parameter_value DH4 write-back" begin
+    data = make_mock_data_for_stochastic_opt_tests()
+    data.doublon_holon_4site_indices = [
+        DoublonHolon4SiteIndex([
+            1 0 1 0
+            0 1 0 1
+        ]),
+    ]
+    data.doublon_holon_4site_params = [ComplexF64(2000 + i, 0) for i = 1:10]
+    data.doublon_holon_4site_opt_flags = fill(true, 10)
+
+    delta = 0.625 - 0.25im
+    orig_charge_phys = [t.value for t in data.charge_rbm_phys_layer_terms]
+    orig_orbital = [t.value for t in data.orbital_terms]
+
+    # NProj = Gutz(1) + Jastrow(1) + DH4(10) = 12. DH4 occupies para_idx 3..12.
+    MVMCOptimizers.update_parameter_value(data, 3, real(delta), imag(delta))
+    @test data.doublon_holon_4site_params[1] == 2001.0 + 0.0im + delta
+    @test [t.value for t in data.charge_rbm_phys_layer_terms] == orig_charge_phys
+    @test [t.value for t in data.orbital_terms] == orig_orbital
+
+    MVMCOptimizers.update_parameter_value(data, 12, real(delta), imag(delta))
+    @test data.doublon_holon_4site_params[10] == 2010.0 + 0.0im + delta
+
+    # RBM and Slater offsets move after the DH4 projection slice.
+    MVMCOptimizers.update_parameter_value(data, 13, real(delta), imag(delta))
+    @test data.charge_rbm_phys_layer_terms[1].value == orig_charge_phys[1] + delta
+    @test data.charge_rbm_phys_layer_terms[2].value == orig_charge_phys[2] + delta
+
+    MVMCOptimizers.update_parameter_value(data, 22, real(delta), imag(delta))
+    @test data.orbital_terms[1].value == orig_orbital[1] + delta
+    @test data.orbital_terms[2].value == orig_orbital[2] + delta
+    @test data.orbital_terms[3].value == orig_orbital[3]
+end
+
+@testset "unit/stochastic_opt: SR enumeration writes DH without touching RBM or Slater" begin
+    data = make_mock_data_for_stochastic_opt_tests()
+    data.modpara = ModParaParameters(
+        nsite = 2,
+        nelec = 1,
+        nvmc_sample = 1,
+        n_orbital_idx = 2,
+        dsr_opt_red_cut = 0.0,
+        dsr_opt_sta_del = 0.0,
+        dsr_opt_step_dt = 0.25,
+    )
+    data.complex_flags = [1]
+    data.doublon_holon_2site_indices = [
+        DoublonHolon2SiteIndex([
+            1 0
+            0 1
+        ]),
+    ]
+    data.doublon_holon_2site_params = [ComplexF64(3000 + i, 0) for i = 1:6]
+    data.doublon_holon_2site_opt_flags = fill(true, 6)
+
+    layout = MVMCExpertModeParsers.projection_layout(data)
+    n_rbm = MVMCExpertModeParsers.count_rbm_parameters(data)
+    n_para = layout.n_proj + n_rbm + data.modpara.n_orbital_idx
+    state = MVMCOptimizers.VMCOptimizationState(
+        data.modpara.nsite,
+        data.modpara.nelec,
+        layout.n_proj,
+        n_para,
+        1,
+        data.modpara.nvmc_sample,
+        true,
+        false,
+    )
+
+    target_para_idx = layout.dh2_offset + 1  # 1-based parameter index
+    target_pi = 2 * (target_para_idx - 1)    # C/Julia SR real component index, 0-based
+    data.optimization_flags = falses(2 * n_para)
+    data.optimization_flags[target_pi + 1] = true
+
+    sr_opt_size = state.sr_opt.sr_opt_size
+    diag_idx = (target_pi + 2) * (2 * sr_opt_size) + (target_pi + 2) + 1
+    state.sr_opt.sr_opt_oo[diag_idx] = 2.0 + 0.0im
+    state.sr_opt.sr_opt_ho[target_pi + 3] = 3.0 + 0.0im
+
+    orig_dh = copy(data.doublon_holon_2site_params)
+    orig_rbm = (
+        [t.value for t in data.charge_rbm_phys_layer_terms],
+        [t.value for t in data.spin_rbm_phys_layer_terms],
+        [t.value for t in data.general_rbm_phys_layer_terms],
+        [t.value for t in data.charge_rbm_hidden_layer_terms],
+        [t.value for t in data.spin_rbm_hidden_layer_terms],
+        [t.value for t in data.general_rbm_hidden_layer_terms],
+        [t.value for t in data.charge_rbm_phys_hidden_terms],
+        [t.value for t in data.spin_rbm_phys_hidden_terms],
+        [t.value for t in data.general_rbm_phys_hidden_terms],
+    )
+    orig_orbital = [t.value for t in data.orbital_terms]
+
+    @test MVMCOptimizers.stochastic_opt!(data, state) == 0
+
+    expected_delta = -0.75 + 0.0im
+    @test data.doublon_holon_2site_params[1] ≈ orig_dh[1] + expected_delta atol = 1e-14
+    @test data.doublon_holon_2site_params[2:end] == orig_dh[2:end]
+    @test (
+        [t.value for t in data.charge_rbm_phys_layer_terms],
+        [t.value for t in data.spin_rbm_phys_layer_terms],
+        [t.value for t in data.general_rbm_phys_layer_terms],
+        [t.value for t in data.charge_rbm_hidden_layer_terms],
+        [t.value for t in data.spin_rbm_hidden_layer_terms],
+        [t.value for t in data.general_rbm_hidden_layer_terms],
+        [t.value for t in data.charge_rbm_phys_hidden_terms],
+        [t.value for t in data.spin_rbm_phys_hidden_terms],
+        [t.value for t in data.general_rbm_phys_hidden_terms],
+    ) == orig_rbm
+    @test [t.value for t in data.orbital_terms] == orig_orbital
 end
 
 @testset "unit/stochastic_opt: get_opt_flag_for_parameter" begin

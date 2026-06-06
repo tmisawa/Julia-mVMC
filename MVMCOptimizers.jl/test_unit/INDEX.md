@@ -22,6 +22,9 @@
 
 ### `src/stochastic_opt.jl`
 - `test_unit/test_unit_stochastic_opt.jl`
+  - `unit/stochastic_opt: update_parameter_value DH write-back and shifted offsets` → `update_parameter_value`（DH2 projection block と DH 後続 RBM/Slater offset）
+  - `unit/stochastic_opt: update_parameter_value DH4 write-back` → `update_parameter_value`（DH4 projection block と DH4 後続 RBM/Slater offset）
+  - `unit/stochastic_opt: SR enumeration writes DH without touching RBM or Slater` → `stochastic_opt!` / `update_parameter_value`
   - `unit/stochastic_opt: get_opt_flag_for_parameter` → `get_opt_flag_for_parameter`
   - `unit/stochastic_opt: update_parameter_value Proj/RBM/Slater mapping` → `update_parameter_value`
   - `unit/stochastic_opt: build_s_matrix_and_g_vector!` → `build_s_matrix_and_g_vector!`
@@ -40,6 +43,11 @@
     - `make_proj_cnt!`
     - `update_proj_cnt!`
     - `update_proj_cnt_fsz!`
+  - DH projection count / update / log coverage
+    - `unit/vmc_sampling: DH2/DH4 projection counts` → `make_proj_cnt!` / `set_projection_diff!`
+    - `unit/vmc_sampling: DH update paths match fresh recompute` → `update_proj_cnt!` / `update_proj_cnt_fsz!`（DH2）
+    - `unit/vmc_sampling: DH4 update paths match fresh recompute` → `update_proj_cnt!` / `update_proj_cnt_fsz!`（DH4）
+    - `unit/vmc_sampling: DH log projection uses real parameter parts` → `log_proj_val` / `log_proj_ratio`
 
 - `test_unit/test_unit_vmc_sampling_misc.jl`
   - `unit/vmc_sampling: log_proj_val / log_proj_ratio`
@@ -67,6 +75,7 @@
 - `test_unit/test_unit_parameter_sync.jl`
   - `unit/parameter_sync: sync_modified_parameter!` → `sync_modified_parameter!`
     - shift（Gutzwiller/Jastrow）
+    - shift（DH2/DH4, Gutzwiller write-back, OptFlag guard）
     - rescale（`D_AMP_MAX`）
     - normalize（`para_qp_trans`）
 

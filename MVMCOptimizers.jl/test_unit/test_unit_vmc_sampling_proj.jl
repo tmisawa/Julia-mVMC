@@ -169,6 +169,44 @@ end
     @test proj_noop == proj0
 end
 
+@testset "unit/vmc_sampling: DH4 update paths match fresh recompute" begin
+    data = make_mock_data_for_proj_tests(nsite = 4)
+    data.gutzwiller_terms = [
+        GutzwillerTerm(0, 0.11 + 0.0im, false),
+        GutzwillerTerm(1, 0.12 + 0.0im, false),
+    ]
+    data.jastrow_terms = [JastrowTerm(0, 1, ComplexF64(0.2 + i / 100), false) for i = 1:data.n_jastrow_idx]
+    data.doublon_holon_4site_indices = [
+        DoublonHolon4SiteIndex([
+            1 2 3 1
+            0 2 3 0
+            0 1 3 0
+            0 1 2 1
+        ]),
+    ]
+    data.doublon_holon_4site_params = [ComplexF64(0.5 + i / 10, -i) for i = 1:10]
+    data.doublon_holon_4site_opt_flags = fill(true, 10)
+
+    nsite = data.modpara.nsite
+    nproj = projection_layout(data).n_proj
+    ele_num0 = make_ele_num(nsite; up_sites = [0, 2], down_sites = [0, 3])
+    proj0 = zeros(Int, nproj)
+    MVMCOptimizers.make_proj_cnt!(proj0, ele_num0, data)
+
+    ri, rj, s = 2, 1, 0
+    ele_num1 = apply_hop(ele_num0, ri, rj, s, nsite)
+    proj1_full = zeros(Int, nproj)
+    MVMCOptimizers.make_proj_cnt!(proj1_full, ele_num1, data)
+
+    proj1_inc = similar(proj0)
+    MVMCOptimizers.update_proj_cnt!(ri, rj, s, proj1_inc, proj0, ele_num1, data)
+    @test proj1_inc == proj1_full
+
+    proj1_fsz = similar(proj0)
+    MVMCOptimizers.update_proj_cnt_fsz!(ri, rj, s, 1 - s, proj1_fsz, proj0, ele_num1, data)
+    @test proj1_fsz == proj1_full
+end
+
 @testset "unit/vmc_sampling: DH log projection uses real parameter parts" begin
     data = _dh_only_data(
         nsite = 4,
