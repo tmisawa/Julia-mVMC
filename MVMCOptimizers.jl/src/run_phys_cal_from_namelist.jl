@@ -85,8 +85,8 @@ function run_phys_cal_from_namelist(
     #    overlay wins — matching C's order.
     read_input_parameters!(data, namelist_str)
 
-    # 5. Slater rescale + GJ shift (C SyncModifiedParameter), before PhysCal.
-    sync_modified_parameter!(data)
+    # 5. Slater rescale before PhysCal. C enables DH/GJ shift flags only in Opt mode.
+    sync_modified_parameter!(data; shift_correlations = false)
 
     # 6. PhysCal. vmc_phys_cal! owns the single init_parameter! (RNG match) and
     #    init_qp_weight!; its save/restore preserves the params loaded above.

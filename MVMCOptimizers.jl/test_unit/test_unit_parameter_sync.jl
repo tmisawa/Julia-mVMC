@@ -90,6 +90,32 @@ using MVMCExpertModeParsers:
         @test newvals ≈ (orig .* ratio) atol = 1e-14
     end
 
+    @testset "correlation shifts can be disabled while Slater rescale remains enabled" begin
+        data = ExpertModeData()
+        data.gutzwiller_terms = [GutzwillerTerm(0, 10.0 + 0.25im, true)]
+        data.jastrow_terms = [JastrowTerm(0, 1, 20.0 - 0.5im, true)]
+        data.doublon_holon_2site_indices = [DoublonHolon2SiteIndex([1 0; 0 1])]
+        data.doublon_holon_2site_params = ComplexF64[i + i * im for i = 1:6]
+        data.orbital_terms = [
+            OrbitalTerm(0, 0, 0, 2.0 + 0.0im, true),
+            OrbitalTerm(0, 1, 1, 0.0 + 8.0im, true),
+        ]
+        data.optimization_flags = fill(true, 2 * projection_layout(data).n_proj)
+
+        orig_g = [t.value for t in data.gutzwiller_terms]
+        orig_j = [t.value for t in data.jastrow_terms]
+        orig_dh = copy(data.doublon_holon_2site_params)
+        orig_orb = [t.value for t in data.orbital_terms]
+        ratio = MVMCOptimizers.D_AMP_MAX / maximum(abs.(orig_orb))
+
+        MVMCOptimizers.sync_modified_parameter!(data; shift_correlations = false)
+
+        @test [t.value for t in data.gutzwiller_terms] == orig_g
+        @test [t.value for t in data.jastrow_terms] == orig_j
+        @test data.doublon_holon_2site_params == orig_dh
+        @test [t.value for t in data.orbital_terms] ≈ (orig_orb .* ratio) atol = 1e-14
+    end
+
     @testset "para_qp_trans is NOT normalized (C normalizes OptTrans, not ParaQPTrans)" begin
         # C's SyncModifiedParameter (parameter.c:163-175) normalizes the
         # dedicated OptTrans[] array gated by FlagOptTrans>0. ParaQPTrans
