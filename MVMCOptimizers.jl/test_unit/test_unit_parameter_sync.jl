@@ -204,6 +204,21 @@ using MVMCExpertModeParsers:
         @test data.gutzwiller_terms[1].value == 10.0 + 0.0im
     end
 
+    @testset "DH shift requires explicit real optimization flags" begin
+        data = ExpertModeData()
+        data.gutzwiller_terms = [GutzwillerTerm(0, 10.0 + 0.0im, true)]
+        data.doublon_holon_2site_indices = [DoublonHolon2SiteIndex([1 0; 0 1])]
+        data.doublon_holon_2site_params = ComplexF64[i + 0im for i = 1:6]
+        data.optimization_flags = Bool[]
+
+        orig_dh = copy(data.doublon_holon_2site_params)
+        @test !MVMCOptimizers.flag_shift_dh2(data)
+        MVMCOptimizers.sync_modified_parameter!(data)
+
+        @test data.doublon_holon_2site_params == orig_dh
+        @test data.gutzwiller_terms[1].value == 10.0 + 0.0im
+    end
+
     @testset "DH shift is disabled when any DH real flag is fixed" begin
         data2 = ExpertModeData()
         data2.gutzwiller_terms = [GutzwillerTerm(0, 10.0 + 0.0im, true)]

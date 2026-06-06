@@ -888,13 +888,6 @@ end
 
 n_projection_parameters(data::ExpertModeData)::Int = projection_layout(data).n_proj
 
-function has_doublon_holon(data::ExpertModeData)::Bool
-    return !isempty(data.doublon_holon_2site_indices) ||
-           !isempty(data.doublon_holon_4site_indices) ||
-           !isempty(data.doublon_holon_2site_params) ||
-           !isempty(data.doublon_holon_4site_params)
-end
-
 function projection_parameters(
     data::ExpertModeData,
     layout::ProjectionLayout = projection_layout(data),
