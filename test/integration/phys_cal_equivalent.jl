@@ -34,12 +34,13 @@ const PHYS_CAL_MODEL_FILTER_ENV = "JULIA_MVMC_PHYS_CAL_MODELS"
 
 # Systems carrying a committed reference/<fixture>/physcal_ref/ fixture.
 # n_para is the expected read_opt_para_file! consumption
-# (= NGutzwillerIdx + NJastrowIdx + NOrbitalIdx); asserting it catches a
+# (= NProj + NOrbitalIdx for these NRBM=0 fixtures); asserting it catches a
 # silently-truncated zqp_opt.dat. It equals (token_count - 6) / 3.
 const PHYS_CAL_MODELS = [
     (fixture = "heisenberg_chain_real", c_model = "HeisenbergChain",     mode = :real, n_para = 14),
     (fixture = "heisenberg_chain_cmp",  c_model = "HeisenbergChain_cmp", mode = :cmp,  n_para = 14),
     (fixture = "hubbard_chain_real",    c_model = "HubbardChain",        mode = :real, n_para = 19),
+    (fixture = "hubbard_chain_dh_real", c_model = "HubbardChain_DH",     mode = :real, n_para = 35),
     (fixture = "kondo_chain_real",      c_model = "KondoChain",          mode = :real, n_para = 76),
 ]
 

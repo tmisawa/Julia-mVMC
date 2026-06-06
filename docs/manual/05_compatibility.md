@@ -103,10 +103,6 @@ for provenance and regeneration instructions.
 
 - **BackFlow** correlation factor (`vmc_bf_*` entry points raise an error
   in this release; inputs that activate Back Flow are not supported).
-- **Doublon-holon execution** (`DH2` / `DH4` index tables are parsed and
-  laid out in the C projection order, but `vmc_para_opt!`, `vmc_phys_cal!`,
-  and initial-parameter loading reject active DH inputs until DH-2 wires the
-  remaining runtime path).
 - **MPI parallelisation** (`NSplitSize > 1` raises an unsupported-MPI
   error until MPI support is implemented; `NSplitSize = 1` is the only
   supported setting).
@@ -116,9 +112,8 @@ for provenance and regeneration instructions.
 - **`InterAllTerm` full spin metadata** — when `interall.def` omits
   per-term spin info, defaults are substituted (see
   `src/vmc_main_cal.jl`).
-- Selected `.def` overlay files: `InDH2`, `InDH4`,
-  `InOrbitalParallel`, `InOptTrans`, and `OptTrans`-bearing
+- Selected `.def` overlay files: `InOrbitalParallel`, `InOptTrans`, and `OptTrans`-bearing
   `initial.def` are recognised but not consumed (warn-only). The
-  Gutzwiller / Jastrow / Orbital / OrbitalGeneral / 9-channel RBM
+  Gutzwiller / Jastrow / DH2 / DH4 / Orbital / OrbitalGeneral / 9-channel RBM
   `In*` overlays **are** consumed. See
   [`02_input_files.md`](02_input_files.md) for the full table.

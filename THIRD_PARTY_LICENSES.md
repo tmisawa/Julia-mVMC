@@ -73,7 +73,10 @@ The full C mVMC source itself is **not** bundled.
     `inputs/`): `5e7ea400ae35b566cfa2de6e342efe962f179a41` (master), gcc-15.
   - PhysCal e2e fixtures (`physcal_ref/`):
     `66f17422968009f8cc70f1dec94b2f52e562d344` (`develop`), Apple Clang 15 +
-    gfortran (`USE_GEMMT=OFF`); see each `physcal_ref/metadata.txt`.
+    gfortran (`USE_GEMMT=OFF`); the DH fixture was generated from local branch
+    `feature/omp-simd-pfupdate` @ `622166afe33c6be3402d7c926db7e9c0003a47c4`,
+    based on that develop commit plus benchmark/test-data commits. See each
+    `physcal_ref/metadata.txt`.
 
   See [test/integration/reference/README.md](test/integration/reference/README.md)
   for the regeneration procedure.

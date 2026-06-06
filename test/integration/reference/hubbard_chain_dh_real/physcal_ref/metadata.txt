@@ -1,0 +1,32 @@
+# PhysCal e2e reference provenance (Plan 3b)
+
+## C-mVMC binary
+- Source: local checkout of issp-center-dev/mVMC, branch `feature/omp-simd-pfupdate`
+  @ 622166afe33c6be3402d7c926db7e9c0003a47c4. This is based on develop
+  @ 66f17422968009f8cc70f1dec94b2f52e562d344 plus OpenMP SIMD benchmark changes
+  and a test-data-only commit.
+- Build: `cmake -DCONFIG=apple -DCMAKE_BUILD_TYPE=Release -DUSE_GEMMT=OFF
+  -DUSE_SCALAPACK=OFF -DTesting=OFF` (no BLIS; reference dskr2k/zskr2k).
+- Compilers: Apple Clang 15.0.0 (clang-1500.1.0.2.5) for C/C++; GNU gfortran 15.2.0
+  (Homebrew) for Fortran; libomp. BLAS: Apple Accelerate. Target: macOS arm64
+  (Darwin 24.6.0).
+- Note on compiler choice: the project's existing ctest_ref data was generated
+  with gcc-15 @ mVMC master 5e7ea40. On this host gcc-15.2's fixincludes headers
+  had drifted ahead of the installed CommandLineTools SDK (missing _bounds.h /
+  quick_exit), so the canonical build used Apple Clang instead. The C-vs-Julia
+  contract is the per-quantity rtol/atol gate (see expected/ + green_compare.jl),
+  not byte-level cross-toolchain identity; Clang vs gcc differ only at ~1e-12.
+- Threads: OMP_NUM_THREADS=1, single MPI rank.
+
+## Run (from a staging copy of physcal_ref/inputs/ with the params below)
+- Fixed params: started from the committed reference/hubbard_chain_real/inputs/zqp_opt.dat
+  Gutzwiller/Jastrow/Slater values and inserted a hand-authored real DH slice:
+  DH2(6) + DH4(10). The resulting file has 111 tokens = 6 + 3*35.
+- PhysCal: `vmc.out -e namelist.def zqp_opt.dat` (NVMCCalMode=1) -> expected/*.
+- DH2/DH4: hand-authored 6-site ring tables. DH2 uses left/right neighbours;
+  DH4 uses left/right nearest and next-nearest neighbours. All DH opt flags are 1.
+- greentwoex.def: 3 factored terms over constituents present in greenone.def:
+  n_{0up}*conj(n_{0dn}) (on-site doublon), |G(0up,1up)|^2 and |G(0dn,1dn)|^2
+  (nearest-neighbour hops). mode=:real, itinerant chain.
+- Julia vs C: one-body max_abs 5.6e-17, direct max_abs 5.6e-17, factored max_abs
+  1.2e-16. n_para_consumed=35.
