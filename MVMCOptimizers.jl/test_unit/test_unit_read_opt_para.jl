@@ -1,7 +1,12 @@
 using Test
 using MVMCOptimizers
 using MVMCExpertModeParsers:
-    ExpertModeData, GutzwillerTerm, JastrowTerm, OrbitalTerm, DoublonHolon2SiteIndex
+    ExpertModeData,
+    GutzwillerTerm,
+    JastrowTerm,
+    OrbitalTerm,
+    DoublonHolon2SiteIndex,
+    ChargeRBMPhysLayerTerm
 
 # Capture the showerror text of whatever `f()` throws (message is the stable
 # contract; assert on substrings, not the concrete exception type).
@@ -38,6 +43,24 @@ const _GOLDEN_OPT = join(
         "0.30", "0.0", "9.9",                              # jastrow1 -> 0.30 + 0im
         "0.40", "-0.10", "9.9",                            # slater idx0 -> 0.40 - 0.10im
         "0.50", "-0.20", "9.9",                            # slater idx1 -> 0.50 - 0.20im
+    ],
+    " ",
+) * " \n"
+
+const _GOLDEN_OPT_DH = join(
+    [
+        "1.0", "2.0", "3.0", "4.0", "5.0", "6.0",          # diagnostics
+        "0.10", "0.0", "9.9",                              # gutz1
+        "0.20", "0.0", "9.9",                              # gutz2
+        "0.30", "0.0", "9.9",                              # jastrow1
+        "1.10", "-0.10", "9.9",                            # DH2 local 0
+        "1.20", "-0.20", "9.9",
+        "1.30", "-0.30", "9.9",
+        "1.40", "-0.40", "9.9",
+        "1.50", "-0.50", "9.9",
+        "1.60", "-0.60", "9.9",                            # DH2 local 5
+        "0.40", "-0.10", "9.9",                            # slater idx0
+        "0.50", "-0.20", "9.9",                            # slater idx1
     ],
     " ",
 ) * " \n"
@@ -121,15 +144,41 @@ end
     end
 end
 
-@testset "read_opt_para_file!: DoublonHolon models are rejected (scope guard)" begin
+@testset "read_opt_para_file!: DH projection block loads before Slater" begin
+    mktempdir() do dir
+        path = joinpath(dir, "zqp_opt.dat")
+        write(path, _GOLDEN_OPT_DH)
+        data = _make_data()
+        data.doublon_holon_2site_indices = [DoublonHolon2SiteIndex([1 0; 0 1])]
+        data.doublon_holon_2site_params = fill(0.0 + 0.0im, 6)
+        data.doublon_holon_2site_opt_flags = fill(true, 6)
+
+        n = MVMCOptimizers.read_opt_para_file!(data, path)
+
+        @test n == 11  # NProj (2 + 1 + 6) + NSlater (2)
+        @test data.doublon_holon_2site_params == ComplexF64[
+            1.10 - 0.10im,
+            1.20 - 0.20im,
+            1.30 - 0.30im,
+            1.40 - 0.40im,
+            1.50 - 0.50im,
+            1.60 - 0.60im,
+        ]
+        @test data.orbital_terms[1].value ≈ 0.40 - 0.10im
+        @test data.orbital_terms[2].value ≈ 0.50 - 0.20im
+    end
+end
+
+@testset "read_opt_para_file!: RBM-bearing models still fail loud" begin
     mktempdir() do dir
         path = joinpath(dir, "zqp_opt.dat")
         write(path, _GOLDEN_OPT)
         data = _make_data()
-        data.doublon_holon_2site_indices = [DoublonHolon2SiteIndex([1 0; 0 1])]
-        data.doublon_holon_2site_params = fill(0.0 + 0im, 6)
+        data.charge_rbm_phys_layer_terms = [
+            ChargeRBMPhysLayerTerm(0, 0.0 + 0.0im, false, 0),
+        ]
         threw, msg = _capture_msg(() -> MVMCOptimizers.read_opt_para_file!(data, path))
-        @test threw && occursin("DoublonHolon", msg)
+        @test threw && occursin("RBM-bearing", msg)
     end
 end
 

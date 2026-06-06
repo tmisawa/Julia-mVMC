@@ -70,6 +70,65 @@ function parse_input_parameter_file(filepath::String)::Dict{Int,ComplexF64}
     return params
 end
 
+function _parse_float_strict(tok::AbstractString, filepath::String, line_num::Int, field::String)::Float64
+    value = tryparse(Float64, tok)
+    value === nothing && error("$filepath:$line_num: invalid $field '$tok'")
+    isfinite(value) || error("$filepath:$line_num: non-finite $field '$tok'")
+    return value
+end
+
+function _parse_int_strict(tok::AbstractString, filepath::String, line_num::Int, field::String)::Int
+    value = tryparse(Int, tok)
+    value === nothing && error("$filepath:$line_num: invalid $field '$tok'")
+    return value
+end
+
+function parse_indexed_input_parameter_file_strict(
+    filepath::String,
+    expected_header_count::Int,
+    expected_param_count::Int,
+    label::AbstractString,
+)::Vector{ComplexF64}
+    content = read_def_file(filepath)
+    lines = split(content, '\n')
+    length(lines) >= 5 || error("$label: $filepath must include 5 header lines")
+
+    header_tokens = split_def_line(clean_line(lines[2]))
+    length(header_tokens) >= 2 || error("$label: $filepath:2 missing count header")
+    header_count = _parse_int_strict(header_tokens[2], filepath, 2, "count")
+    header_count == expected_header_count ||
+        error("$label: header count mismatch in $filepath: got $header_count, expected $expected_header_count")
+
+    params = fill(0.0 + 0.0im, expected_param_count)
+    seen = falses(expected_param_count)
+    row_count = 0
+
+    for line_num = 6:length(lines)
+        line = clean_line(lines[line_num])
+        isempty(line) && continue
+        tokens = split_def_line(line)
+        length(tokens) == 3 || error("$label: $filepath:$line_num expected 'idx real imag'")
+        row_count += 1
+
+        idx = _parse_int_strict(tokens[1], filepath, line_num, "index")
+        0 <= idx < expected_param_count ||
+            error("$label: index $idx out of range [0, $(expected_param_count - 1)] in $filepath:$line_num")
+        !seen[idx+1] || error("$label: duplicated index $idx in $filepath:$line_num")
+        real_val = _parse_float_strict(tokens[2], filepath, line_num, "real value")
+        imag_val = _parse_float_strict(tokens[3], filepath, line_num, "imag value")
+
+        seen[idx+1] = true
+        params[idx+1] = ComplexF64(real_val, imag_val)
+    end
+
+    row_count == expected_param_count ||
+        error("$label: row count mismatch in $filepath: got $row_count, expected $expected_param_count")
+    missing = findfirst(x -> !x, seen)
+    missing === nothing || error("$label: missing index $(missing - 1) in $filepath")
+
+    return params
+end
+
 function _rbm_section_nparam(terms)::Int
     if isempty(terms)
         return 0
@@ -116,16 +175,17 @@ keyword argument.
 | `InJastrow` | `data.jastrow_terms[i].value` |
 | `InOrbital` / `InOrbitalAntiParallel` | `data.orbital_terms[i].value` |
 | `InOrbitalGeneral` | `data.orbital_terms[i].value` (fsz layout) |
+| `InDH2` | `data.doublon_holon_2site_params` |
+| `InDH4` | `data.doublon_holon_4site_params` |
 | `InChargeRBM_PhysLayer` / `_HiddenLayer` / `_PhysHidden` | `charge_rbm_*_terms` |
 | `InSpinRBM_PhysLayer` / `_HiddenLayer` / `_PhysHidden` | `spin_rbm_*_terms` |
 | `InGeneralRBM_PhysLayer` / `_HiddenLayer` / `_PhysHidden` | `general_rbm_*_terms` |
 
 # Recognised but not yet wired (warn-only stubs)
 
-`InDH2`, `InDH4`, `InOrbitalParallel`, `InOptTrans` — these emit an
-`@warn` and skip. The corresponding C-side data structures
-(doublon-holon, parallel-orbital offset path, OptTrans + FlagOptTrans)
-are not yet implemented in Julia.
+`InOrbitalParallel`, `InOptTrans` — these emit an `@warn` and skip. The
+corresponding C-side data structures (parallel-orbital offset path, OptTrans +
+FlagOptTrans) are not yet implemented in Julia.
 
 # Phase ordering
 
@@ -186,18 +246,32 @@ function read_input_parameters!(data::ExpertModeData, namelist_path::String)
         elseif file_type == "InDH2"
             full_path = joinpath(base_dir, file_path)
             if validate_file_exists(full_path)
-                parse_input_parameter_file(full_path)
-                # DH-1 parses DH index tables but does not yet consume InDH overlays.
-                # DH-2 will validate local indices and write into the DH Proj slice.
-                @warn "InDH2.def parsing not yet fully implemented"
+                layout = projection_layout(data)
+                expected = 6 * layout.n_dh2
+                length(data.doublon_holon_2site_params) == expected ||
+                    error("InDH2 target parameter length mismatch: got $(length(data.doublon_holon_2site_params)), expected $expected")
+                params = parse_indexed_input_parameter_file_strict(
+                    full_path,
+                    layout.n_dh2,
+                    expected,
+                    "InDH2",
+                )
+                copyto!(data.doublon_holon_2site_params, params)
             end
         elseif file_type == "InDH4"
             full_path = joinpath(base_dir, file_path)
             if validate_file_exists(full_path)
-                parse_input_parameter_file(full_path)
-                # DH-1 parses DH index tables but does not yet consume InDH overlays.
-                # DH-2 will validate local indices and write into the DH Proj slice.
-                @warn "InDH4.def parsing not yet fully implemented"
+                layout = projection_layout(data)
+                expected = 10 * layout.n_dh4
+                length(data.doublon_holon_4site_params) == expected ||
+                    error("InDH4 target parameter length mismatch: got $(length(data.doublon_holon_4site_params)), expected $expected")
+                params = parse_indexed_input_parameter_file_strict(
+                    full_path,
+                    layout.n_dh4,
+                    expected,
+                    "InDH4",
+                )
+                copyto!(data.doublon_holon_4site_params, params)
             end
         elseif file_type == "InOrbital" || file_type == "InOrbitalAntiParallel"
             full_path = joinpath(base_dir, file_path)

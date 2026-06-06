@@ -7,7 +7,13 @@ Tests for read_input_parameters! function (equivalent to C's ReadInputParameters
 using Test
 using MVMCExpertModeParsers
 
-import MVMCExpertModeParsers: ExpertModeData, GutzwillerTerm, JastrowTerm, OrbitalTerm
+import MVMCExpertModeParsers:
+    ExpertModeData,
+    GutzwillerTerm,
+    JastrowTerm,
+    OrbitalTerm,
+    DoublonHolon2SiteIndex,
+    DoublonHolon4SiteIndex
 import MVMCExpertModeParsers: read_input_parameters!
 
 """
@@ -180,10 +186,132 @@ function test_read_input_parameters_missing_file()
     end
 end
 
+function _write_indexed_input_parameter_file(path, header_name, header_count, rows)
+    open(path, "w") do f
+        write(f, "=============================================\n")
+        write(f, "$header_name          $header_count\n")
+        write(f, "ComplexType         1\n")
+        write(f, "=============================================\n")
+        write(f, "=============================================\n")
+        for row in rows
+            write(f, row * "\n")
+        end
+    end
+end
+
+function test_read_input_parameters_dh_overlays()
+    @testset "read_input_parameters! DH overlays" begin
+        mktempdir() do test_dir
+            namelist_path = joinpath(test_dir, "namelist.def")
+            open(namelist_path, "w") do f
+                write(f, "ModPara modpara.def\n")
+                write(f, "InDH2 indh2.def\n")
+                write(f, "InDH4 indh4.def\n")
+            end
+
+            data = ExpertModeData()
+            data.doublon_holon_2site_indices = [DoublonHolon2SiteIndex([1 0; 0 1])]
+            data.doublon_holon_2site_params = fill(0.0 + 0.0im, 6)
+            data.doublon_holon_4site_indices = [DoublonHolon4SiteIndex([1 0 1 0; 0 1 0 1])]
+            data.doublon_holon_4site_params = fill(0.0 + 0.0im, 10)
+
+            _write_indexed_input_parameter_file(
+                joinpath(test_dir, "indh2.def"),
+                "NDoublonHolon2siteIdx",
+                1,
+                [
+                    "5 5.0 -5.0",
+                    "3 3.0 -3.0",
+                    "1 1.0 -1.0",
+                    "0 0.0 0.5",
+                    "2 2.0 -2.0",
+                    "4 4.0 -4.0",
+                ],
+            )
+            _write_indexed_input_parameter_file(
+                joinpath(test_dir, "indh4.def"),
+                "NDoublonHolon4siteIdx",
+                1,
+                ["$(i - 1) $(10 + i).0 -$(10 + i).0" for i = 1:10],
+            )
+
+            read_input_parameters!(data, namelist_path)
+
+            @test data.doublon_holon_2site_params == ComplexF64[
+                0.0 + 0.5im,
+                1.0 - 1.0im,
+                2.0 - 2.0im,
+                3.0 - 3.0im,
+                4.0 - 4.0im,
+                5.0 - 5.0im,
+            ]
+            @test data.doublon_holon_4site_params == ComplexF64[
+                11.0 - 11.0im,
+                12.0 - 12.0im,
+                13.0 - 13.0im,
+                14.0 - 14.0im,
+                15.0 - 15.0im,
+                16.0 - 16.0im,
+                17.0 - 17.0im,
+                18.0 - 18.0im,
+                19.0 - 19.0im,
+                20.0 - 20.0im,
+            ]
+        end
+
+        mktempdir() do test_dir
+            namelist_path = joinpath(test_dir, "namelist.def")
+            write(namelist_path, "InDH2 indh2.def\n")
+
+            data = ExpertModeData()
+            data.doublon_holon_2site_indices = [DoublonHolon2SiteIndex([1 0; 0 1])]
+            data.doublon_holon_2site_params = fill(0.0 + 0.0im, 6)
+
+            bad_cases = Dict(
+                "duplicate" => [
+                    "0 0.0 0.0",
+                    "1 1.0 0.0",
+                    "1 2.0 0.0",
+                    "3 3.0 0.0",
+                    "4 4.0 0.0",
+                    "5 5.0 0.0",
+                ],
+                "range" => [
+                    "0 0.0 0.0",
+                    "1 1.0 0.0",
+                    "2 2.0 0.0",
+                    "3 3.0 0.0",
+                    "4 4.0 0.0",
+                    "6 6.0 0.0",
+                ],
+                "short" => [
+                    "0 0.0 0.0",
+                    "1 1.0 0.0",
+                    "2 2.0 0.0",
+                    "3 3.0 0.0",
+                    "4 4.0 0.0",
+                ],
+            )
+
+            for rows in values(bad_cases)
+                _write_indexed_input_parameter_file(
+                    joinpath(test_dir, "indh2.def"),
+                    "NDoublonHolon2siteIdx",
+                    1,
+                    rows,
+                )
+                @test_throws ErrorException read_input_parameters!(data, namelist_path)
+                @test data.doublon_holon_2site_params == fill(0.0 + 0.0im, 6)
+            end
+        end
+    end
+end
+
 # Run all tests
 @testset "Read Input Parameters Tests" begin
     test_read_input_parameters_basic()
     test_read_input_parameters_orbital()
     test_read_input_parameters_complex()
     test_read_input_parameters_missing_file()
+    test_read_input_parameters_dh_overlays()
 end

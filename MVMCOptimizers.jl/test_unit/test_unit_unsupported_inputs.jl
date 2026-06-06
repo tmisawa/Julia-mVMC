@@ -1,6 +1,6 @@
 using Test
 using MVMCOptimizers
-using MVMCExpertModeParsers: ExpertModeData, ModParaParameters, DoublonHolon2SiteIndex
+using MVMCExpertModeParsers: ExpertModeData, ModParaParameters
 
 # Capture the showerror text of whatever `f()` throws.
 # Returns (threw::Bool, message::String). Used so the contract asserts on the
@@ -67,14 +67,7 @@ end
     end
 end
 
-@testset "unit/unsupported_inputs: DoublonHolon runtime guard" begin
-    for entry in (vmc_para_opt!, vmc_phys_cal!)
-        data = ExpertModeData()
-        data.doublon_holon_2site_indices = [DoublonHolon2SiteIndex([1 0; 0 1])]
-        data.doublon_holon_2site_params = fill(0.0 + 0.0im, 6)
-        @test entry(data) == 1
-    end
-
+@testset "unit/unsupported_inputs: DoublonHolon complex flag participates in all-complex" begin
     data = ExpertModeData()
     data.doublon_holon_2site_complex = true
     @test MVMCOptimizers.get_all_complex_flag(data)

@@ -1,7 +1,14 @@
 using Test
 using MVMCOptimizers
 using MVMCExpertModeParsers
-using MVMCExpertModeParsers: ExpertModeData, GutzwillerTerm, JastrowTerm, OrbitalTerm
+using MVMCExpertModeParsers:
+    ExpertModeData,
+    GutzwillerTerm,
+    JastrowTerm,
+    OrbitalTerm,
+    DoublonHolon2SiteIndex,
+    DoublonHolon4SiteIndex,
+    projection_layout
 
 @testset "unit/parameter_sync: sync_modified_parameter!" begin
     @testset "shift gutzwiller/jastrow when all optimized (default)" begin
@@ -103,5 +110,116 @@ using MVMCExpertModeParsers: ExpertModeData, GutzwillerTerm, JastrowTerm, Orbita
 
         # Must be byte-identical to the input.
         @test data.para_qp_trans == orig
+    end
+
+    @testset "DH2 shift subtracts bin averages and shifts Gutzwiller" begin
+        data = ExpertModeData()
+        data.gutzwiller_terms = [GutzwillerTerm(0, 10.0 + 0.25im, true)]
+        data.doublon_holon_2site_indices = [DoublonHolon2SiteIndex([1 0; 0 1])]
+        data.doublon_holon_2site_params = ComplexF64[
+            1 + 1im,
+            2 + 2im,
+            3 + 3im,
+            4 + 4im,
+            5 + 5im,
+            6 + 6im,
+        ]
+        data.optimization_flags = fill(true, 2 * projection_layout(data).n_proj)
+
+        MVMCOptimizers.sync_modified_parameter!(data)
+
+        @test data.doublon_holon_2site_params == ComplexF64[
+            -2 + 1im,
+            -2 + 2im,
+            0 + 3im,
+            0 + 4im,
+            2 + 5im,
+            2 + 6im,
+        ]
+        @test data.gutzwiller_terms[1].value == 17.0 + 0.25im
+    end
+
+    @testset "DH4 shift subtracts five-bin averages" begin
+        data = ExpertModeData()
+        data.gutzwiller_terms = [GutzwillerTerm(0, 1.0 + 0.0im, true)]
+        data.doublon_holon_4site_indices = [DoublonHolon4SiteIndex([1 0 1 0; 0 1 0 1])]
+        data.doublon_holon_4site_params = ComplexF64[
+            1 + 0im,
+            2 + 0im,
+            3 + 0im,
+            4 + 0im,
+            5 + 0im,
+            6 + 0im,
+            7 + 0im,
+            8 + 0im,
+            9 + 0im,
+            10 + 0im,
+        ]
+        data.optimization_flags = fill(true, 2 * projection_layout(data).n_proj)
+
+        MVMCOptimizers.sync_modified_parameter!(data)
+
+        @test real.(data.doublon_holon_4site_params) ≈ [-4, -4, -2, -2, 0, 0, 2, 2, 4, 4]
+        @test data.gutzwiller_terms[1].value == 12.0 + 0.0im
+    end
+
+    @testset "DH shift is disabled when any Gutzwiller real flag is fixed" begin
+        data = ExpertModeData()
+        data.gutzwiller_terms = [GutzwillerTerm(0, 10.0 + 0.0im, true)]
+        data.doublon_holon_2site_indices = [DoublonHolon2SiteIndex([1 0; 0 1])]
+        data.doublon_holon_2site_params = ComplexF64[i + 0im for i = 1:6]
+        data.optimization_flags = fill(true, 2 * projection_layout(data).n_proj)
+        data.optimization_flags[1] = false
+
+        orig_dh = copy(data.doublon_holon_2site_params)
+        MVMCOptimizers.sync_modified_parameter!(data)
+
+        @test data.doublon_holon_2site_params == orig_dh
+        @test data.gutzwiller_terms[1].value == 10.0 + 0.0im
+    end
+
+    @testset "DH shift is disabled when any DH real flag is fixed" begin
+        data2 = ExpertModeData()
+        data2.gutzwiller_terms = [GutzwillerTerm(0, 10.0 + 0.0im, true)]
+        data2.doublon_holon_2site_indices = [DoublonHolon2SiteIndex([1 0; 0 1])]
+        data2.doublon_holon_2site_params = ComplexF64[i + 0im for i = 1:6]
+        layout2 = projection_layout(data2)
+        data2.optimization_flags = fill(true, 2 * layout2.n_proj)
+        data2.optimization_flags[2 * layout2.dh2_offset + 1] = false
+
+        orig_dh2 = copy(data2.doublon_holon_2site_params)
+        @test !MVMCOptimizers.flag_shift_dh2(data2, layout2)
+        MVMCOptimizers.sync_modified_parameter!(data2)
+        @test data2.doublon_holon_2site_params == orig_dh2
+        @test data2.gutzwiller_terms[1].value == 10.0 + 0.0im
+
+        data4 = ExpertModeData()
+        data4.gutzwiller_terms = [GutzwillerTerm(0, 20.0 + 0.0im, true)]
+        data4.doublon_holon_4site_indices = [DoublonHolon4SiteIndex([1 0 1 0; 0 1 0 1])]
+        data4.doublon_holon_4site_params = ComplexF64[i + 0im for i = 1:10]
+        layout4 = projection_layout(data4)
+        data4.optimization_flags = fill(true, 2 * layout4.n_proj)
+        data4.optimization_flags[2 * layout4.dh4_offset + 1] = false
+
+        orig_dh4 = copy(data4.doublon_holon_4site_params)
+        @test !MVMCOptimizers.flag_shift_dh4(data4, layout4)
+        MVMCOptimizers.sync_modified_parameter!(data4)
+        @test data4.doublon_holon_4site_params == orig_dh4
+        @test data4.gutzwiller_terms[1].value == 20.0 + 0.0im
+    end
+
+    @testset "DH shift happens before Gutzwiller-Jastrow shift" begin
+        data = ExpertModeData()
+        data.gutzwiller_terms = [GutzwillerTerm(0, 10.0 + 0.0im, true)]
+        data.jastrow_terms = [JastrowTerm(0, 1, 20.0 + 0.0im, true)]
+        data.doublon_holon_2site_indices = [DoublonHolon2SiteIndex([1 0; 0 1])]
+        data.doublon_holon_2site_params = ComplexF64[i + 0im for i = 1:6]
+        data.optimization_flags = fill(true, 2 * projection_layout(data).n_proj)
+
+        MVMCOptimizers.sync_modified_parameter!(data)
+
+        # DH2 contributes gShift = 3 + 4 = 7, then GJ shifts average(17, 20)=18.5.
+        @test data.gutzwiller_terms[1].value == -1.5 + 0.0im
+        @test data.jastrow_terms[1].value == 1.5 + 0.0im
     end
 end

@@ -43,24 +43,34 @@ function update_parameter_value(
     delta_real::Float64,
     delta_imag::Float64,
 )
-    n_gutzwiller = length(data.gutzwiller_terms)
-    n_jastrow = length(data.jastrow_terms)
-    n_proj = n_gutzwiller + n_jastrow
+    layout = MVMCExpertModeParsers.projection_layout(data)
+    n_proj = layout.n_proj
     n_rbm = has_rbm_terms(data) ? MVMCExpertModeParsers.count_rbm_parameters(data) : 0
     delta = ComplexF64(delta_real, delta_imag)
 
     if para_idx <= n_proj
-        # Projection parameters (Gutzwiller or Jastrow)
-        if para_idx <= n_gutzwiller
+        # Projection parameters: Gutzwiller | Jastrow | SpinJastrow(0) | DH2 | DH4.
+        if para_idx <= layout.gutzwiller_offset + layout.n_gutzwiller
             # Gutzwiller parameter
-            term = data.gutzwiller_terms[para_idx]
-            term.value += delta
-        else
+            local_idx = para_idx - layout.gutzwiller_offset
+            if 1 <= local_idx <= length(data.gutzwiller_terms)
+                data.gutzwiller_terms[local_idx].value += delta
+            end
+        elseif para_idx <= layout.jastrow_offset + layout.n_jastrow
             # Jastrow parameter
-            jastrow_idx = para_idx - n_gutzwiller
-            if jastrow_idx <= length(data.jastrow_terms)
-                term = data.jastrow_terms[jastrow_idx]
-                term.value += delta
+            local_idx = para_idx - layout.jastrow_offset
+            if 1 <= local_idx <= length(data.jastrow_terms)
+                data.jastrow_terms[local_idx].value += delta
+            end
+        elseif layout.dh2_offset < para_idx <= layout.dh2_offset + 6 * layout.n_dh2
+            local_idx = para_idx - layout.dh2_offset
+            if 1 <= local_idx <= length(data.doublon_holon_2site_params)
+                data.doublon_holon_2site_params[local_idx] += delta
+            end
+        elseif layout.dh4_offset < para_idx <= layout.dh4_offset + 10 * layout.n_dh4
+            local_idx = para_idx - layout.dh4_offset
+            if 1 <= local_idx <= length(data.doublon_holon_4site_params)
+                data.doublon_holon_4site_params[local_idx] += delta
             end
         end
     elseif para_idx <= n_proj + n_rbm

@@ -136,6 +136,95 @@ function init_loc_spn!(state::VMCOptimizationState, data::ExpertModeData)
     end
 end
 
+@inline function _site_occupancy_class(ele_num::Vector{Int}, n_site::Int, ri::Int)::Int
+    return ele_num[ri+1] + ele_num[n_site+ri+1]
+end
+
+@inline function _is_doublon(ele_num::Vector{Int}, n_site::Int, ri::Int)::Bool
+    return ele_num[ri+1] == 1 && ele_num[n_site+ri+1] == 1
+end
+
+@inline function _is_holon(ele_num::Vector{Int}, n_site::Int, ri::Int)::Bool
+    return ele_num[ri+1] == 0 && ele_num[n_site+ri+1] == 0
+end
+
+function _count_dh2!(
+    proj_cnt::Vector{Int},
+    ele_num::Vector{Int},
+    data::ExpertModeData,
+    layout,
+)
+    n_site = data.modpara.nsite
+    for (xn, dh) in enumerate(data.doublon_holon_2site_indices)
+        xn0 = xn - 1
+        for ri = 0:(n_site-1)
+            occ = _site_occupancy_class(ele_num, n_site, ri)
+            occ == 1 && continue
+            xi = div(occ, 2)  # 0: holon, 1: doublon
+            neighbors = dh.neighbors
+            r0 = neighbors[ri+1, 1]
+            r1 = neighbors[ri+1, 2]
+            xm = if xi == 0
+                (_is_doublon(ele_num, n_site, r0) ? 1 : 0) +
+                (_is_doublon(ele_num, n_site, r1) ? 1 : 0)
+            else
+                (_is_holon(ele_num, n_site, r0) ? 1 : 0) +
+                (_is_holon(ele_num, n_site, r1) ? 1 : 0)
+            end
+            idx = layout.dh2_offset + xn0 + (xi + 2 * xm) * layout.n_dh2
+            idx + 1 <= length(proj_cnt) && (proj_cnt[idx+1] += 1)
+        end
+    end
+    return proj_cnt
+end
+
+function _count_dh4!(
+    proj_cnt::Vector{Int},
+    ele_num::Vector{Int},
+    data::ExpertModeData,
+    layout,
+)
+    n_site = data.modpara.nsite
+    for (xn, dh) in enumerate(data.doublon_holon_4site_indices)
+        xn0 = xn - 1
+        for ri = 0:(n_site-1)
+            occ = _site_occupancy_class(ele_num, n_site, ri)
+            occ == 1 && continue
+            xi = div(occ, 2)  # 0: holon, 1: doublon
+            neighbors = dh.neighbors
+            xm = 0
+            if xi == 0
+                for col = 1:4
+                    xm += _is_doublon(ele_num, n_site, neighbors[ri+1, col]) ? 1 : 0
+                end
+            else
+                for col = 1:4
+                    xm += _is_holon(ele_num, n_site, neighbors[ri+1, col]) ? 1 : 0
+                end
+            end
+            idx = layout.dh4_offset + xn0 + (xi + 2 * xm) * layout.n_dh4
+            idx + 1 <= length(proj_cnt) && (proj_cnt[idx+1] += 1)
+        end
+    end
+    return proj_cnt
+end
+
+function _zero_dh_tail!(proj_cnt::Vector{Int}, layout)
+    (layout.n_dh2 == 0 && layout.n_dh4 == 0) && return proj_cnt
+    start = layout.dh2_offset + 1
+    stop = min(layout.n_proj, length(proj_cnt))
+    start <= stop && fill!(@view(proj_cnt[start:stop]), 0)
+    return proj_cnt
+end
+
+function _recompute_dh_counts!(proj_cnt::Vector{Int}, ele_num::Vector{Int}, data::ExpertModeData, layout)
+    (layout.n_dh2 == 0 && layout.n_dh4 == 0) && return proj_cnt
+    _zero_dh_tail!(proj_cnt, layout)
+    _count_dh2!(proj_cnt, ele_num, data, layout)
+    _count_dh4!(proj_cnt, ele_num, data, layout)
+    return proj_cnt
+end
+
 """
     make_proj_cnt!(proj_cnt::Vector{Int}, ele_num::Vector{Int}, data::ExpertModeData)
 
@@ -148,6 +237,7 @@ function make_proj_cnt!(proj_cnt::Vector{Int}, ele_num::Vector{Int}, data::Exper
     n_gutzwiller_idx = data.n_gutzwiller_idx
     n_jastrow = length(data.jastrow_terms)
     gutzwiller_idx = data.gutzwiller_idx
+    layout = MVMCExpertModeParsers.projection_layout(data)
 
     # Initialize
     fill!(proj_cnt, 0)
@@ -219,8 +309,7 @@ function make_proj_cnt!(proj_cnt::Vector{Int}, ele_num::Vector{Int}, data::Exper
         end
     end
 
-    # TODO: Add Doublon-Holon correlation factors (2-site and 4-site)
-    # This requires more complex logic from C code
+    _recompute_dh_counts!(proj_cnt, ele_num, data, layout)
 end
 
 """
@@ -243,6 +332,7 @@ function update_proj_cnt!(
     n_proj = length(proj_cnt_new)
     n_gutzwiller_idx = data.n_gutzwiller_idx
     gutzwiller_idx = data.gutzwiller_idx
+    layout = MVMCExpertModeParsers.projection_layout(data)
 
     # Copy old counts
     if proj_cnt_new !== proj_cnt_old
@@ -350,7 +440,7 @@ function update_proj_cnt!(
         end
     end
 
-    # TODO: Add Doublon-Holon correlation factors update
+    _recompute_dh_counts!(proj_cnt_new, ele_num, data, layout)
 end
 
 """
@@ -845,22 +935,12 @@ function log_proj_ratio(
     data::ExpertModeData,
 )::Float64
     z = 0.0
-    n_proj = min(length(proj_cnt_new), length(proj_cnt_old))
-
-    # Collect all projection parameters
-    proj_params = ComplexF64[]
-    for term in data.gutzwiller_terms
-        push!(proj_params, term.value)
-    end
-    for term in data.jastrow_terms
-        push!(proj_params, term.value)
-    end
-    # TODO: Add Doublon-Holon terms
+    layout = MVMCExpertModeParsers.projection_layout(data)
+    proj_params = MVMCExpertModeParsers.projection_parameters(data, layout)
+    n_proj = min(length(proj_cnt_new), length(proj_cnt_old), length(proj_params))
 
     for idx = 1:n_proj
-        if idx <= length(proj_params)
-            z += real(proj_params[idx]) * (proj_cnt_new[idx] - proj_cnt_old[idx])
-        end
+        z += real(proj_params[idx]) * (proj_cnt_new[idx] - proj_cnt_old[idx])
     end
 
     return z
@@ -874,21 +954,12 @@ Equivalent to C's `LogProjVal()`.
 """
 function log_proj_val(proj_cnt::Vector{Int}, data::ExpertModeData)::Float64
     z = 0.0
-    n_proj = length(proj_cnt)
-
-    # Collect all projection parameters
-    proj_params = ComplexF64[]
-    for term in data.gutzwiller_terms
-        push!(proj_params, term.value)
-    end
-    for term in data.jastrow_terms
-        push!(proj_params, term.value)
-    end
+    layout = MVMCExpertModeParsers.projection_layout(data)
+    proj_params = MVMCExpertModeParsers.projection_parameters(data, layout)
+    n_proj = min(length(proj_cnt), length(proj_params))
 
     for idx = 1:n_proj
-        if idx <= length(proj_params)
-            z += real(proj_params[idx]) * proj_cnt[idx]
-        end
+        z += real(proj_params[idx]) * proj_cnt[idx]
     end
 
     return z
@@ -4497,6 +4568,7 @@ function update_proj_cnt_fsz!(
     n_proj = length(proj_cnt_new)
     n_gutzwiller_idx = data.n_gutzwiller_idx
     gutzwiller_idx = data.gutzwiller_idx
+    layout = MVMCExpertModeParsers.projection_layout(data)
 
     # Copy old counts
     if proj_cnt_new !== proj_cnt_old
@@ -4588,7 +4660,7 @@ function update_proj_cnt_fsz!(
         end
     end
 
-    # Doublon-Holon terms are not yet implemented (no precomputed DH index tables).
+    _recompute_dh_counts!(proj_cnt_new, ele_num, data, layout)
 end
 
 function copy_from_burn_sample_fsz!(
