@@ -1355,6 +1355,8 @@ function calculate_m_all_fcmp!(
     qp_end::Int,
     data::ExpertModeData,
     state::VMCOptimizationState,
+    ;
+    threaded::Bool = false,
 )::Int
     n_site = data.modpara.nsite
     n_elec = data.modpara.nelec
@@ -1396,6 +1398,9 @@ function calculate_m_all_fcmp!(
     # Note: PfaPack uses 1-based indexing for qp_start and qp_end
     # n_elec in PfaPack = n_size (2*Ne) in MVMCOptimizers
     # The subset views are passed directly (1-based relative to the subset)
+    pfapack_workspace = threaded ?
+        state.workspace.pfapack_workspace :
+        state.workspace.pfapack_workspace.workspaces[1]
     info = calculate_m_all_fcmp_pfapack!(
         ele_idx,
         slater_elm_subset,
@@ -1405,7 +1410,7 @@ function calculate_m_all_fcmp!(
         qp_num + 1,  # qp_end relative to the subset (exclusive)
         n_site,
         n_size,  # n_elec in PfaPack = total electrons (2*Ne)
-        state.workspace.pfapack_workspace,  # Pre-allocated workspace
+        pfapack_workspace,  # Pre-allocated workspace
     )
 
     if info != 0
@@ -2345,7 +2350,7 @@ function update_m_all_two_real!(
 
         # Calculate vecP[i] = sum_j invM[i][j] * vecS[j]
         # Calculate vecQ[i] = sum_j invM[i][j] * vecT[j]
-        @turbo for msi = 0:(n_size-1)
+        @inbounds for msi = 0:(n_size-1)
             msi_next = msi + 1
             for msj = 0:(n_size-1)
                 msj_next = msj + 1
@@ -2383,7 +2388,7 @@ function update_m_all_two_real!(
         end
 
         # Update InvM
-        @turbo for msi = 0:(n_size-1)
+        @inbounds for msi = 0:(n_size-1)
             msi_next = msi + 1
             p_i = vec_p[msi_next]
             q_i = vec_q[msi_next]
@@ -4785,6 +4790,8 @@ function calculate_m_all_real!(
     qp_end::Int,
     data::ExpertModeData,
     state::VMCOptimizationState,
+    ;
+    threaded::Bool = false,
 )::Int
     n_site = data.modpara.nsite
     n_elec = data.modpara.nelec
@@ -4825,6 +4832,9 @@ function calculate_m_all_real!(
     # Call PfaPack's calculate_m_all_real!
     # Note: We use the imported function from PfaPack
     # PfaPack expects n_elec to be total number of electrons (2*Ne), not Ne
+    pfapack_workspace = threaded ?
+        ws.pfapack_workspace :
+        ws.pfapack_workspace.workspaces[1]
     info = calculate_m_all_real_pfapack!(
         ele_idx,
         slater_elm_real_subset,
@@ -4834,7 +4844,7 @@ function calculate_m_all_real!(
         qp_num + 1,  # qp_end (1-based, exclusive, relative to subset)
         n_site,
         n_size,  # Pass n_size (2*Ne) instead of n_elec (Ne)
-        ws.pfapack_workspace,  # Pre-allocated workspace
+        pfapack_workspace,  # Pre-allocated workspace
     )
 
     if info != 0
@@ -5183,7 +5193,7 @@ function calculate_new_pf_m_two2_real!(
         inv_offset = (qpidx - 1) * n_size * n_size
 
         # Calculate vec_a[i] = sltE_real[rsa][rsi] and vec_b[i] = sltE_real[rsb][rsi]
-        @turbo for msi = 0:(n_size-1)
+        @inbounds for msi = 0:(n_size-1)
             #=
             if msi < n_elec
                 rsi = ele_idx[msi + 1]  # up-spin (0-based)
@@ -5215,7 +5225,7 @@ function calculate_new_pf_m_two2_real!(
 
         # Calculate bMa = sum_i vec_b[i] * (sum_j invM[i][j] * vec_a[j])
         bMa = 0.0
-        @turbo for msi = 0:(n_size-1)
+        @inbounds for msi = 0:(n_size-1)
             tmp = 0.0
             for msj = 0:(n_size-1)
                 tmp += inv_m_real[inv_offset+msi*n_size+msj+1] * vec_a[msj+1]

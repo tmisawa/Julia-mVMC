@@ -169,6 +169,100 @@ function accumulate_factored_green!(phys::PhysicalQuantities, w::Float64)
     return nothing
 end
 
+function accumulate_factored_green!(
+    dst::PhysicalQuantities,
+    phys::PhysicalQuantities,
+    w::Float64,
+)
+    @inbounds for (idx, (idx0, idx1)) in enumerate(phys.cis_ajs_ckt_alt_idx)
+        dst.phys_cis_ajs_ckt_alt[idx] +=
+            w * phys.local_cis_ajs[idx0] * conj(phys.local_cis_ajs[idx1])
+    end
+    return nothing
+end
+
+function accumulate_factored_green!(
+    acc::VMCPhysAccumulator,
+    phys::PhysicalQuantities,
+    w::Float64,
+)
+    @inbounds for (idx, (idx0, idx1)) in enumerate(phys.cis_ajs_ckt_alt_idx)
+        acc.phys_cis_ajs_ckt_alt[idx] +=
+            w * acc.local_cis_ajs[idx0] * conj(acc.local_cis_ajs[idx1])
+    end
+    return nothing
+end
+
+@inline function accumulate_phys_cis_ajs!(
+    phys::PhysicalQuantities,
+    idx::Integer,
+    w::Float64,
+    local_val::ComplexF64,
+)
+    phys.local_cis_ajs[idx] = local_val
+    phys.phys_cis_ajs[idx] += w * local_val
+    return nothing
+end
+
+@inline function accumulate_phys_cis_ajs!(
+    dst::PhysicalQuantities,
+    phys::PhysicalQuantities,
+    idx::Integer,
+    w::Float64,
+    local_val::ComplexF64,
+)
+    phys.local_cis_ajs[idx] = local_val
+    dst.phys_cis_ajs[idx] += w * local_val
+    return nothing
+end
+
+@inline function accumulate_phys_cis_ajs!(
+    acc::VMCPhysAccumulator,
+    phys::PhysicalQuantities,
+    idx::Integer,
+    w::Float64,
+    local_val::ComplexF64,
+)
+    acc.local_cis_ajs[idx] = local_val
+    acc.phys_cis_ajs[idx] += w * local_val
+    return nothing
+end
+
+@inline function accumulate_phys_cis_ajs_ckt_alt_dc!(
+    phys::PhysicalQuantities,
+    idx::Integer,
+    w::Float64,
+    local_val::ComplexF64,
+)
+    phys.local_cis_ajs_ckt_alt_dc[idx] = local_val
+    phys.phys_cis_ajs_ckt_alt_dc[idx] += w * local_val
+    return nothing
+end
+
+@inline function accumulate_phys_cis_ajs_ckt_alt_dc!(
+    dst::PhysicalQuantities,
+    phys::PhysicalQuantities,
+    idx::Integer,
+    w::Float64,
+    local_val::ComplexF64,
+)
+    phys.local_cis_ajs_ckt_alt_dc[idx] = local_val
+    dst.phys_cis_ajs_ckt_alt_dc[idx] += w * local_val
+    return nothing
+end
+
+@inline function accumulate_phys_cis_ajs_ckt_alt_dc!(
+    acc::VMCPhysAccumulator,
+    phys::PhysicalQuantities,
+    idx::Integer,
+    w::Float64,
+    local_val::ComplexF64,
+)
+    acc.local_cis_ajs_ckt_alt_dc[idx] = local_val
+    acc.phys_cis_ajs_ckt_alt_dc[idx] += w * local_val
+    return nothing
+end
+
 """
     calculate_green_func!(data::ExpertModeData, state::VMCOptimizationState,
                          w::Float64, ip::ComplexF64,
@@ -193,9 +287,60 @@ function calculate_green_func!(
     ele_num::Vector{Int},
     ele_proj_cnt::Vector{Int},
 )
+    return calculate_green_func_into!(
+        data,
+        state,
+        state.phys_quantities,
+        w,
+        ip,
+        ele_idx,
+        ele_cfg,
+        ele_num,
+        ele_proj_cnt,
+    )
+end
+
+function calculate_green_func!(
+    data::ExpertModeData,
+    state::VMCOptimizationState,
+    acc::VMCPhysAccumulator,
+    w::Float64,
+    ip::ComplexF64,
+    ele_idx::Vector{Int},
+    ele_cfg::Vector{Int},
+    ele_num::Vector{Int},
+    ele_proj_cnt::Vector{Int},
+)
+    return calculate_green_func_into!(
+        data,
+        state,
+        acc,
+        w,
+        ip,
+        ele_idx,
+        ele_cfg,
+        ele_num,
+        ele_proj_cnt,
+    )
+end
+
+function calculate_green_func_into!(
+    data::ExpertModeData,
+    state::VMCOptimizationState,
+    dst::Union{PhysicalQuantities,VMCPhysAccumulator,Nothing},
+    w::Float64,
+    ip::ComplexF64,
+    ele_idx::Vector{Int},
+    ele_cfg::Vector{Int},
+    ele_num::Vector{Int},
+    ele_proj_cnt::Vector{Int},
+)
     if state.phys_quantities === nothing
         error("PhysicalQuantities not initialized. Call initialize_phys_quantities! first.")
     end
+
+    dst === nothing &&
+        error("PhysicalQuantities not initialized. Call initialize_phys_quantities! first.")
 
     phys = state.phys_quantities
     all_complex = get_all_complex_flag(data)
@@ -220,8 +365,7 @@ function calculate_green_func!(
             all_complex = all_complex,
         )
 
-        phys.local_cis_ajs[idx] = local_val
-        phys.phys_cis_ajs[idx] += w * local_val
+        accumulate_phys_cis_ajs!(dst, phys, idx, w, local_val)
     end
 
     # 2-body Green's function (direct): <c†_i c_j c†_k c_l>
@@ -251,11 +395,10 @@ function calculate_green_func!(
             all_complex = all_complex,
         )
 
-        phys.local_cis_ajs_ckt_alt_dc[idx] = local_val
-        phys.phys_cis_ajs_ckt_alt_dc[idx] += w * local_val
+        accumulate_phys_cis_ajs_ckt_alt_dc!(dst, phys, idx, w, local_val)
     end
 
     # 2-body Green's function (product): <c†_i c_j> × conj(<c†_k c_l>)
     # using the resolved 1-based index pairs into the one-body Greens above.
-    accumulate_factored_green!(phys, w)
+    accumulate_factored_green!(dst, phys, w)
 end

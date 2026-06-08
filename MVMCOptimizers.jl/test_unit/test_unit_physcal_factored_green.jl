@@ -63,6 +63,42 @@ end
     @test pq.phys_cis_ajs_ckt_alt[1] ≈ (2.0 + 11.0im)
 end
 
+@testset "calculate_green_func! legacy no-acc path writes to state phys" begin
+    data = ExpertModeData()
+    data.modpara.nsite = 2
+    data.modpara.nelec = 1
+    data.green_one_terms = [
+        GreenOneTerm(0, 0, :up, :up),
+        GreenOneTerm(1, 1, :down, :down),
+    ]
+    data.green_two_ex_terms = [
+        GreenTwoExTerm(0, 0, 0, 0, 1, 1, 1, 1),
+    ]
+
+    state = MVMCOptimizers.VMCOptimizationState(2, 1, 0, 0, 1, 1, true, false)
+    MVMCOptimizers.initialize_phys_quantities!(state, data)
+    phys = state.phys_quantities
+
+    ele_idx = Int[0, 1]
+    ele_cfg = Int[0, -1, -1, 1]
+    ele_num = Int[1, 0, 0, 1]
+
+    MVMCOptimizers.calculate_green_func!(
+        data,
+        state,
+        0.5,
+        1.0 + 0.0im,
+        ele_idx,
+        ele_cfg,
+        ele_num,
+        Int[],
+    )
+
+    @test phys.local_cis_ajs == [1.0 + 0.0im, 1.0 + 0.0im]
+    @test phys.phys_cis_ajs == [0.5 + 0.0im, 0.5 + 0.0im]
+    @test phys.phys_cis_ajs_ckt_alt == [0.5 + 0.0im]
+end
+
 using MVMCOptimizers: VMCOptimizationState
 using Printf
 

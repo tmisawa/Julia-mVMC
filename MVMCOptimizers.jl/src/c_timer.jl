@@ -21,10 +21,9 @@ Design notes (see docs/plans/2026-05-25-julia-mvmc-c-compatible-timer-plan.md):
   `calculate_m_all_*` is timed as id 30/34 from sampling and id 40 from the main
   calculation, so wrapping its body would conflate them. A given id must not be
   re-entered before it is stopped (single `start_ns[id]` slot, same as C).
-- Single shared timer is safe because the sample loops are single-threaded;
-  threading is confined to the QP loop inside `calculate_m_all` (joined before
-  the surrounding timer stops). If sample-level threading is ever added, move to
-  thread-local accumulators.
+- Sample-level threading uses worker-local timers and reduces them into the
+  parent timer after the parallel region. A single shared timer must not be
+  started/stopped concurrently because each id has one `start_ns[id]` slot.
 """
 
 # C's NTimer (global.h). Sized to cover the maximum id in use, including the

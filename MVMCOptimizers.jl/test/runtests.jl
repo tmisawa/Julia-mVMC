@@ -68,6 +68,7 @@ end
     include("../test_unit/test_unit_vmc_main_cal_sr.jl")
     include("../test_unit/test_unit_parameter_sync.jl")
     include("../test_unit/test_unit_types.jl")
+    include("../test_unit/test_unit_threading.jl")
     include("../test_unit/test_unit_unsupported_inputs.jl")
     include("../test_unit/test_unit_physcal_factored_green.jl")
     include("../test_unit/test_unit_read_opt_para.jl")
