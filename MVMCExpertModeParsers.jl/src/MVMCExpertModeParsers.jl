@@ -106,8 +106,16 @@ function parse_expert_mode_files(namelist_path::String)::ExpertModeData
         namelist_content = read_def_file(namelist_path)
         file_list = parse_namelist_content(namelist_content)
 
+        # C reads every orbital-block count in a first pass, so OrbitalParallel may
+        # appear in any namelist position. This single-pass parser instead builds
+        # the parallel block on top of the already-parsed anti-parallel block (whose
+        # NArrayAP offsets the parallel indices), so the anti-parallel file must be
+        # listed first. Enforce that explicitly rather than emit a wrong layout.
+        required_file_fatal = _orbital_file_order_error(file_list)
+
         # Parse each file (continue on errors, like C implementation)
         for (file_type, file_path) in file_list
+            required_file_fatal === nothing || break
             full_path = joinpath(base_dir, file_path)
 
             if _is_unsupported_projection_file_type(file_type)
@@ -200,6 +208,34 @@ function parse_expert_mode_files(namelist_path::String)::ExpertModeData
     return data
 end
 
+"""
+    _orbital_file_order_error(file_list) -> Union{String, Nothing}
+
+Return an error message if `OrbitalParallel` is listed before `Orbital` /
+`OrbitalAntiParallel` in the namelist, otherwise `nothing`. The single-pass
+parser offsets the parallel orbital block by the anti-parallel `NArrayAP`, so the
+anti-parallel block must be parsed first. A pure-parallel system (no anti-parallel
+file) is valid (`NArrayAP == 0`).
+"""
+function _orbital_file_order_error(file_list::Vector{Tuple{String,String}})
+    parallel_pos = nothing
+    anti_pos = nothing
+    for (i, (file_type, _)) in enumerate(file_list)
+        if file_type == "OrbitalParallel" && parallel_pos === nothing
+            parallel_pos = i
+        elseif (file_type == "Orbital" || file_type == "OrbitalAntiParallel") &&
+               anti_pos === nothing
+            anti_pos = i
+        end
+    end
+    if parallel_pos !== nothing && anti_pos !== nothing && parallel_pos < anti_pos
+        return "OrbitalParallel must be listed after Orbital/OrbitalAntiParallel in " *
+               "namelist.def: the anti-parallel block defines the NArrayAP offset " *
+               "for the parallel orbital block"
+    end
+    return nothing
+end
+
 function apply_orbital_opt_flags_from_files!(
     data::ExpertModeData,
     file_list::Vector{Tuple{String,String}},
@@ -221,16 +257,21 @@ function apply_orbital_opt_flags_from_files!(
         full_path = joinpath(base_dir, file_path)
         validate_file_exists(full_path) || continue
 
-        result, opt_flags = parse_orbital_def(full_path)
+        result, opt_flags, header_count = parse_orbital_def(full_path)
         result.success || continue
+
+        # Record NArrayAP from the header (C's iNOrbitalAntiParallel) before the
+        # opt-flag emptiness check, so the parallel opt-flag offset below is
+        # correct even when the anti-parallel file carries no opt flags.
+        if file_type == "Orbital" || file_type == "OrbitalAntiParallel"
+            n_orbital_anti_parallel = header_count
+        end
+
         isempty(opt_flags) && continue
 
         if file_type == "Orbital" || file_type == "OrbitalAntiParallel"
             for (idx, opt) in opt_flags
                 orbital_opt_flags[idx] = opt
-            end
-            if !isempty(result.data)
-                n_orbital_anti_parallel = maximum(t.idx for t in result.data) + 1
             end
         elseif file_type == "OrbitalParallel"
             for (idx, opt) in opt_flags
@@ -492,33 +533,34 @@ function parse_file_by_type!(data::ExpertModeData, file_type::String, file_path:
             )
         end
     elseif file_type == "Orbital"
-        result, opt_flags = parse_orbital_def(file_path)
+        result, opt_flags, anti_count = parse_orbital_def(file_path)
         if result.success
             data.orbital_terms = result.data
             # C implementation: KWOrbital sets iFlgOrbitalAntiParallel = 1
             data.i_flg_orbital_anti_parallel = 1
             # NOTE: build_orbital_sgn_matrix! is called after judge_orbital_mode!
-            # to ensure correct matrix size for FSZ mode
-            # Set n_orbital_idx from maximum idx in orbital_terms
-            if !isempty(data.orbital_terms)
-                max_idx = maximum(t.idx for t in data.orbital_terms)
-                data.modpara.n_orbital_idx = max_idx + 1  # 0-based to 1-based count
+            # to ensure correct matrix size for FSZ mode.
+            # Use the header declared count (C's iNOrbitalAntiParallel), not
+            # max(idx)+1, so unreferenced trailing parameters still reserve slots.
+            if anti_count > 0
+                data.modpara.n_orbital_idx = anti_count
+                data.n_orbital_anti_parallel = anti_count  # NArrayAP
             end
         end
     elseif file_type == "OrbitalAntiParallel"
-        result, opt_flags = parse_orbital_def(file_path)
+        result, opt_flags, anti_count = parse_orbital_def(file_path)
         if result.success
             data.orbital_terms = result.data
             data.i_flg_orbital_anti_parallel = 1
             # NOTE: build_orbital_sgn_matrix! is called after judge_orbital_mode!
-            # Set n_orbital_idx from maximum idx in orbital_terms
-            if !isempty(data.orbital_terms)
-                max_idx = maximum(t.idx for t in data.orbital_terms)
-                data.modpara.n_orbital_idx = max_idx + 1  # 0-based to 1-based count
+            # Use the header declared count (C's iNOrbitalAntiParallel).
+            if anti_count > 0
+                data.modpara.n_orbital_idx = anti_count
+                data.n_orbital_anti_parallel = anti_count  # NArrayAP
             end
         end
     elseif file_type == "OrbitalParallel"
-        result, opt_flags = parse_orbital_def(file_path)
+        result, opt_flags, parallel_count = parse_orbital_def(file_path)
         if result.success
             # C implementation: OrbitalParallel indices are interleaved for up-up and down-down
             # See readdef.c GetInfoOrbitalParallel (lines 2608-2620):
@@ -529,14 +571,13 @@ function parse_file_by_type!(data::ExpertModeData, file_type::String, file_path:
             # So indices are: [NArrayAP + 2*0 = up0, NArrayAP + 2*0 + 1 = down0,
             #                  NArrayAP + 2*1 = up1, NArrayAP + 2*1 + 1 = down1, ...]
 
-            # Get the number of anti-parallel orbitals for offsetting
-            n_orbital_anti_parallel = 0
-            if !isempty(data.orbital_terms)
-                n_orbital_anti_parallel = maximum(t.idx for t in data.orbital_terms) + 1
-            end
+            # NArrayAP is the anti-parallel parameter count recorded by the
+            # preceding Orbital/OrbitalAntiParallel parse (0 for a pure-parallel
+            # system). C reads OrbitalParallel after the anti-parallel block;
+            # the namelist order is enforced by parse_expert_mode_files.
+            n_orbital_anti_parallel = data.n_orbital_anti_parallel
 
             # Create interleaved parallel orbital terms matching C implementation
-            n_parallel = length(result.data)
             for term in result.data
                 fij_org = term.idx  # Original index from the file (0-based)
 
@@ -566,23 +607,19 @@ function parse_file_by_type!(data::ExpertModeData, file_type::String, file_path:
             end
 
             data.i_flg_orbital_parallel = 1
-            # NOTE: build_orbital_sgn_matrix! is called after judge_orbital_mode!
-            # Set n_orbital_idx from maximum idx in orbital_terms
-            if !isempty(data.orbital_terms)
-                max_idx = maximum(t.idx for t in data.orbital_terms)
-                data.modpara.n_orbital_idx = max_idx + 1  # 0-based to 1-based count
-            end
+            # Total parameter count = NArrayAP + 2*iNOrbitalParallel (header count),
+            # matching C readdef.c (bufInt[IdxNOrbit] += 2*iNOrbitalParallel).
+            data.modpara.n_orbital_idx = n_orbital_anti_parallel + 2 * parallel_count
         end
     elseif file_type == "OrbitalGeneral"
-        result, opt_flags = parse_orbital_def(file_path)
+        result, opt_flags, general_count = parse_orbital_def(file_path)
         if result.success
             data.orbital_terms = result.data
             data.i_flg_orbital_general = 1
             # NOTE: build_orbital_sgn_matrix! is called after judge_orbital_mode!
-            # Set n_orbital_idx from maximum idx in orbital_terms
-            if !isempty(data.orbital_terms)
-                max_idx = maximum(t.idx for t in data.orbital_terms)
-                data.modpara.n_orbital_idx = max_idx + 1  # 0-based to 1-based count
+            # Use the header declared count (C's NOrbitalIdx for OrbitalGeneral).
+            if general_count > 0
+                data.modpara.n_orbital_idx = general_count
             end
         end
     elseif file_type == "OneBodyG"
