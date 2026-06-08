@@ -88,6 +88,18 @@
   - `unit/types: ElectronConfiguration sizes (fsz vs non-fsz)` → `ElectronConfiguration(..., use_fsz)`
   - `unit/types: SlaterMatrixData size normalization` → `SlaterMatrixData(n_qp_full, n_site, n_elec, all_complex)`
 
+### `src/threading.jl`（VMCMainCal sample threading）
+- `test_unit/test_unit_threading.jl`
+  - `unit/threading: VMCThreadConfig` → effective thread count and validation
+  - `unit/threading: sample chunks` → 0-based contiguous sample range split and validation
+  - `unit/threading: energy accumulator reduction` → deterministic local energy merge
+  - `unit/threading: SR accumulator reduction` → complex/real SR array merge
+  - `unit/threading: PhysCal accumulator reduction` → `phys_*` merge without touching local scratch、factored Green の local accumulator 加算
+  - `unit/threading: counter and timer reductions` → counter sum and `CTimer` elapsed merge
+  - `unit/threading: whole-thread accumulator construction and merge` → combined local accumulator allocation and ordered merge
+  - `unit/threading: VMCMainCal worker state boundaries` → saved sample 配列のみ共有し、scratch / counter / workspace は worker-local
+  - `unit/threading: vmc_main_cal! requested thread self-consistency` → `requested_threads=1/2` で complex store/non-store、real、measurement PhysCal、FSZ の accumulators が一致
+
 ### `src/unsupported_inputs.jl`（runtime contract）
 - `test_unit/test_unit_unsupported_inputs.jl`
   - `unit/unsupported_inputs: NSplitSize contract` → `validate_supported_modpara`
@@ -105,6 +117,7 @@
   - `canonical one-body list` → `build_canonical_cis_ajs_idx`（greenone 先頭 → greentwoex 構成 append・dedup・site 範囲・spin 検証）
   - `factored index resolution is 1-based` → `resolve_cis_ajs_ckt_alt_idx`（C index 0 → Julia 1）
   - `factored accumulation` → `accumulate_factored_green!`（`w·local[idx0]·conj(local[idx1])`）
+  - `calculate_green_func! legacy no-acc path writes to state phys` → accumulator なし旧 API の R1 follow-up 回帰ガード
   - `output: canonical cisajs + factored ex` → `output_green_func!`（canonical 出力 / output_dir / `_001` 番号）
   - `PhysCal output file index uses NDataIdxStart` → `physcal_output_file_index`
   - `output_data_phys!: out/var truncate-on-first-sample, Green files use NDataIdxStart` → fmt-1 回帰ガード（out/var は 0-based ismp で write-mode 決定 → 初回 truncate・再実行で非汚染、Green は `ismp+NDataIdxStart` 番号）

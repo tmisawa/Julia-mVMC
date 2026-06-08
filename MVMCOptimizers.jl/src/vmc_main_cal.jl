@@ -123,6 +123,7 @@ function green_func1(
 
     # Get electron index at site rj with spin s
     mj = ele_cfg[rj+1+s*n_site]  # 0-based in C
+    mj < 0 && return 0.0 + 0.0im
     msj = mj + s * n_elec  # 0-based index in ele_idx
     rsi = ri + s * n_site
     rsj = rj + s * n_site
@@ -1072,6 +1073,7 @@ function green_func2(
 
     mj = ele_cfg[rj+1+s*n_site]
     ml = ele_cfg[rl+1+t*n_site]
+    (mj < 0 || ml < 0) && return 0.0 + 0.0im
     msj = mj + s * n_elec
     mtl = ml + t * n_elec
 
@@ -2504,6 +2506,67 @@ function finalize_oo_store!(
     end
 end
 
+function vmc_sample_chunks(n_samples::Integer, n_chunks::Integer)
+    n = Int(n_samples)
+    c = Int(n_chunks)
+    c >= 1 || error("n_chunks must be >= 1, got $c")
+    n >= 0 || error("n_samples must be >= 0, got $n")
+    chunk_size = div(n, c)
+    remainder = rem(n, c)
+    chunks = Vector{UnitRange{Int}}(undef, c)
+    first_sample = 0
+    for chunk = 1:c
+        len = chunk_size + (chunk <= remainder ? 1 : 0)
+        last_sample = first_sample + len - 1
+        chunks[chunk] = first_sample:last_sample
+        first_sample += len
+    end
+    return chunks
+end
+
+function make_vmc_main_cal_worker_state(
+    data::ExpertModeData,
+    parent::VMCOptimizationState,
+)
+    n_site = data.modpara.nsite
+    n_elec = data.modpara.nelec
+    n_proj = MVMCExpertModeParsers.projection_layout(data).n_proj
+    n_para = parent.sr_opt.sr_opt_size - 1
+    n_qp_full = length(parent.slater_matrix.pf_m)
+    n_vmc_sample = data.modpara.nvmc_sample
+    all_complex = get_all_complex_flag(data)
+    use_fsz = !isempty(parent.electron_config.ele_spn)
+
+    worker = VMCOptimizationState(
+        n_site,
+        n_elec,
+        n_proj,
+        n_para,
+        n_qp_full,
+        n_vmc_sample,
+        all_complex,
+        use_fsz,
+    )
+
+    # Saved sample arrays are read-only in VMCMainCal; avoid duplicating them.
+    # Scratch arrays and counters remain worker-local.
+    worker.electron_config.ele_idx = parent.electron_config.ele_idx
+    worker.electron_config.ele_cfg = parent.electron_config.ele_cfg
+    worker.electron_config.ele_num = parent.electron_config.ele_num
+    worker.electron_config.ele_proj_cnt = parent.electron_config.ele_proj_cnt
+    worker.electron_config.ele_spn = parent.electron_config.ele_spn
+    worker.phys_quantities = parent.phys_quantities
+    worker.slater_matrix.slater_elm = parent.slater_matrix.slater_elm
+    worker.slater_matrix.slater_elm_real = parent.slater_matrix.slater_elm_real
+    copyto!(worker.slater_matrix.inv_m, parent.slater_matrix.inv_m)
+    copyto!(worker.slater_matrix.pf_m, parent.slater_matrix.pf_m)
+    if !isempty(worker.slater_matrix.inv_m_real)
+        copyto!(worker.slater_matrix.inv_m_real, parent.slater_matrix.inv_m_real)
+        copyto!(worker.slater_matrix.pf_m_real, parent.slater_matrix.pf_m_real)
+    end
+    return worker
+end
+
 # ============================================================================
 # Main Calculation Functions
 # ============================================================================
@@ -2514,7 +2577,13 @@ end
 Main calculation: energy expectation values and SR optimization quantities (sz-conserved).
 Equivalent to C's `VMCMainCal()`.
 """
-function vmc_main_cal!(data::ExpertModeData, state::VMCOptimizationState, c_timer::CTimer = CTIMER_DISABLED)
+function vmc_main_cal!(
+    data::ExpertModeData,
+    state::VMCOptimizationState,
+    c_timer::CTimer = CTIMER_DISABLED;
+    requested_threads::Integer = Base.Threads.nthreads(),
+    use_store::Bool = true,
+)
     n_site = data.modpara.nsite
     n_elec = data.modpara.nelec
     n_size = 2 * n_elec
@@ -2544,9 +2613,6 @@ function vmc_main_cal!(data::ExpertModeData, state::VMCOptimizationState, c_time
     # We only implement optimization mode (0)
     nvmc_cal_mode = data.modpara.vmc_calc_mode
 
-    # Use stored samples (NSRCG or NStoreO mode)
-    use_store = true  # Default to store mode for efficiency
-
     # Clear physical quantities ([24] cal)
     ctimer_start!(c_timer, 24)
     clear_phys_quantity!(state)
@@ -2559,311 +2625,424 @@ function vmc_main_cal!(data::ExpertModeData, state::VMCOptimizationState, c_time
         @error "vmc_main_cal!: slater_elm is all zeros! This indicates update_slater_elm_fcmp! was not called or failed."
     end
 
-    # Sample loop
-    for sample = 0:(n_vmc_sample-1)
-        # Get electron configuration for this sample
-        ele_idx_start = sample * n_size + 1
-        ele_idx_end = ele_idx_start + n_size - 1
-        ele_idx = state.electron_config.ele_idx[ele_idx_start:ele_idx_end]
+    function process_sample_range!(
+        sample_range,
+        worker_state::VMCOptimizationState,
+        local_acc::VMCThreadAccumulator,
+        c_timer::CTimer,
+        allow_inner_threads::Bool,
+    )
+        @debug "VMCMainCal worker sample range" sample_range length_ele_idx=length(worker_state.electron_config.ele_idx) length_ele_cfg=length(worker_state.electron_config.ele_cfg) length_ele_num=length(worker_state.electron_config.ele_num) length_ele_proj_cnt=length(worker_state.electron_config.ele_proj_cnt)
 
-        # Validate ele_idx: check if it's all zeros (uninitialized)
-        if all(x -> x == 0, ele_idx)
-            @error "VMCMainCal: sample=$sample has invalid ele_idx (all zeros). This sample was not properly saved by vmc_make_sample!. Skipping this sample."
-            @error "  ele_idx_start=$ele_idx_start, ele_idx_end=$ele_idx_end, n_size=$n_size"
-            @error "  ele_idx[1:min(10, length(ele_idx))] = $(ele_idx[1:min(10, length(ele_idx))])"
-            continue
-        end
-
-        # Validate ele_idx: check if it contains invalid values (all -1 or negative)
-        if all(x -> x < 0, ele_idx)
-            @error "VMCMainCal: sample=$sample has invalid ele_idx (all negative). This sample was not properly initialized. Skipping this sample."
-            @error "  ele_idx[1:min(10, length(ele_idx))] = $(ele_idx[1:min(10, length(ele_idx))])"
-            continue
-        end
-
-        ele_cfg_start = sample * n_site2 + 1
-        ele_cfg_end = ele_cfg_start + n_site2 - 1
-        ele_cfg = state.electron_config.ele_cfg[ele_cfg_start:ele_cfg_end]
-
-        ele_num_start = sample * n_site2 + 1
-        ele_num_end = ele_num_start + n_site2 - 1
-        ele_num = state.electron_config.ele_num[ele_num_start:ele_num_end]
-
-        # Debug: Validate ele_num for half-filling on localized spin sites only
-        # Note: Half-filling check (n0[ri] + n1[ri] == 1) only applies to
-        # sites marked as localized spins (LocSpn[ri] == 1).
-        # For itinerant sites (LocSpn[ri] == 0), sites can be empty or doubly occupied.
-        n0 = @view ele_num[1:n_site]
-        n1 = @view ele_num[(n_site+1):(2*n_site)]
-        loc_spn = get_loc_spn_array(data)
-        half_filling_violations = 0
-        for ri = 1:n_site
-            if loc_spn[ri] == 1 && n0[ri] + n1[ri] != 1
-                # Only check localized spin sites
-                half_filling_violations += 1
+        # Sample loop
+        for sample_value in sample_range
+            sample = Int(sample_value)
+            sample_n_site2 = n_site2
+            # Get electron configuration for this sample
+            ele_idx_start = sample * n_size + 1
+            ele_idx_end = ele_idx_start + n_size - 1
+            if ele_idx_end > length(worker_state.electron_config.ele_idx)
+                @error "VMCMainCal: sample ele_idx slice is out of bounds" sample ele_idx_start ele_idx_end saved_ele_idx_len=length(worker_state.electron_config.ele_idx)
+                continue
             end
-        end
-        if half_filling_violations > 0
-            @warn "VMCMainCal: sample=$sample violates half-filling at $half_filling_violations localized spin sites"
-            @warn "  n0[1:min(8,$n_site)] = $(n0[1:min(8, n_site)])"
-            @warn "  n1[1:min(8,$n_site)] = $(n1[1:min(8, n_site)])"
-            @warn "  loc_spn[1:min(8,$n_site)] = $(loc_spn[1:min(8, n_site)])"
-            @warn "  ele_idx = $(ele_idx[1:min(10, length(ele_idx))])"
-        end
+            ele_idx = Vector{Int}(undef, n_size)
+            copyto!(ele_idx, 1, worker_state.electron_config.ele_idx, ele_idx_start, n_size)
 
-        ele_proj_cnt_start = sample * n_proj + 1
-        ele_proj_cnt_end =
-            min(ele_proj_cnt_start + n_proj - 1, length(state.electron_config.ele_proj_cnt))
-        if n_proj > 0 && ele_proj_cnt_end >= ele_proj_cnt_start
-            ele_proj_cnt =
-                state.electron_config.ele_proj_cnt[ele_proj_cnt_start:ele_proj_cnt_end]
-        else
-            ele_proj_cnt = Int[]
-        end
+            # Validate ele_idx: check if it's all zeros (uninitialized)
+            if all(x -> x == 0, ele_idx)
+                @error "VMCMainCal: sample=$sample has invalid ele_idx (all zeros). This sample was not properly saved by vmc_make_sample!. Skipping this sample."
+                @error "  ele_idx_start=$ele_idx_start, ele_idx_end=$ele_idx_end, n_size=$n_size"
+                @error "  ele_idx[1:min(10, length(ele_idx))] = $(ele_idx[1:min(10, length(ele_idx))])"
+                continue
+            end
 
-        # Calculate M inverse and Pfaffian for this sample ([40] CalculateMAll;
-        # wraps the call site and the real->complex copy, as in C's vmccal.c).
-        # Use real version if !all_complex, matching C implementation
-        ctimer_start!(c_timer, 40)
-        if !all_complex
-            info = calculate_m_all_real!(ele_idx, 1, n_qp_full + 1, data, state)
-            # Copy inv_m_real to inv_m (needed for SlaterElmDiff_fcmp)
-            # C does: for(tmp_i=0;tmp_i<NQPFull*(Nsize*Nsize+1);tmp_i++) InvM[tmp_i]=InvM_real[tmp_i];
-            # which copies both InvM_real and PfM_real (since PfM = InvM + NQPFull*Nsize*Nsize)
-            n_size_sq = n_size * n_size
-            @inbounds for qp = 1:n_qp_full
-                base_idx = (qp - 1) * n_size_sq
-                for i = 1:n_size_sq
-                    linear_idx = base_idx + i
-                    if linear_idx <= length(state.slater_matrix.inv_m) &&
-                       linear_idx <= length(state.slater_matrix.inv_m_real)
-                        state.slater_matrix.inv_m[linear_idx] =
-                            ComplexF64(state.slater_matrix.inv_m_real[linear_idx], 0.0)
+            # Validate ele_idx: check if it contains invalid values (all -1 or negative)
+            if all(x -> x < 0, ele_idx)
+                @error "VMCMainCal: sample=$sample has invalid ele_idx (all negative). This sample was not properly initialized. Skipping this sample."
+                @error "  ele_idx[1:min(10, length(ele_idx))] = $(ele_idx[1:min(10, length(ele_idx))])"
+                continue
+            end
+
+            ele_cfg_start = sample * sample_n_site2 + 1
+            ele_cfg_end = ele_cfg_start + sample_n_site2 - 1
+            if ele_cfg_end > length(worker_state.electron_config.ele_cfg)
+                @error "VMCMainCal: sample ele_cfg slice is out of bounds" sample ele_cfg_start ele_cfg_end n_site2=sample_n_site2 saved_ele_cfg_len=length(worker_state.electron_config.ele_cfg)
+                continue
+            end
+            ele_cfg = Vector{Int}(undef, sample_n_site2)
+            copyto!(ele_cfg, 1, worker_state.electron_config.ele_cfg, ele_cfg_start, sample_n_site2)
+
+            ele_num_start = sample * sample_n_site2 + 1
+            ele_num_end = ele_num_start + sample_n_site2 - 1
+            if ele_num_end > length(worker_state.electron_config.ele_num)
+                @error "VMCMainCal: sample ele_num slice is out of bounds" sample ele_num_start ele_num_end n_site2=sample_n_site2 saved_ele_num_len=length(worker_state.electron_config.ele_num)
+                continue
+            end
+            ele_num = Vector{Int}(undef, sample_n_site2)
+            copyto!(ele_num, 1, worker_state.electron_config.ele_num, ele_num_start, sample_n_site2)
+
+            # Debug: Validate ele_num for half-filling on localized spin sites only
+            # Note: Half-filling check (n0[ri] + n1[ri] == 1) only applies to
+            # sites marked as localized spins (LocSpn[ri] == 1).
+            # For itinerant sites (LocSpn[ri] == 0), sites can be empty or doubly occupied.
+            n0 = @view ele_num[1:n_site]
+            n1 = @view ele_num[(n_site+1):(2*n_site)]
+            loc_spn = get_loc_spn_array(data)
+            half_filling_violations = 0
+            for ri = 1:n_site
+                if loc_spn[ri] == 1 && n0[ri] + n1[ri] != 1
+                    # Only check localized spin sites
+                    half_filling_violations += 1
+                end
+            end
+            if half_filling_violations > 0
+                @warn "VMCMainCal: sample=$sample violates half-filling at $half_filling_violations localized spin sites"
+                @warn "  n0[1:min(8,$n_site)] = $(n0[1:min(8, n_site)])"
+                @warn "  n1[1:min(8,$n_site)] = $(n1[1:min(8, n_site)])"
+                @warn "  loc_spn[1:min(8,$n_site)] = $(loc_spn[1:min(8, n_site)])"
+                @warn "  ele_idx = $(ele_idx[1:min(10, length(ele_idx))])"
+            end
+
+            ele_proj_cnt_start = sample * n_proj + 1
+            ele_proj_cnt_end =
+                min(ele_proj_cnt_start + n_proj - 1, length(worker_state.electron_config.ele_proj_cnt))
+            if n_proj > 0 && ele_proj_cnt_end >= ele_proj_cnt_start
+                ele_proj_cnt =
+                    worker_state.electron_config.ele_proj_cnt[ele_proj_cnt_start:ele_proj_cnt_end]
+            else
+                ele_proj_cnt = Int[]
+            end
+
+            # Calculate M inverse and Pfaffian for this sample ([40] CalculateMAll;
+            # wraps the call site and the real->complex copy, as in C's vmccal.c).
+            # Use real version if !all_complex, matching C implementation
+            ctimer_start!(c_timer, 40)
+            info = 0
+            if !all_complex
+                if allow_inner_threads
+                    info = calculate_m_all_real!(
+                        ele_idx,
+                        1,
+                        n_qp_full + 1,
+                        data,
+                        worker_state;
+                        threaded = true,
+                    )
+                else
+                    info = calculate_m_all_real!(
+                        ele_idx,
+                        1,
+                        n_qp_full + 1,
+                        data,
+                        worker_state;
+                        threaded = false,
+                    )
+                end
+                # Copy inv_m_real to inv_m (needed for SlaterElmDiff_fcmp)
+                # C does: for(tmp_i=0;tmp_i<NQPFull*(Nsize*Nsize+1);tmp_i++) InvM[tmp_i]=InvM_real[tmp_i];
+                # which copies both InvM_real and PfM_real (since PfM = InvM + NQPFull*Nsize*Nsize)
+                n_size_sq = n_size * n_size
+                @inbounds for qp = 1:n_qp_full
+                    base_idx = (qp - 1) * n_size_sq
+                    for i = 1:n_size_sq
+                        linear_idx = base_idx + i
+                        if linear_idx <= length(worker_state.slater_matrix.inv_m) &&
+                           linear_idx <= length(worker_state.slater_matrix.inv_m_real)
+                            worker_state.slater_matrix.inv_m[linear_idx] =
+                                ComplexF64(worker_state.slater_matrix.inv_m_real[linear_idx], 0.0)
+                        end
                     end
                 end
-            end
-            # Also copy pf_m_real to pf_m (needed for SlaterElmDiff_fcmp)
-            # In C, PfM and InvM are contiguous, so the above copy covers both
-            # In Julia, they are separate arrays, so we need explicit copy
-            @inbounds for qp = 1:n_qp_full
-                if qp <= length(state.slater_matrix.pf_m) &&
-                   qp <= length(state.slater_matrix.pf_m_real)
-                    state.slater_matrix.pf_m[qp] =
-                        ComplexF64(state.slater_matrix.pf_m_real[qp], 0.0)
-                end
-            end
-        else
-            info = calculate_m_all_fcmp!(ele_idx, 1, n_qp_full + 1, data, state)
-        end
-        ctimer_stop!(c_timer, 40)
-
-        if info != 0
-            @warn "VMCMainCal: sample=$sample info=$info (CalculateMAll)"
-            continue
-        end
-
-
-        # Debug: Check slater_elm values
-        if sample == 0 || sample == 1
-            n_site2 = 2 * n_site
-            # Check up-spin part (rsi=0-15): slater_elm[rsi * n_site2 + rsj + 1] for rsi=0-15
-            # Check down-spin part (rsi=16-31): slater_elm[rsi * n_site2 + rsj + 1] for rsi=16-31
-            # For qp_idx=1 (first QP), offset = 0
-            qp_offset = 0 * n_site2 * n_site2
-            @debug "VMCMainCal: sample=$sample, slater_elm size=$(length(state.slater_matrix.slater_elm)), n_qp_full=$(n_qp_full)"
-            # Check all 4 blocks of slater_elm
-            @debug "VMCMainCal: sample=$sample, slater_elm blocks:"
-            @debug "  up-up [rsi=0, rsj=0-4]: $(state.slater_matrix.slater_elm[qp_offset + 1:qp_offset + min(5, n_site2)])"
-            @debug "  up-down [rsi=0, rsj=16-20]: $(state.slater_matrix.slater_elm[qp_offset + 16 + 1:qp_offset + min(21, n_site2)])"
-            @debug "  down-up [rsi=16, rsj=0-4]: $(state.slater_matrix.slater_elm[qp_offset + 16 * n_site2 + 1:qp_offset + 16 * n_site2 + min(5, n_site2)])"
-            @debug "  down-down [rsi=16, rsj=16-20]: $(state.slater_matrix.slater_elm[qp_offset + 16 * n_site2 + 16 + 1:qp_offset + 16 * n_site2 + min(21, n_site2)])"
-            @debug "  down-down [rsi=17, rsj=16-20]: $(state.slater_matrix.slater_elm[qp_offset + 17 * n_site2 + 16 + 1:qp_offset + 17 * n_site2 + min(21, n_site2)])"
-        end
-
-        # Calculate inner product (use real version if !all_complex, matching C implementation)
-        if !all_complex
-            ip_real =
-                calculate_ip_real(state.slater_matrix.pf_m_real, 1, n_qp_full + 1, data)
-            ip = ComplexF64(ip_real, 0.0)  # Convert to ComplexF64 for calculate_hamiltonian
-        else
-            ip = calculate_ip_fcmp(state.slater_matrix.pf_m, 1, n_qp_full + 1, data)
-        end
-
-        # Debug: Check for zero or extreme ip values
-        if abs(ip) < 1e-100
-            @warn "VMCMainCal: sample=$sample has zero ip: ip=$ip, pf_m[1]=$(!all_complex ? state.slater_matrix.pf_m_real[1] : state.slater_matrix.pf_m[1])" maxlog=5
-        elseif abs(ip) > 1e100
-            @warn "VMCMainCal: sample=$sample has extreme ip: ip=$ip, pf_m[1]=$(!all_complex ? state.slater_matrix.pf_m_real[1] : state.slater_matrix.pf_m[1])" maxlog=5
-        end
-
-        # Calculate weight (currently w = 1.0 for unbiased sampling)
-        w = 1.0
-
-        if !isfinite(w)
-            @warn "VMCMainCal: sample=$sample w=$w"
-            continue
-        end
-
-        # Calculate energy
-        # C implementation uses CalculateHamiltonian_real(creal(ip), ...) for real mode
-        # For real mode, pass real part of ip to calculate_hamiltonian
-        # Note: calculate_hamiltonian uses green_func1/green_func2 which need to handle real mode
-        # [41] LocEnergyCal
-        ctimer_start!(c_timer, 41)
-        if !all_complex
-            # Real mode: use real ip and pass all_complex flag
-            e = calculate_hamiltonian(
-                ComplexF64(ip_real, 0.0),
-                ele_idx,
-                ele_cfg,
-                ele_num,
-                ele_proj_cnt,
-                data,
-                state;
-                all_complex = false,
-                c_timer = c_timer,
-            )
-        else
-            e = calculate_hamiltonian(
-                ip,
-                ele_idx,
-                ele_cfg,
-                ele_num,
-                ele_proj_cnt,
-                data,
-                state;
-                all_complex = true,
-                c_timer = c_timer,
-            )
-        end
-        ctimer_stop!(c_timer, 41)
-
-        if !isfinite(real(e) + imag(e))
-            @warn "VMCMainCal: sample=$sample e=$e ip=$ip"
-            continue
-        end
-
-        # Debug: Track zero energy cases
-        if abs(real(e)) < 1e-15 && sample < 5
-            @debug "VMCMainCal: Zero energy at sample=$sample, ip=$ip, pf_m[1]=$(state.slater_matrix.pf_m[1]), ele_idx[1:8]=$(ele_idx[1:min(8, length(ele_idx))])"
-        end
-
-        # Debug: Check energy values
-        if sample == 0 || sample == 1
-            @debug "VMCMainCal: sample=$sample, e=$(real(e)), ip=$ip, wc_before=$(state.energy.wc)"
-        end
-
-        # Accumulate energy statistics
-        state.energy.wc += w
-        state.energy.etot += w * e
-        state.energy.etot2 += w * conj(e) * e
-
-        # Calculate Green's functions (only in measurement mode)
-        if nvmc_cal_mode == 1 && state.phys_quantities !== nothing
-            calculate_green_func!(
-                data,
-                state,
-                w,
-                ip,
-                ele_idx,
-                ele_cfg,
-                ele_num,
-                ele_proj_cnt,
-            )
-        end
-
-        # Calculate SR optimization quantities (only in optimization mode)
-        if nvmc_cal_mode == 0
-            sr_opt_o = state.sr_opt.sr_opt_o
-            fill!(sr_opt_o, 0.0 + 0.0im)
-
-            # Set projection factor derivatives
-            set_projection_diff!(sr_opt_o, ele_proj_cnt, n_proj)
-
-            # Set RBM derivatives
-            if n_rbm > 0
-                rbm_offset = 2 * n_proj + 2
-                rbm_end = rbm_offset + 2 * n_rbm
-                if rbm_end <= length(sr_opt_o)
-                    rbm_cnt = make_rbm_cnt(ele_num, data)
-                    rbm_view = @view sr_opt_o[(rbm_offset+1):rbm_end]
-                    set_rbm_diff!(rbm_view, rbm_cnt, ele_num, data)
-                else
-                    @warn "RBM derivative range out of bounds: rbm_end=$rbm_end, length(sr_opt_o)=$(length(sr_opt_o))" maxlog=1
-                end
-            end
-
-            # Set Slater element derivatives ([42] ReturnSlaterElmDiff)
-            if n_slater > 0
-                slater_offset = 2 * (n_proj + n_rbm) + 2  # After projection + RBM factors
-                slater_end = slater_offset + 2 * n_slater
-                slater_view = @view sr_opt_o[(slater_offset+1):slater_end]
-                ctimer_start!(c_timer, 42)
-                slater_elm_diff_fcmp!(slater_view, ip, ele_idx, data, state)
-                ctimer_stop!(c_timer, 42)
-            end
-            if n_opt_trans > 0
-                opt_offset = 2 * (n_proj + n_rbm + n_slater) + 2
-                opt_end = opt_offset + 2 * n_opt_trans
-                if opt_end <= length(sr_opt_o)
-                    opt_trans_diff!(@view(sr_opt_o[(opt_offset+1):opt_end]), ip, data, state)
-                end
-            end
-
-            # Accumulate OO and HO ([43] calculate OO and HO)
-            ctimer_start!(c_timer, 43)
-            if all_complex
-                if use_store
-                    calculate_oo_store!(
-                        state.sr_opt.sr_opt_oo,
-                        state.sr_opt.sr_opt_ho,
-                        state.sr_opt.sr_opt_o_store,
-                        sr_opt_o,
-                        w,
-                        e,
-                        sample,
-                        sr_opt_size,
-                    )
-                else
-                    calculate_oo!(
-                        state.sr_opt.sr_opt_oo,
-                        state.sr_opt.sr_opt_ho,
-                        sr_opt_o,
-                        w,
-                        e,
-                        sr_opt_size,
-                    )
+                # Also copy pf_m_real to pf_m (needed for SlaterElmDiff_fcmp)
+                # In C, PfM and InvM are contiguous, so the above copy covers both
+                # In Julia, they are separate arrays, so we need explicit copy
+                @inbounds for qp = 1:n_qp_full
+                    if qp <= length(worker_state.slater_matrix.pf_m) &&
+                       qp <= length(worker_state.slater_matrix.pf_m_real)
+                        worker_state.slater_matrix.pf_m[qp] =
+                            ComplexF64(worker_state.slater_matrix.pf_m_real[qp], 0.0)
+                    end
                 end
             else
-                # Convert to real and calculate
-                sr_opt_o_real = state.sr_opt.sr_opt_o_real
-                for i = 1:sr_opt_size
-                    sr_opt_o_real[i] = real(sr_opt_o[2*(i-1)+1])
+                if allow_inner_threads
+                    info = calculate_m_all_fcmp!(
+                        ele_idx,
+                        1,
+                        n_qp_full + 1,
+                        data,
+                        worker_state;
+                        threaded = true,
+                    )
+                else
+                    info = calculate_m_all_fcmp!(
+                        ele_idx,
+                        1,
+                        n_qp_full + 1,
+                        data,
+                        worker_state;
+                        threaded = false,
+                    )
                 end
+            end
+            ctimer_stop!(c_timer, 40)
 
-                calculate_oo_real!(
-                    state.sr_opt.sr_opt_oo_real,
-                    state.sr_opt.sr_opt_ho_real,
-                    sr_opt_o_real,
-                    w,
-                    real(e),
-                    sr_opt_size,
+            if info != 0
+                @warn "VMCMainCal: sample=$sample info=$info (CalculateMAll)"
+                continue
+            end
+
+
+            # Debug: Check slater_elm values
+            if sample == 0 || sample == 1
+                # Check up-spin part (rsi=0-15): slater_elm[rsi * n_site2 + rsj + 1] for rsi=0-15
+                # Check down-spin part (rsi=16-31): slater_elm[rsi * n_site2 + rsj + 1] for rsi=16-31
+                # For qp_idx=1 (first QP), offset = 0
+                qp_offset = 0 * sample_n_site2 * sample_n_site2
+                @debug "VMCMainCal: sample=$sample, slater_elm size=$(length(worker_state.slater_matrix.slater_elm)), n_qp_full=$(n_qp_full)"
+                # Check all 4 blocks of slater_elm
+                @debug "VMCMainCal: sample=$sample, slater_elm blocks:"
+                @debug "  up-up [rsi=0, rsj=0-4]: $(worker_state.slater_matrix.slater_elm[qp_offset + 1:qp_offset + min(5, sample_n_site2)])"
+                @debug "  up-down [rsi=0, rsj=16-20]: $(worker_state.slater_matrix.slater_elm[qp_offset + 16 + 1:qp_offset + min(21, sample_n_site2)])"
+                @debug "  down-up [rsi=16, rsj=0-4]: $(worker_state.slater_matrix.slater_elm[qp_offset + 16 * sample_n_site2 + 1:qp_offset + 16 * sample_n_site2 + min(5, sample_n_site2)])"
+                @debug "  down-down [rsi=16, rsj=16-20]: $(worker_state.slater_matrix.slater_elm[qp_offset + 16 * sample_n_site2 + 16 + 1:qp_offset + 16 * sample_n_site2 + min(21, sample_n_site2)])"
+                @debug "  down-down [rsi=17, rsj=16-20]: $(worker_state.slater_matrix.slater_elm[qp_offset + 17 * sample_n_site2 + 16 + 1:qp_offset + 17 * sample_n_site2 + min(21, sample_n_site2)])"
+            end
+
+            # Calculate inner product (use real version if !all_complex, matching C implementation)
+            if !all_complex
+                ip_real =
+                    calculate_ip_real(worker_state.slater_matrix.pf_m_real, 1, n_qp_full + 1, data)
+                ip = ComplexF64(ip_real, 0.0)  # Convert to ComplexF64 for calculate_hamiltonian
+            else
+                ip = calculate_ip_fcmp(worker_state.slater_matrix.pf_m, 1, n_qp_full + 1, data)
+            end
+
+            # Debug: Check for zero or extreme ip values
+            if abs(ip) < 1e-100
+                @warn "VMCMainCal: sample=$sample has zero ip: ip=$ip, pf_m[1]=$(!all_complex ? worker_state.slater_matrix.pf_m_real[1] : worker_state.slater_matrix.pf_m[1])" maxlog=5
+            elseif abs(ip) > 1e100
+                @warn "VMCMainCal: sample=$sample has extreme ip: ip=$ip, pf_m[1]=$(!all_complex ? worker_state.slater_matrix.pf_m_real[1] : worker_state.slater_matrix.pf_m[1])" maxlog=5
+            end
+
+            # Calculate weight (currently w = 1.0 for unbiased sampling)
+            w = 1.0
+
+            if !isfinite(w)
+                @warn "VMCMainCal: sample=$sample w=$w"
+                continue
+            end
+
+            # Calculate energy
+            # C implementation uses CalculateHamiltonian_real(creal(ip), ...) for real mode
+            # For real mode, pass real part of ip to calculate_hamiltonian
+            # Note: calculate_hamiltonian uses green_func1/green_func2 which need to handle real mode
+            # [41] LocEnergyCal
+            ctimer_start!(c_timer, 41)
+            if !all_complex
+                # Real mode: use real ip and pass all_complex flag
+                e = calculate_hamiltonian(
+                    ComplexF64(ip_real, 0.0),
+                    ele_idx,
+                    ele_cfg,
+                    ele_num,
+                    ele_proj_cnt,
+                    data,
+                    worker_state;
+                    all_complex = false,
+                    c_timer = c_timer,
+                )
+            else
+                e = calculate_hamiltonian(
+                    ip,
+                    ele_idx,
+                    ele_cfg,
+                    ele_num,
+                    ele_proj_cnt,
+                    data,
+                    worker_state;
+                    all_complex = true,
+                    c_timer = c_timer,
                 )
             end
-            ctimer_stop!(c_timer, 43)
+            ctimer_stop!(c_timer, 41)
+
+            if !isfinite(real(e) + imag(e))
+                @warn "VMCMainCal: sample=$sample e=$e ip=$ip"
+                continue
+            end
+
+            # Debug: Track zero energy cases
+            if abs(real(e)) < 1e-15 && sample < 5
+                @debug "VMCMainCal: Zero energy at sample=$sample, ip=$ip, pf_m[1]=$(worker_state.slater_matrix.pf_m[1]), ele_idx[1:8]=$(ele_idx[1:min(8, length(ele_idx))])"
+            end
+
+            # Debug: Check energy values
+            if sample == 0 || sample == 1
+                @debug "VMCMainCal: sample=$sample, e=$(real(e)), ip=$ip, wc_before=$(local_acc.energy.wc)"
+            end
+
+            # Accumulate energy statistics
+            accumulate_energy!(local_acc.energy, w, e)
+
+            # Calculate Green's functions (only in measurement mode)
+            if nvmc_cal_mode == 1 && worker_state.phys_quantities !== nothing
+                calculate_green_func!(
+                    data,
+                    worker_state,
+                    local_acc.phys,
+                    w,
+                    ip,
+                    ele_idx,
+                    ele_cfg,
+                    ele_num,
+                    ele_proj_cnt,
+                )
+            end
+
+            # Calculate SR optimization quantities (only in optimization mode)
+            if nvmc_cal_mode == 0
+                sr_opt_o = local_acc.sr_opt.sr_opt_o
+                fill!(sr_opt_o, 0.0 + 0.0im)
+
+                # Set projection factor derivatives
+                set_projection_diff!(sr_opt_o, ele_proj_cnt, n_proj)
+
+                # Set RBM derivatives
+                if n_rbm > 0
+                    rbm_offset = 2 * n_proj + 2
+                    rbm_end = rbm_offset + 2 * n_rbm
+                    if rbm_end <= length(sr_opt_o)
+                        rbm_cnt = make_rbm_cnt(ele_num, data)
+                        rbm_view = @view sr_opt_o[(rbm_offset+1):rbm_end]
+                        set_rbm_diff!(rbm_view, rbm_cnt, ele_num, data)
+                    else
+                        @warn "RBM derivative range out of bounds: rbm_end=$rbm_end, length(sr_opt_o)=$(length(sr_opt_o))" maxlog=1
+                    end
+                end
+
+                # Set Slater element derivatives ([42] ReturnSlaterElmDiff)
+                if n_slater > 0
+                    slater_offset = 2 * (n_proj + n_rbm) + 2  # After projection + RBM factors
+                    slater_end = slater_offset + 2 * n_slater
+                    slater_view = @view sr_opt_o[(slater_offset+1):slater_end]
+                    ctimer_start!(c_timer, 42)
+                    slater_elm_diff_fcmp!(slater_view, ip, ele_idx, data, worker_state)
+                    ctimer_stop!(c_timer, 42)
+                end
+                if n_opt_trans > 0
+                    opt_offset = 2 * (n_proj + n_rbm + n_slater) + 2
+                    opt_end = opt_offset + 2 * n_opt_trans
+                    if opt_end <= length(sr_opt_o)
+                        opt_trans_diff!(@view(sr_opt_o[(opt_offset+1):opt_end]), ip, data, worker_state)
+                    end
+                end
+
+                # Accumulate OO and HO ([43] calculate OO and HO)
+                ctimer_start!(c_timer, 43)
+                if all_complex
+                    if use_store
+                        calculate_oo_store!(
+                            local_acc.sr_opt.sr_opt_oo,
+                            local_acc.sr_opt.sr_opt_ho,
+                            local_acc.sr_opt.sr_opt_o_store,
+                            sr_opt_o,
+                            w,
+                            e,
+                            sample,
+                            sr_opt_size,
+                        )
+                    else
+                        calculate_oo!(
+                            local_acc.sr_opt.sr_opt_oo,
+                            local_acc.sr_opt.sr_opt_ho,
+                            sr_opt_o,
+                            w,
+                            e,
+                            sr_opt_size,
+                        )
+                    end
+                else
+                    # Convert to real and calculate
+                    sr_opt_o_real = local_acc.sr_opt.sr_opt_o_real
+                    for i = 1:sr_opt_size
+                        sr_opt_o_real[i] = real(sr_opt_o[2*(i-1)+1])
+                    end
+
+                    calculate_oo_real!(
+                        local_acc.sr_opt.sr_opt_oo_real,
+                        local_acc.sr_opt.sr_opt_ho_real,
+                        sr_opt_o_real,
+                        w,
+                        real(e),
+                        sr_opt_size,
+                    )
+                end
+                ctimer_stop!(c_timer, 43)
+            end
         end
+
+        return nothing
     end
 
-    # Finalize OO from stored samples ([45] multiply store OO)
-    if nvmc_cal_mode == 0 && use_store && all_complex
-        ctimer_start!(c_timer, 45)
-        finalize_oo_store!(
-            state.sr_opt.sr_opt_oo,
-            state.sr_opt.sr_opt_o_store,
-            sr_opt_size,
-            n_vmc_sample,
+    config = VMCThreadConfig(n_vmc_sample; requested_threads = requested_threads)
+    if vmc_threading_enabled(config)
+        local_accs = make_thread_accumulators(state, config, c_timer)
+        worker_states = [
+            make_vmc_main_cal_worker_state(data, state)
+            for _ = 1:config.effective_threads
+        ]
+        chunks = vmc_sample_chunks(n_vmc_sample, config.effective_threads)
+
+        Base.Threads.@threads :static for worker_id = 1:config.effective_threads
+            process_sample_range!(
+                chunks[worker_id],
+                worker_states[worker_id],
+                local_accs[worker_id],
+                local_accs[worker_id].timer,
+                false,
+            )
+        end
+
+        # Finalize OO from stored samples ([45] multiply store OO)
+        if nvmc_cal_mode == 0 && use_store && all_complex
+            ctimer_start!(c_timer, 45)
+            for local_acc in local_accs
+                finalize_oo_store!(
+                    local_acc.sr_opt.sr_opt_oo,
+                    local_acc.sr_opt.sr_opt_o_store,
+                    sr_opt_size,
+                    n_vmc_sample,
+                )
+            end
+            ctimer_stop!(c_timer, 45)
+        end
+
+        clear_sropt_store!(state.sr_opt)
+        merge_thread_accumulators!(state, c_timer, local_accs)
+    else
+        local_acc = VMCThreadAccumulator(state, c_timer)
+        process_sample_range!(
+            0:(n_vmc_sample-1),
+            state,
+            local_acc,
+            c_timer,
+            true,
         )
-        ctimer_stop!(c_timer, 45)
+
+        # Finalize OO from stored samples ([45] multiply store OO)
+        if nvmc_cal_mode == 0 && use_store && all_complex
+            ctimer_start!(c_timer, 45)
+            finalize_oo_store!(
+                local_acc.sr_opt.sr_opt_oo,
+                local_acc.sr_opt.sr_opt_o_store,
+                sr_opt_size,
+                n_vmc_sample,
+            )
+            ctimer_stop!(c_timer, 45)
+        end
+
+        clear_sropt_store!(state.sr_opt)
+        merge_thread_accumulator!(state, c_timer, local_acc)
     end
 
     # Debug: Check etot at the end of vmc_main_cal!
@@ -2919,7 +3098,12 @@ Equivalent to C's `VMCMainCal_fsz()`.
 # Reference
 - C implementation: mVMC/src/mVMC/vmccal_fsz.c:36-248 (VMCMainCal_fsz)
 """
-function vmc_main_cal_fsz!(data::ExpertModeData, state::VMCOptimizationState, c_timer::CTimer = CTIMER_DISABLED)
+function vmc_main_cal_fsz!(
+    data::ExpertModeData,
+    state::VMCOptimizationState,
+    c_timer::CTimer = CTIMER_DISABLED;
+    requested_threads::Integer = Base.Threads.nthreads(),
+)
     n_site = data.modpara.nsite
     n_site2 = 2 * n_site
     n_elec = data.modpara.nelec
@@ -2945,12 +3129,20 @@ function vmc_main_cal_fsz!(data::ExpertModeData, state::VMCOptimizationState, c_
     clear_phys_quantity!(state)
     ctimer_stop!(c_timer, 24)
 
+    function process_sample_range_fsz!(
+        sample_range,
+        worker_state::VMCOptimizationState,
+        local_acc::VMCThreadAccumulator,
+        c_timer::CTimer,
+    )
+        @debug "VMCMainCal_fsz worker sample range" sample_range length_ele_idx=length(worker_state.electron_config.ele_idx) length_ele_cfg=length(worker_state.electron_config.ele_cfg) length_ele_num=length(worker_state.electron_config.ele_num) length_ele_proj_cnt=length(worker_state.electron_config.ele_proj_cnt) length_ele_spn=length(worker_state.electron_config.ele_spn)
+
     # Process each sample
-    for sample = 0:(n_vmc_sample-1)
+    for sample in sample_range
         # Extract electron configuration for this sample
         ele_idx_start = sample * n_size + 1
         ele_idx_end = ele_idx_start + n_size - 1
-        ele_idx = state.electron_config.ele_idx[ele_idx_start:ele_idx_end]
+        ele_idx = worker_state.electron_config.ele_idx[ele_idx_start:ele_idx_end]
 
         # Validate ele_idx
         if all(x -> x == 0, ele_idx) || all(x -> x < 0, ele_idx)
@@ -2959,18 +3151,18 @@ function vmc_main_cal_fsz!(data::ExpertModeData, state::VMCOptimizationState, c_
 
         ele_cfg_start = sample * n_site2 + 1
         ele_cfg_end = ele_cfg_start + n_site2 - 1
-        ele_cfg = state.electron_config.ele_cfg[ele_cfg_start:ele_cfg_end]
+        ele_cfg = worker_state.electron_config.ele_cfg[ele_cfg_start:ele_cfg_end]
 
         ele_num_start = sample * n_site2 + 1
         ele_num_end = ele_num_start + n_site2 - 1
-        ele_num = state.electron_config.ele_num[ele_num_start:ele_num_end]
+        ele_num = worker_state.electron_config.ele_num[ele_num_start:ele_num_end]
 
         ele_proj_cnt_start = sample * n_proj + 1
         ele_proj_cnt_end =
-            min(ele_proj_cnt_start + n_proj - 1, length(state.electron_config.ele_proj_cnt))
+            min(ele_proj_cnt_start + n_proj - 1, length(worker_state.electron_config.ele_proj_cnt))
         if n_proj > 0 && ele_proj_cnt_end >= ele_proj_cnt_start
             ele_proj_cnt =
-                state.electron_config.ele_proj_cnt[ele_proj_cnt_start:ele_proj_cnt_end]
+                worker_state.electron_config.ele_proj_cnt[ele_proj_cnt_start:ele_proj_cnt_end]
         else
             ele_proj_cnt = Int[]
         end
@@ -2978,11 +3170,11 @@ function vmc_main_cal_fsz!(data::ExpertModeData, state::VMCOptimizationState, c_
         # FSZ: Extract ele_spn for this sample
         ele_spn_start = sample * n_size + 1
         ele_spn_end = ele_spn_start + n_size - 1
-        ele_spn = state.electron_config.ele_spn[ele_spn_start:ele_spn_end]
+        ele_spn = worker_state.electron_config.ele_spn[ele_spn_start:ele_spn_end]
 
         # Calculate M inverse and Pfaffian using FSZ version ([40] CalculateMAll)
         ctimer_start!(c_timer, 40)
-        info = calculate_m_all_fsz!(ele_idx, ele_spn, 1, n_qp_full + 1, data, state)
+        info = calculate_m_all_fsz!(ele_idx, ele_spn, 1, n_qp_full + 1, data, worker_state)
         ctimer_stop!(c_timer, 40)
 
         if info != 0
@@ -2991,7 +3183,7 @@ function vmc_main_cal_fsz!(data::ExpertModeData, state::VMCOptimizationState, c_
         end
 
         # Calculate inner product
-        ip = calculate_ip_fcmp(state.slater_matrix.pf_m, 1, n_qp_full + 1, data)
+        ip = calculate_ip_fcmp(worker_state.slater_matrix.pf_m, 1, n_qp_full + 1, data)
 
         if abs(ip) < 1e-100
             @warn "VMCMainCal_fsz: sample=$sample has zero ip" maxlog=5
@@ -3014,7 +3206,7 @@ function vmc_main_cal_fsz!(data::ExpertModeData, state::VMCOptimizationState, c_
             ele_proj_cnt,
             ele_spn,
             data,
-            state;
+            worker_state;
             all_complex = all_complex,
             c_timer = c_timer,
         )
@@ -3030,20 +3222,17 @@ function vmc_main_cal_fsz!(data::ExpertModeData, state::VMCOptimizationState, c_
         # C reference (mVMC/src/mVMC/calham_fsz.c:CalculateSz_fsz +
         # vmccal_fsz.c:144-148).
         sz_local = calculate_sz_fsz(ele_num, n_site)
-        state.energy.wc += w
-        state.energy.etot += w * e
-        state.energy.etot2 += w * conj(e) * e
-        state.energy.sztot += w * sz_local
-        state.energy.sztot2 += w * sz_local * sz_local
+        accumulate_energy!(local_acc.energy, w, e; sz = sz_local)
 
         # Calculate Green's functions (only in measurement mode)
         # C implementation: VMCMainCal_fsz calls CalculateGreenFunc_fsz when NVMCCalMode==1
-        if nvmc_cal_mode == 1 && state.phys_quantities !== nothing
+        if nvmc_cal_mode == 1 && worker_state.phys_quantities !== nothing
             # TODO: Implement FSZ-specific green function calculation
             # For now, use standard version (may not be accurate for spin-flip terms)
             calculate_green_func!(
                 data,
-                state,
+                worker_state,
+                local_acc.phys,
                 w,
                 ip,
                 ele_idx,
@@ -3055,7 +3244,7 @@ function vmc_main_cal_fsz!(data::ExpertModeData, state::VMCOptimizationState, c_
 
         # Calculate SR optimization quantities (only in optimization mode)
         if nvmc_cal_mode == 0
-            sr_opt_o = state.sr_opt.sr_opt_o
+            sr_opt_o = local_acc.sr_opt.sr_opt_o
             fill!(sr_opt_o, 0.0 + 0.0im)
 
             # Set projection factor derivatives
@@ -3069,22 +3258,22 @@ function vmc_main_cal_fsz!(data::ExpertModeData, state::VMCOptimizationState, c_
                 slater_view = @view sr_opt_o[(slater_offset+1):slater_end]
                 # Use FSZ version for Slater element derivative ([42] ReturnSlaterElmDiff)
                 ctimer_start!(c_timer, 42)
-                slater_elm_diff_fsz!(slater_view, ip, ele_idx, ele_spn, data, state)
+                slater_elm_diff_fsz!(slater_view, ip, ele_idx, ele_spn, data, worker_state)
                 ctimer_stop!(c_timer, 42)
             end
             if n_opt_trans > 0
                 opt_offset = 2 * (n_proj + n_slater) + 2
                 opt_end = opt_offset + 2 * n_opt_trans
                 if opt_end <= length(sr_opt_o)
-                    opt_trans_diff!(@view(sr_opt_o[(opt_offset+1):opt_end]), ip, data, state)
+                    opt_trans_diff!(@view(sr_opt_o[(opt_offset+1):opt_end]), ip, data, worker_state)
                 end
             end
 
             # Accumulate OO and HO ([43] calculate OO and HO)
             ctimer_start!(c_timer, 43)
             calculate_oo!(
-                state.sr_opt.sr_opt_oo,
-                state.sr_opt.sr_opt_ho,
+                local_acc.sr_opt.sr_opt_oo,
+                local_acc.sr_opt.sr_opt_ho,
                 sr_opt_o,
                 w,
                 e,
@@ -3092,6 +3281,37 @@ function vmc_main_cal_fsz!(data::ExpertModeData, state::VMCOptimizationState, c_
             )
             ctimer_stop!(c_timer, 43)
         end
+    end
+
+        return nothing
+    end
+
+    config = VMCThreadConfig(n_vmc_sample; requested_threads = requested_threads)
+    if vmc_threading_enabled(config)
+        local_accs = make_thread_accumulators(state, config, c_timer)
+        worker_states = [
+            make_vmc_main_cal_worker_state(data, state)
+            for _ = 1:config.effective_threads
+        ]
+        chunks = vmc_sample_chunks(n_vmc_sample, config.effective_threads)
+
+        Base.Threads.@threads :static for worker_id = 1:config.effective_threads
+            process_sample_range_fsz!(
+                chunks[worker_id],
+                worker_states[worker_id],
+                local_accs[worker_id],
+                local_accs[worker_id].timer,
+            )
+        end
+
+        clear_sropt_store!(state.sr_opt)
+        merge_thread_accumulators!(state, c_timer, local_accs)
+    else
+        local_acc = VMCThreadAccumulator(state, c_timer)
+        process_sample_range_fsz!(0:(n_vmc_sample-1), state, local_acc, c_timer)
+
+        clear_sropt_store!(state.sr_opt)
+        merge_thread_accumulator!(state, c_timer, local_acc)
     end
 
     # Debug: Check final energy accumulation
