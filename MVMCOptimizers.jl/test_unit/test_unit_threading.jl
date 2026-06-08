@@ -46,6 +46,34 @@ end
     @test_throws ErrorException MO.vmc_sample_chunks(-1, 1)
 end
 
+@testset "unit/threading: inner copy helpers" begin
+    n = 128
+    real_src = [sin(0.03 * i) for i = 1:n]
+    complex_dst_seq = fill(99.0 + 99.0im, n)
+    complex_dst_thr = copy(complex_dst_seq)
+
+    MO.copy_real_to_complex!(complex_dst_seq, real_src, n; threaded = false)
+    MO.copy_real_to_complex!(complex_dst_thr, real_src, n; threaded = true)
+    @test complex_dst_thr == complex_dst_seq
+    @test complex_dst_thr == ComplexF64.(real_src, 0.0)
+
+    complex_src = [
+        ComplexF64(cos(0.05 * i), sin(0.07 * i))
+        for i = 1:n
+    ]
+    real_dst_seq = fill(99.0, n)
+    real_dst_thr = copy(real_dst_seq)
+
+    MO.copy_complex_realpart!(real_dst_seq, complex_src, n; threaded = false)
+    MO.copy_complex_realpart!(real_dst_thr, complex_src, n; threaded = true)
+    @test real_dst_thr == real_dst_seq
+    @test real_dst_thr == real.(complex_src)
+
+    short_dst = fill(0.0 + 0.0im, 4)
+    MO.copy_real_to_complex!(short_dst, real_src, n; threaded = true)
+    @test short_dst == ComplexF64.(real_src[1:4], 0.0)
+end
+
 @testset "unit/threading: energy accumulator reduction" begin
     a = MO.VMCEnergyAccumulator()
     b = MO.VMCEnergyAccumulator()
