@@ -4910,26 +4910,25 @@ function calculate_m_all_fsz_real!(
     end
 
     qp_num = qp_end - qp_start
-    @inbounds for qp_local = 1:qp_num
-        qp_global = qp_start + qp_local - 1
-        if qp_global <= length(state.slater_matrix.pf_m_real)
-            state.slater_matrix.pf_m_real[qp_global] = real(state.slater_matrix.pf_m[qp_global])
-        end
-    end
+    # Real/complex buffers are expected to use canonical VMCOptimizationState
+    # sizes. A malformed undersized state should fail here instead of silently
+    # skipping part of the copy.
+    copy_complex_realpart!(
+        view(state.slater_matrix.pf_m_real, qp_start:(qp_end-1)),
+        view(state.slater_matrix.pf_m, qp_start:(qp_end-1)),
+        qp_num;
+        threaded = true,
+    )
 
     nsq = n_size * n_size
-    @inbounds for qp_local = 1:qp_num
-        qp_global = qp_start + qp_local - 1
-        dst_start = (qp_global - 1) * nsq + 1
-        dst_end = dst_start + nsq - 1
-        if dst_end <= length(state.slater_matrix.inv_m_real)
-            dst = view(state.slater_matrix.inv_m_real, dst_start:dst_end)
-            src = view(state.slater_matrix.inv_m, dst_start:dst_end)
-            for i = 1:nsq
-                dst[i] = real(src[i])
-            end
-        end
-    end
+    dst_start = (qp_start - 1) * nsq + 1
+    n_copy = qp_num * nsq
+    copy_complex_realpart!(
+        view(state.slater_matrix.inv_m_real, dst_start:(dst_start+n_copy-1)),
+        view(state.slater_matrix.inv_m, dst_start:(dst_start+n_copy-1)),
+        n_copy;
+        threaded = true,
+    )
 
     return 0
 end
@@ -5754,9 +5753,12 @@ function vmc_make_sample_real!(
         length(state.slater_matrix.slater_elm),
         length(state.slater_matrix.slater_elm_real),
     )
-    @inbounds @simd for i = 1:n_copy
-        state.slater_matrix.slater_elm_real[i] = real(state.slater_matrix.slater_elm[i])
-    end
+    copy_complex_realpart!(
+        state.slater_matrix.slater_elm_real,
+        state.slater_matrix.slater_elm,
+        n_copy;
+        threaded = true,
+    )
 
     # Initialize QP range (single-process: use all)
     qp_start = 1
@@ -6242,9 +6244,12 @@ function vmc_make_sample_fsz_real!(
         length(state.slater_matrix.slater_elm),
         length(state.slater_matrix.slater_elm_real),
     )
-    @inbounds @simd for i = 1:n_copy
-        state.slater_matrix.slater_elm_real[i] = real(state.slater_matrix.slater_elm[i])
-    end
+    copy_complex_realpart!(
+        state.slater_matrix.slater_elm_real,
+        state.slater_matrix.slater_elm,
+        n_copy;
+        threaded = true,
+    )
 
     if !burn_flag
         info = make_initial_sample_fsz_real!(

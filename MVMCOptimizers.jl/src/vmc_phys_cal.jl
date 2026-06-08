@@ -199,10 +199,12 @@ function vmc_phys_cal!(
                 length(state.slater_matrix.slater_elm),
                 length(state.slater_matrix.slater_elm_real),
             )
-            @inbounds for i = 1:n_copy_slater
-                state.slater_matrix.slater_elm_real[i] =
-                    real(state.slater_matrix.slater_elm[i])
-            end
+            copy_complex_realpart!(
+                state.slater_matrix.slater_elm_real,
+                state.slater_matrix.slater_elm,
+                n_copy_slater;
+                threaded = true,
+            )
 
             # Also copy InvM to InvM_real
             # C: for(tmp_i=0;tmp_i<NQPFull*(Nsize*Nsize+1);tmp_i++) InvM_real[tmp_i]= creal(InvM[tmp_i]);
@@ -210,9 +212,12 @@ function vmc_phys_cal!(
                 length(state.slater_matrix.inv_m),
                 length(state.slater_matrix.inv_m_real),
             )
-            @inbounds for i = 1:n_copy_inv
-                state.slater_matrix.inv_m_real[i] = real(state.slater_matrix.inv_m[i])
-            end
+            copy_complex_realpart!(
+                state.slater_matrix.inv_m_real,
+                state.slater_matrix.inv_m,
+                n_copy_inv;
+                threaded = true,
+            )
 
             # DEBUG: Verify SlaterElm_real has been copied
             @debug "vmc_phys_cal!: Before vmc_make_sample_real!, SlaterElm_real sum = $(sum(abs, state.slater_matrix.slater_elm_real))"

@@ -173,3 +173,121 @@ end
     expected_ho .+= (w * e) .* sr_opt_o
     @test sr_opt_ho ≈ expected_ho
 end
+
+@testset "unit/vmc_main_cal: threaded OO/store inner loops match sequential" begin
+    sr_opt_size = 40
+    size_2 = 2 * sr_opt_size
+    w = 0.375
+    e = 1.1 - 0.25im
+
+    sr_opt_o = ComplexF64[
+        ComplexF64(sin(0.17 * i), cos(0.11 * i))
+        for i = 1:size_2
+    ]
+
+    oo_seq = fill(0.2 + 0.1im, size_2 * size_2)
+    ho_seq = fill(-0.3 + 0.4im, size_2)
+    oo_thr = copy(oo_seq)
+    ho_thr = copy(ho_seq)
+
+    MVMCOptimizers.calculate_oo!(
+        oo_seq,
+        ho_seq,
+        sr_opt_o,
+        w,
+        e,
+        sr_opt_size;
+        threaded = false,
+    )
+    MVMCOptimizers.calculate_oo!(
+        oo_thr,
+        ho_thr,
+        sr_opt_o,
+        w,
+        e,
+        sr_opt_size;
+        threaded = true,
+    )
+    @test oo_thr == oo_seq
+    @test ho_thr == ho_seq
+
+    sr_opt_o_real = [sin(0.13 * i) for i = 1:sr_opt_size]
+    oo_real_seq = fill(0.2, sr_opt_size * sr_opt_size)
+    ho_real_seq = fill(-0.3, sr_opt_size)
+    oo_real_thr = copy(oo_real_seq)
+    ho_real_thr = copy(ho_real_seq)
+    MVMCOptimizers.calculate_oo_real!(
+        oo_real_seq,
+        ho_real_seq,
+        sr_opt_o_real,
+        w,
+        real(e),
+        sr_opt_size;
+        threaded = false,
+    )
+    MVMCOptimizers.calculate_oo_real!(
+        oo_real_thr,
+        ho_real_thr,
+        sr_opt_o_real,
+        w,
+        real(e),
+        sr_opt_size;
+        threaded = true,
+    )
+    @test oo_real_thr == oo_real_seq
+    @test ho_real_thr == ho_real_seq
+
+    n_samples = 5
+    sample = 2
+    store_seq = fill(0.0 + 0.0im, size_2 * n_samples)
+    store_thr = copy(store_seq)
+    ho_store_seq = fill(0.1 - 0.2im, size_2)
+    ho_store_thr = copy(ho_store_seq)
+    dummy_oo = ComplexF64[]
+    MVMCOptimizers.calculate_oo_store!(
+        dummy_oo,
+        ho_store_seq,
+        store_seq,
+        sr_opt_o,
+        w,
+        e,
+        sample,
+        sr_opt_size;
+        threaded = false,
+    )
+    MVMCOptimizers.calculate_oo_store!(
+        dummy_oo,
+        ho_store_thr,
+        store_thr,
+        sr_opt_o,
+        w,
+        e,
+        sample,
+        sr_opt_size;
+        threaded = true,
+    )
+    @test store_thr == store_seq
+    @test ho_store_thr == ho_store_seq
+
+    final_seq = fill(0.0 + 0.0im, size_2 * size_2)
+    final_thr = copy(final_seq)
+    full_store = ComplexF64[
+        ComplexF64(sin(0.07 * i), cos(0.05 * i))
+        for i = 1:(size_2 * n_samples)
+    ]
+    MVMCOptimizers.finalize_oo_store!(
+        final_seq,
+        full_store,
+        sr_opt_size,
+        n_samples;
+        threaded = false,
+    )
+    MVMCOptimizers.finalize_oo_store!(
+        final_thr,
+        full_store,
+        sr_opt_size,
+        n_samples;
+        threaded = true,
+    )
+    @test final_thr == final_seq
+end

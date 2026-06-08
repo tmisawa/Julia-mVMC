@@ -225,7 +225,7 @@ function vmc_para_opt!(
             # Convert to real arrays if needed ([69] MAll: real/complex copy)
             if !isempty(state.slater_matrix.slater_elm_real)
                 ctimer_start!(timer, 69)
-                convert_to_real_arrays!(state)
+                convert_to_real_arrays!(state; threaded = true)
                 ctimer_stop!(timer, 69)
             end
 
@@ -242,7 +242,7 @@ function vmc_para_opt!(
             # Convert back to complex if needed ([69] MAll: real/complex copy)
             if !isempty(state.slater_matrix.inv_m_real)
                 ctimer_start!(timer, 69)
-                convert_from_real_arrays!(state)
+                convert_from_real_arrays!(state; threaded = true)
                 ctimer_stop!(timer, 69)
             end
         else  # complex
@@ -400,28 +400,33 @@ function get_n_qp_full(data::ExpertModeData)::Int
     return n_sp_gauss_leg * n_mp_trans * n_qp_opt_trans
 end
 
-function convert_to_real_arrays!(state::VMCOptimizationState)
+function convert_to_real_arrays!(state::VMCOptimizationState; threaded::Bool = false)
     # Convert InvM to real arrays
     # Note: slater_elm_real is copied in vmc_make_sample_real! so we skip it here
     # Optimized: only convert if arrays are not empty and have matching sizes
     if !isempty(state.slater_matrix.inv_m) && !isempty(state.slater_matrix.inv_m_real)
         n_copy =
             min(length(state.slater_matrix.inv_m), length(state.slater_matrix.inv_m_real))
-        @inbounds @simd for i = 1:n_copy
-            state.slater_matrix.inv_m_real[i] = real(state.slater_matrix.inv_m[i])
-        end
+        copy_complex_realpart!(
+            state.slater_matrix.inv_m_real,
+            state.slater_matrix.inv_m,
+            n_copy;
+            threaded = threaded,
+        )
     end
 end
 
-function convert_from_real_arrays!(state::VMCOptimizationState)
+function convert_from_real_arrays!(state::VMCOptimizationState; threaded::Bool = false)
     # Convert InvM back from real arrays
     # Optimized: only convert if arrays are not empty and have matching sizes
     if !isempty(state.slater_matrix.inv_m_real) && !isempty(state.slater_matrix.inv_m)
         n_copy =
             min(length(state.slater_matrix.inv_m_real), length(state.slater_matrix.inv_m))
-        @inbounds @simd for i = 1:n_copy
-            state.slater_matrix.inv_m[i] =
-                ComplexF64(state.slater_matrix.inv_m_real[i], 0.0)
-        end
+        copy_real_to_complex!(
+            state.slater_matrix.inv_m,
+            state.slater_matrix.inv_m_real,
+            n_copy;
+            threaded = threaded,
+        )
     end
 end

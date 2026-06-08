@@ -71,6 +71,7 @@
   - `unit/vmc_main_cal: set_rbm_diff!` → `set_rbm_diff!`
   - `unit/vmc_main_cal: calculate_oo!` → `calculate_oo!`
   - `unit/vmc_main_cal: calculate_oo_real!` → `calculate_oo_real!`
+  - `unit/vmc_main_cal: threaded OO/store inner loops match sequential` → R3 inner-loop threading（complex/real OO, store, finalize）
 
 ### `src/parameter_sync.jl`
 - `test_unit/test_unit_parameter_sync.jl`
@@ -92,6 +93,7 @@
 - `test_unit/test_unit_threading.jl`
   - `unit/threading: VMCThreadConfig` → effective thread count and validation
   - `unit/threading: sample chunks` → 0-based contiguous sample range split and validation
+  - `unit/threading: inner copy helpers` → R3 real/complex copy helper の threaded/serial 一致
   - `unit/threading: energy accumulator reduction` → deterministic local energy merge
   - `unit/threading: SR accumulator reduction` → complex/real SR array merge
   - `unit/threading: PhysCal accumulator reduction` → `phys_*` merge without touching local scratch、factored Green の local accumulator 加算

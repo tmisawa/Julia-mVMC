@@ -36,6 +36,58 @@ end
 @inline vmc_threading_enabled(config::VMCThreadConfig) = config.effective_threads > 1
 @inline effective_thread_count(config::VMCThreadConfig) = config.effective_threads
 
+@inline function vmc_inner_threading_enabled(
+    work_items::Integer,
+    threaded::Bool;
+    min_work_per_thread::Integer = 64,
+)
+    if !threaded || Base.Threads.nthreads() == 1 || work_items <= 0
+        return false
+    end
+    threshold = max(Int(min_work_per_thread), Base.Threads.nthreads())
+    return Int(work_items) >= threshold
+end
+
+function copy_real_to_complex!(
+    dst::AbstractVector{ComplexF64},
+    src::AbstractVector{Float64},
+    n::Integer = min(length(dst), length(src));
+    threaded::Bool = false,
+)
+    n_copy = min(Int(n), length(dst), length(src))
+    n_copy <= 0 && return dst
+    if vmc_inner_threading_enabled(n_copy, threaded)
+        Base.Threads.@threads :static for i = 1:n_copy
+            @inbounds dst[i] = ComplexF64(src[i], 0.0)
+        end
+    else
+        @inbounds @simd for i = 1:n_copy
+            dst[i] = ComplexF64(src[i], 0.0)
+        end
+    end
+    return dst
+end
+
+function copy_complex_realpart!(
+    dst::AbstractVector{Float64},
+    src::AbstractVector{ComplexF64},
+    n::Integer = min(length(dst), length(src));
+    threaded::Bool = false,
+)
+    n_copy = min(Int(n), length(dst), length(src))
+    n_copy <= 0 && return dst
+    if vmc_inner_threading_enabled(n_copy, threaded)
+        Base.Threads.@threads :static for i = 1:n_copy
+            @inbounds dst[i] = real(src[i])
+        end
+    else
+        @inbounds @simd for i = 1:n_copy
+            dst[i] = real(src[i])
+        end
+    end
+    return dst
+end
+
 mutable struct VMCEnergyAccumulator
     wc::ComplexF64
     etot::ComplexF64

@@ -2391,20 +2391,40 @@ function calculate_oo!(
     w::Float64,
     e::ComplexF64,
     sr_opt_size::Int,
+    ;
+    threaded::Bool = false,
 )
     size_2 = 2 * sr_opt_size
 
     # Update <O> and <HO>
-    for j = 0:(size_2-1)
-        tmp = w * sr_opt_o[j+1]
-        sr_opt_oo[0*size_2+j+1] += tmp  # First row: <O>
-        sr_opt_ho[j+1] += e * tmp  # <HO>
+    if vmc_inner_threading_enabled(size_2, threaded)
+        Base.Threads.@threads :static for j = 0:(size_2-1)
+            @inbounds begin
+                tmp = w * sr_opt_o[j+1]
+                sr_opt_oo[0*size_2+j+1] += tmp  # First row: <O>
+                sr_opt_ho[j+1] += e * tmp  # <HO>
+            end
+        end
+    else
+        @inbounds @simd for j = 0:(size_2-1)
+            tmp = w * sr_opt_o[j+1]
+            sr_opt_oo[0*size_2+j+1] += tmp  # First row: <O>
+            sr_opt_ho[j+1] += e * tmp  # <HO>
+        end
     end
 
     # Update <O†O>
-    for i = 2:(size_2-1)
-        for j = 0:(size_2-1)
-            sr_opt_oo[i*size_2+j+1] += w * sr_opt_o[j+1] * conj(sr_opt_o[i+1])
+    if vmc_inner_threading_enabled(size_2 - 2, threaded)
+        Base.Threads.@threads :static for i = 2:(size_2-1)
+            @inbounds for j = 0:(size_2-1)
+                sr_opt_oo[i*size_2+j+1] += w * sr_opt_o[j+1] * conj(sr_opt_o[i+1])
+            end
+        end
+    else
+        @inbounds for i = 2:(size_2-1)
+            for j = 0:(size_2-1)
+                sr_opt_oo[i*size_2+j+1] += w * sr_opt_o[j+1] * conj(sr_opt_o[i+1])
+            end
         end
     end
 end
@@ -2423,6 +2443,8 @@ function calculate_oo_real!(
     w::Float64,
     e::Float64,
     sr_opt_size::Int,
+    ;
+    threaded::Bool = false,
 )
     we = w * e
 
@@ -2431,17 +2453,33 @@ function calculate_oo_real!(
     # BLAS column-major: A[i,j] = A[i + lda*j] for i in 0..m-1, j in 0..n-1
     # So OO[i,j] is at index i + srOptSize*j (0-based) or (i-1) + srOptSize*(j-1) + 1 (1-based)
     lda = sr_opt_size
-    for i = 1:sr_opt_size
-        for j = 1:sr_opt_size
-            # Column-major indexing: idx = row + lda * column (0-based)
-            idx = (i - 1) + lda * (j - 1) + 1  # 1-based Julia index
-            sr_opt_oo[idx] += w * sr_opt_o[i] * sr_opt_o[j]
+    if vmc_inner_threading_enabled(sr_opt_size, threaded)
+        Base.Threads.@threads :static for i = 1:sr_opt_size
+            @inbounds for j = 1:sr_opt_size
+                # Column-major indexing: idx = row + lda * column (0-based)
+                idx = (i - 1) + lda * (j - 1) + 1  # 1-based Julia index
+                sr_opt_oo[idx] += w * sr_opt_o[i] * sr_opt_o[j]
+            end
+        end
+    else
+        @inbounds for i = 1:sr_opt_size
+            for j = 1:sr_opt_size
+                # Column-major indexing: idx = row + lda * column (0-based)
+                idx = (i - 1) + lda * (j - 1) + 1  # 1-based Julia index
+                sr_opt_oo[idx] += w * sr_opt_o[i] * sr_opt_o[j]
+            end
         end
     end
 
     # HO[i] += w * e * O[i]
-    for i = 1:sr_opt_size
-        sr_opt_ho[i] += we * sr_opt_o[i]
+    if vmc_inner_threading_enabled(sr_opt_size, threaded)
+        Base.Threads.@threads :static for i = 1:sr_opt_size
+            @inbounds sr_opt_ho[i] += we * sr_opt_o[i]
+        end
+    else
+        @inbounds @simd for i = 1:sr_opt_size
+            sr_opt_ho[i] += we * sr_opt_o[i]
+        end
     end
 end
 
@@ -2462,16 +2500,29 @@ function calculate_oo_store!(
     e::ComplexF64,
     sample::Int,
     sr_opt_size::Int,
+    ;
+    threaded::Bool = false,
 )
     we = w * e
     sqrtw = sqrt(w)
     size_2 = 2 * sr_opt_size
 
-    for i = 0:(size_2-1)
-        # Store sqrt(w) * O for later matrix multiplication
-        sr_opt_o_store[i+sample*size_2+1] = sqrtw * sr_opt_o[i+1]
-        # Accumulate HO
-        sr_opt_ho[i+1] += we * sr_opt_o[i+1]
+    if vmc_inner_threading_enabled(size_2, threaded)
+        Base.Threads.@threads :static for i = 0:(size_2-1)
+            @inbounds begin
+                # Store sqrt(w) * O for later matrix multiplication
+                sr_opt_o_store[i+sample*size_2+1] = sqrtw * sr_opt_o[i+1]
+                # Accumulate HO
+                sr_opt_ho[i+1] += we * sr_opt_o[i+1]
+            end
+        end
+    else
+        @inbounds @simd for i = 0:(size_2-1)
+            # Store sqrt(w) * O for later matrix multiplication
+            sr_opt_o_store[i+sample*size_2+1] = sqrtw * sr_opt_o[i+1]
+            # Accumulate HO
+            sr_opt_ho[i+1] += we * sr_opt_o[i+1]
+        end
     end
 end
 
@@ -2487,6 +2538,8 @@ function finalize_oo_store!(
     sr_opt_o_store::Vector{ComplexF64},
     sr_opt_size::Int,
     sample_size::Int,
+    ;
+    threaded::Bool = false,
 )
     size_2 = 2 * sr_opt_size
 
@@ -2495,13 +2548,25 @@ function finalize_oo_store!(
     O_store = reshape(sr_opt_o_store[1:(size_2*sample_size)], size_2, sample_size)
 
     # OO = O * O^H (Hermitian)
-    for i = 1:size_2
-        for j = 1:size_2
-            sum_val = 0.0 + 0.0im
-            for s = 1:sample_size
-                sum_val += O_store[i, s] * conj(O_store[j, s])
+    if vmc_inner_threading_enabled(size_2, threaded)
+        Base.Threads.@threads :static for i = 1:size_2
+            @inbounds for j = 1:size_2
+                sum_val = 0.0 + 0.0im
+                for s = 1:sample_size
+                    sum_val += O_store[i, s] * conj(O_store[j, s])
+                end
+                sr_opt_oo[(i-1)*size_2+j] = sum_val
             end
-            sr_opt_oo[(i-1)*size_2+j] = sum_val
+        end
+    else
+        @inbounds for i = 1:size_2
+            for j = 1:size_2
+                sum_val = 0.0 + 0.0im
+                for s = 1:sample_size
+                    sum_val += O_store[i, s] * conj(O_store[j, s])
+                end
+                sr_opt_oo[(i-1)*size_2+j] = sum_val
+            end
         end
     end
 end
@@ -2742,27 +2807,21 @@ function vmc_main_cal!(
                 # C does: for(tmp_i=0;tmp_i<NQPFull*(Nsize*Nsize+1);tmp_i++) InvM[tmp_i]=InvM_real[tmp_i];
                 # which copies both InvM_real and PfM_real (since PfM = InvM + NQPFull*Nsize*Nsize)
                 n_size_sq = n_size * n_size
-                @inbounds for qp = 1:n_qp_full
-                    base_idx = (qp - 1) * n_size_sq
-                    for i = 1:n_size_sq
-                        linear_idx = base_idx + i
-                        if linear_idx <= length(worker_state.slater_matrix.inv_m) &&
-                           linear_idx <= length(worker_state.slater_matrix.inv_m_real)
-                            worker_state.slater_matrix.inv_m[linear_idx] =
-                                ComplexF64(worker_state.slater_matrix.inv_m_real[linear_idx], 0.0)
-                        end
-                    end
-                end
+                copy_real_to_complex!(
+                    worker_state.slater_matrix.inv_m,
+                    worker_state.slater_matrix.inv_m_real,
+                    n_qp_full * n_size_sq;
+                    threaded = allow_inner_threads,
+                )
                 # Also copy pf_m_real to pf_m (needed for SlaterElmDiff_fcmp)
                 # In C, PfM and InvM are contiguous, so the above copy covers both
                 # In Julia, they are separate arrays, so we need explicit copy
-                @inbounds for qp = 1:n_qp_full
-                    if qp <= length(worker_state.slater_matrix.pf_m) &&
-                       qp <= length(worker_state.slater_matrix.pf_m_real)
-                        worker_state.slater_matrix.pf_m[qp] =
-                            ComplexF64(worker_state.slater_matrix.pf_m_real[qp], 0.0)
-                    end
-                end
+                copy_real_to_complex!(
+                    worker_state.slater_matrix.pf_m,
+                    worker_state.slater_matrix.pf_m_real,
+                    n_qp_full;
+                    threaded = allow_inner_threads,
+                )
             else
                 if allow_inner_threads
                     info = calculate_m_all_fcmp!(
@@ -2950,6 +3009,7 @@ function vmc_main_cal!(
                             e,
                             sample,
                             sr_opt_size,
+                            threaded = allow_inner_threads,
                         )
                     else
                         calculate_oo!(
@@ -2959,6 +3019,7 @@ function vmc_main_cal!(
                             w,
                             e,
                             sr_opt_size,
+                            threaded = allow_inner_threads,
                         )
                     end
                 else
@@ -2975,6 +3036,7 @@ function vmc_main_cal!(
                         w,
                         real(e),
                         sr_opt_size,
+                        threaded = allow_inner_threads,
                     )
                 end
                 ctimer_stop!(c_timer, 43)
@@ -3012,6 +3074,7 @@ function vmc_main_cal!(
                     local_acc.sr_opt.sr_opt_o_store,
                     sr_opt_size,
                     n_vmc_sample,
+                    threaded = true,
                 )
             end
             ctimer_stop!(c_timer, 45)
@@ -3037,6 +3100,7 @@ function vmc_main_cal!(
                 local_acc.sr_opt.sr_opt_o_store,
                 sr_opt_size,
                 n_vmc_sample,
+                threaded = true,
             )
             ctimer_stop!(c_timer, 45)
         end
@@ -3134,6 +3198,7 @@ function vmc_main_cal_fsz!(
         worker_state::VMCOptimizationState,
         local_acc::VMCThreadAccumulator,
         c_timer::CTimer,
+        allow_inner_threads::Bool,
     )
         @debug "VMCMainCal_fsz worker sample range" sample_range length_ele_idx=length(worker_state.electron_config.ele_idx) length_ele_cfg=length(worker_state.electron_config.ele_cfg) length_ele_num=length(worker_state.electron_config.ele_num) length_ele_proj_cnt=length(worker_state.electron_config.ele_proj_cnt) length_ele_spn=length(worker_state.electron_config.ele_spn)
 
@@ -3278,6 +3343,7 @@ function vmc_main_cal_fsz!(
                 w,
                 e,
                 length(sr_opt_o) ÷ 2,
+                threaded = allow_inner_threads,
             )
             ctimer_stop!(c_timer, 43)
         end
@@ -3301,6 +3367,7 @@ function vmc_main_cal_fsz!(
                 worker_states[worker_id],
                 local_accs[worker_id],
                 local_accs[worker_id].timer,
+                false,
             )
         end
 
@@ -3308,7 +3375,7 @@ function vmc_main_cal_fsz!(
         merge_thread_accumulators!(state, c_timer, local_accs)
     else
         local_acc = VMCThreadAccumulator(state, c_timer)
-        process_sample_range_fsz!(0:(n_vmc_sample-1), state, local_acc, c_timer)
+        process_sample_range_fsz!(0:(n_vmc_sample-1), state, local_acc, c_timer, true)
 
         clear_sropt_store!(state.sr_opt)
         merge_thread_accumulator!(state, c_timer, local_acc)
