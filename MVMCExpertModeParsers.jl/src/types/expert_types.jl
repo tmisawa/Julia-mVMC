@@ -781,6 +781,10 @@ mutable struct ExpertModeData
     i_flg_orbital_general::Int  # 0: sz conserved, 1: general (fsz)
     i_flg_orbital_anti_parallel::Int  # 0: not used, 1: OrbitalAntiParallel exists
     i_flg_orbital_parallel::Int  # 0: not used, 1: OrbitalParallel exists
+    # Number of anti-parallel orbital parameters (C's iNOrbitalAntiParallel / NArrayAP).
+    # Recorded exactly at parse time and used as the offset where the parallel
+    # orbital block begins, mirroring readdef.c (Slater[iNOrbitalAntiParallel + idx]).
+    n_orbital_anti_parallel::Int
 
     function ExpertModeData()
         new(
@@ -840,6 +844,7 @@ mutable struct ExpertModeData
             0,
             0,
             0,  # i_flg_orbital_general, i_flg_orbital_anti_parallel, i_flg_orbital_parallel (default: 0)
+            0,  # n_orbital_anti_parallel (NArrayAP, default: 0)
         )
     end
 end

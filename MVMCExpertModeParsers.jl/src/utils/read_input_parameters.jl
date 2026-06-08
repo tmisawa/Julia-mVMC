@@ -178,25 +178,16 @@ function _set_rbm_terms_from_params!(terms, params::Dict{Int, ComplexF64})
 end
 
 function _orbital_parallel_offset(data::ExpertModeData)::Int
+    # No OrbitalParallel block: InOrbital/InOrbitalAntiParallel cover the whole
+    # Slater array, so the overlay window spans all orbital parameters.
     data.i_flg_orbital_parallel == 1 || return count_orbital_parameters(data)
+    # Parallel-only (no anti-parallel): the parallel block starts at index 0.
     data.i_flg_orbital_anti_parallel == 1 || return 0
-
-    pair_min = typemax(Int)
-    idx_map = Dict{Tuple{Int,Int,Int},Vector{Int}}()
-    for term in data.orbital_terms
-        key = (term.site1, term.site2, term.sign)
-        push!(get!(idx_map, key, Int[]), term.idx)
-    end
-    for idxs in values(idx_map)
-        sort!(idxs)
-        for i = 1:(length(idxs)-1)
-            if idxs[i+1] == idxs[i] + 1
-                pair_min = min(pair_min, idxs[i])
-            end
-        end
-    end
-
-    return pair_min == typemax(Int) ? 0 : pair_min
+    # Both present: the parallel block begins exactly at NArrayAP, the number of
+    # anti-parallel parameters recorded at parse time. This mirrors C readdef.c,
+    # `Slater[iNOrbitalAntiParallel + idx]`, instead of inferring the boundary
+    # heuristically from consecutive index pairs.
+    return data.n_orbital_anti_parallel
 end
 
 """

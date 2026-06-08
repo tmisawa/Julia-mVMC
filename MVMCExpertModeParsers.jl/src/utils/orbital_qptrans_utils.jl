@@ -107,25 +107,10 @@ function build_orbital_sgn_matrix!(data::ExpertModeData)
             end
 
             if data.i_flg_orbital_anti_parallel == 1 && data.i_flg_orbital_parallel == 1
-                # We have both Orbital and OrbitalParallel.
-                # Parallel terms are added as consecutive index pairs (idx, idx+1)
-                # with identical (site1, site2, sign). Use the smallest such pair
-                # to determine where parallel indices start.
-                pair_min = typemax(Int)
-                idx_map = Dict{Tuple{Int,Int,Int},Vector{Int}}()
-                for term in data.orbital_terms
-                    key = (term.site1, term.site2, term.sign)
-                    push!(get!(idx_map, key, Int[]), term.idx)
-                end
-                for idxs in values(idx_map)
-                    sort!(idxs)
-                    for i = 1:(length(idxs)-1)
-                        if idxs[i+1] == idxs[i] + 1
-                            pair_min = min(pair_min, idxs[i])
-                        end
-                    end
-                end
-                n_anti_parallel = pair_min == typemax(Int) ? n_site * n_site : pair_min
+                # We have both Orbital and OrbitalParallel. The parallel block
+                # begins exactly at NArrayAP, recorded at parse time, matching
+                # C's iNOrbitalAntiParallel offset (readdef.c GetInfoOrbitalParallel).
+                n_anti_parallel = data.n_orbital_anti_parallel
             else
                 n_anti_parallel = 0
             end

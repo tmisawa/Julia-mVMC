@@ -16,6 +16,12 @@ import MVMCExpertModeParsers:
     DoublonHolon2SiteIndex,
     DoublonHolon4SiteIndex
 import MVMCExpertModeParsers: read_input_parameters!
+import MVMCExpertModeParsers:
+    _orbital_parallel_offset,
+    count_orbital_parameters,
+    parse_file_by_type!,
+    _orbital_file_order_error,
+    parse_expert_mode_files
 
 """
     test_read_input_parameters_basic()
@@ -200,6 +206,8 @@ function test_read_input_parameters_orbital_parallel_and_opttrans()
             data.i_flg_orbital_anti_parallel = 1
             data.i_flg_orbital_parallel = 1
             data.modpara.n_orbital_idx = 5
+            # NArrayAP: one anti-parallel parameter (idx 0); parallel block starts at 1.
+            data.n_orbital_anti_parallel = 1
             data.orbital_terms = [
                 OrbitalTerm(0, 1, 0, 0.0 + 0.0im, false, 1),
                 OrbitalTerm(0, 0, 1, 0.0 + 0.0im, false, 1),
@@ -455,6 +463,248 @@ function test_read_input_parameters_dh_overlays()
     end
 end
 
+function test_orbital_parallel_offset_cases()
+    @testset "_orbital_parallel_offset branches" begin
+        # No OrbitalParallel block: the overlay window spans all orbital params,
+        # so the offset equals the total orbital parameter count.
+        data = ExpertModeData()
+        data.i_flg_orbital_anti_parallel = 1
+        data.i_flg_orbital_parallel = 0
+        data.modpara.n_orbital_idx = 4
+        data.n_orbital_anti_parallel = 4
+        @test _orbital_parallel_offset(data) == count_orbital_parameters(data) == 4
+
+        # Parallel-only (no anti-parallel): the parallel block starts at index 0.
+        data = ExpertModeData()
+        data.i_flg_orbital_anti_parallel = 0
+        data.i_flg_orbital_parallel = 1
+        data.modpara.n_orbital_idx = 6
+        data.n_orbital_anti_parallel = 0
+        @test _orbital_parallel_offset(data) == 0
+
+        # Both present: the offset is exactly NArrayAP, independent of how the
+        # orbital_terms indices happen to be grouped (no heuristic inference).
+        for narrayap in (1, 2, 3, 5)
+            data = ExpertModeData()
+            data.i_flg_orbital_anti_parallel = 1
+            data.i_flg_orbital_parallel = 1
+            data.modpara.n_orbital_idx = narrayap + 4
+            data.n_orbital_anti_parallel = narrayap
+            @test _orbital_parallel_offset(data) == narrayap
+        end
+    end
+end
+
+function test_read_input_parameters_orbital_parallel_offset_regression()
+    @testset "InOrbitalParallel exact offset (heuristic-fragile config)" begin
+        mktempdir() do test_dir
+            namelist_path = joinpath(test_dir, "namelist.def")
+            write(namelist_path, "InOrbitalParallel inorbitalparallel.def\n")
+
+            # Anti-parallel block (NArrayAP = 3) deliberately contains two terms
+            # that share (site1, site2, sign) with consecutive indices (idx 0, 1).
+            # The previous heuristic inferred the parallel-block start from the
+            # smallest such consecutive pair and would have returned offset 0,
+            # corrupting the anti-parallel parameters. The exact NArrayAP-based
+            # offset (3) confines the overlay to the parallel block (idx 3, 4).
+            data = ExpertModeData()
+            data.i_flg_orbital_anti_parallel = 1
+            data.i_flg_orbital_parallel = 1
+            data.modpara.n_orbital_idx = 5
+            data.n_orbital_anti_parallel = 3
+            data.orbital_terms = [
+                OrbitalTerm(0, 1, 0, 7.0 + 0.0im, false, 1),  # anti
+                OrbitalTerm(0, 1, 1, 8.0 + 0.0im, false, 1),  # anti (same key as idx 0)
+                OrbitalTerm(0, 2, 2, 9.0 + 0.0im, false, 1),  # anti
+                OrbitalTerm(1, 0, 3, 0.0 + 0.0im, false, 1),  # parallel up
+                OrbitalTerm(1, 0, 4, 0.0 + 0.0im, false, 1),  # parallel down
+            ]
+
+            @test _orbital_parallel_offset(data) == 3
+
+            _write_indexed_input_parameter_file(
+                joinpath(test_dir, "inorbitalparallel.def"),
+                "NOrbitalParallel",
+                2,
+                ["0 10.0 0.1", "1 20.0 0.2"],
+            )
+
+            read_input_parameters!(data, namelist_path)
+
+            # Anti-parallel parameters are untouched.
+            @test [t.value for t in data.orbital_terms[1:3]] ==
+                  ComplexF64[7.0, 8.0, 9.0]
+            # Parallel parameters receive the overlay values.
+            @test data.orbital_terms[4].value == 10.0 + 0.1im
+            @test data.orbital_terms[5].value == 20.0 + 0.2im
+        end
+    end
+end
+
+function test_orbital_parallel_offset_from_parse()
+    @testset "parse records NArrayAP for OrbitalParallel offset" begin
+        mktempdir() do test_dir
+            anti_path = joinpath(test_dir, "orbitalidx.def")
+            write(
+                anti_path,
+                """
+                =============================================
+                NOrbitalIdx          2
+                ComplexType          0
+                =============================================
+                =============================================
+                    0      0      0
+                    0      1      1
+                    1      0      1
+                    1      1      0
+                    0      1
+                    1      1
+                """,
+            )
+
+            data = ExpertModeData()
+            parse_file_by_type!(data, "OrbitalAntiParallel", anti_path)
+            # OrbitalAntiParallel alone records NArrayAP = max idx + 1 = 2.
+            @test data.n_orbital_anti_parallel == 2
+            @test data.i_flg_orbital_anti_parallel == 1
+
+            par_path = joinpath(test_dir, "orbitalidxpara.def")
+            write(
+                par_path,
+                """
+                =============================================
+                NOrbitalParallel     1
+                ComplexType          0
+                =============================================
+                =============================================
+                    0      1      0
+                    1      0      0
+                    0      1
+                """,
+            )
+            parse_file_by_type!(data, "OrbitalParallel", par_path)
+
+            # Parsing OrbitalParallel preserves the exact NArrayAP recorded from
+            # the anti-parallel block, which is the offset used by the overlay.
+            @test data.i_flg_orbital_parallel == 1
+            @test data.n_orbital_anti_parallel == 2
+            @test _orbital_parallel_offset(data) == 2
+        end
+    end
+end
+
+function test_orbital_parallel_offset_sparse_header()
+    @testset "NArrayAP from header count, not max(idx)+1" begin
+        mktempdir() do test_dir
+            # Anti-parallel file declares NOrbitalIdx=3 but only idx 0,1 are
+            # referenced by site pairs (idx 2 is a declared-but-unreferenced
+            # parameter, listed only in the OptFlag section). C uses the header
+            # count (iNOrbitalAntiParallel=3); max(idx)+1 would give 2.
+            anti_path = joinpath(test_dir, "orbitalidx.def")
+            write(
+                anti_path,
+                """
+                =============================================
+                NOrbitalIdx          3
+                ComplexType          0
+                =============================================
+                =============================================
+                    0      1      0
+                    1      0      1
+                    0      1
+                    1      1
+                    2      1
+                """,
+            )
+
+            data = ExpertModeData()
+            parse_file_by_type!(data, "OrbitalAntiParallel", anti_path)
+            @test data.n_orbital_anti_parallel == 3
+            @test data.modpara.n_orbital_idx == 3
+
+            # Parallel file declares 1 parallel parameter.
+            par_path = joinpath(test_dir, "orbitalidxpara.def")
+            write(
+                par_path,
+                """
+                =============================================
+                NOrbitalIdx          1
+                ComplexType          0
+                =============================================
+                =============================================
+                    0      1      0
+                    0      1
+                """,
+            )
+            parse_file_by_type!(data, "OrbitalParallel", par_path)
+
+            # NArrayAP stays 3 (header), so parallel slots are 3,4 and the
+            # reserved-but-unused anti slot 2 is not stolen by the parallel block.
+            @test data.n_orbital_anti_parallel == 3
+            @test _orbital_parallel_offset(data) == 3
+            @test data.modpara.n_orbital_idx == 3 + 2 * 1
+            @test any(t -> t.idx == 3, data.orbital_terms)
+            @test any(t -> t.idx == 4, data.orbital_terms)
+            @test all(t -> t.idx != 2, data.orbital_terms)
+
+            # InOrbitalParallel overlay must land on slots 3,4 only.
+            namelist_path = joinpath(test_dir, "namelist.def")
+            write(namelist_path, "InOrbitalParallel inorbitalparallel.def\n")
+            _write_indexed_input_parameter_file(
+                joinpath(test_dir, "inorbitalparallel.def"),
+                "NOrbitalParallel",
+                2,
+                ["0 11.0 0.0", "1 22.0 0.0"],
+            )
+            read_input_parameters!(data, namelist_path)
+            @test all(
+                t.value == 11.0 + 0.0im for t in data.orbital_terms if t.idx == 3
+            )
+            @test all(
+                t.value == 22.0 + 0.0im for t in data.orbital_terms if t.idx == 4
+            )
+        end
+    end
+end
+
+function test_orbital_file_order_error()
+    @testset "OrbitalParallel-before-AntiParallel is rejected" begin
+        # Helper: parallel before anti is an error; anti-first or pure-parallel ok.
+        @test _orbital_file_order_error([
+            ("OrbitalParallel", "p.def"),
+            ("OrbitalAntiParallel", "a.def"),
+        ]) !== nothing
+        @test _orbital_file_order_error([
+            ("OrbitalParallel", "p.def"),
+            ("Orbital", "a.def"),
+        ]) !== nothing
+        @test _orbital_file_order_error([
+            ("OrbitalAntiParallel", "a.def"),
+            ("OrbitalParallel", "p.def"),
+        ]) === nothing
+        @test _orbital_file_order_error([("OrbitalParallel", "p.def")]) === nothing
+        @test _orbital_file_order_error([("Gutzwiller", "g.def")]) === nothing
+
+        # End-to-end: parse_expert_mode_files hard-fails on the bad order, before
+        # any referenced file is even opened.
+        mktempdir() do test_dir
+            namelist_path = joinpath(test_dir, "namelist.def")
+            write(
+                namelist_path,
+                "OrbitalParallel orbitalidxpara.def\nOrbitalAntiParallel orbitalidx.def\n",
+            )
+            err = nothing
+            try
+                parse_expert_mode_files(namelist_path)
+            catch e
+                err = e
+            end
+            @test err isa ErrorException
+            @test occursin("OrbitalParallel must be listed after", sprint(showerror, err))
+        end
+    end
+end
+
 # Run all tests
 @testset "Read Input Parameters Tests" begin
     test_read_input_parameters_basic()
@@ -462,6 +712,11 @@ end
     test_read_input_parameters_complex()
     test_read_input_parameters_missing_file()
     test_read_input_parameters_orbital_parallel_and_opttrans()
+    test_orbital_parallel_offset_cases()
+    test_read_input_parameters_orbital_parallel_offset_regression()
+    test_orbital_parallel_offset_from_parse()
+    test_orbital_parallel_offset_sparse_header()
+    test_orbital_file_order_error()
     test_parse_opttrans_def()
     test_read_input_parameters_dh_overlays()
 end

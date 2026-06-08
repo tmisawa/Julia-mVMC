@@ -5,14 +5,17 @@ Parser for orbital.def files containing orbital parameter terms.
 """
 
 """
-    parse_orbital_def(filepath::String) -> Tuple{ParseResult{Vector{OrbitalTerm}}, Dict{Int, Int}}
+    parse_orbital_def(filepath::String) -> Tuple{ParseResult{Vector{OrbitalTerm}}, Dict{Int, Int}, Int}
 
 Parse orbital.def file from file path.
-Returns orbital terms and OptFlag dictionary (idx -> opt_flag).
+Returns orbital terms, OptFlag dictionary (idx -> opt_flag), and the header
+declared parameter count (`NOrbitalIdx` / `NOrbitalParallel`). The declared count
+is what C reads via `ReadBuffIntCmpFlg` (`iNOrbitalAntiParallel`/`iNOrbitalParallel`),
+and is the authoritative parameter count even when some indices are unreferenced.
 """
 function parse_orbital_def(
     filepath::String,
-)::Tuple{ParseResult{Vector{OrbitalTerm}},Dict{Int,Int}}
+)::Tuple{ParseResult{Vector{OrbitalTerm}},Dict{Int,Int},Int}
     try
         content = read_def_file(filepath)
         return parse_orbital_content(content)
@@ -20,19 +23,22 @@ function parse_orbital_def(
         return (
             ParseResult{Vector{OrbitalTerm}}(false, nothing, "Error reading file: $e", 0),
             Dict{Int,Int}(),
+            0,
         )
     end
 end
 
 """
-    parse_orbital_content(content::String) -> Tuple{ParseResult{Vector{OrbitalTerm}}, Dict{Int, Int}}
+    parse_orbital_content(content::String) -> Tuple{ParseResult{Vector{OrbitalTerm}}, Dict{Int, Int}, Int}
 
 Parse orbital.def content from string.
-Returns orbital terms and OptFlag dictionary (idx -> opt_flag).
+Returns orbital terms, OptFlag dictionary (idx -> opt_flag), and the header
+declared parameter count (0 for the headerless legacy format, where it falls
+back to `max(idx)+1`).
 """
 function parse_orbital_content(
     content::String,
-)::Tuple{ParseResult{Vector{OrbitalTerm}},Dict{Int,Int}}
+)::Tuple{ParseResult{Vector{OrbitalTerm}},Dict{Int,Int},Int}
     context = ParsingContext("orbital.def")
     terms = OrbitalTerm[]
 
@@ -54,7 +60,10 @@ function parse_orbital_content(
     if length(lines) > 1
         header_line = clean_line(lines[2])
         tokens = split_def_line(header_line)
-        if length(tokens) >= 2 && tokens[1] == "NOrbitalIdx"
+        # Accept any NOrbital* header keyword (NOrbitalIdx, NOrbitalParallel,
+        # NOrbitalAntiParallel, NOrbitalGeneral). C reads the count positionally
+        # via ReadBuffIntCmpFlg regardless of the keyword spelling.
+        if length(tokens) >= 2 && startswith(tokens[1], "NOrbital")
             n_orbital_idx = safe_parse_int(tokens[2], 0)
             has_header = true
         end
@@ -161,7 +170,18 @@ function parse_orbital_content(
         join(context.errors, "; "),
         context.line_number,
     )
-    return (result, opt_flags)
+    # Declared parameter count from the header. C reads this directly as
+    # iNOrbitalAntiParallel / iNOrbitalParallel (ReadBuffIntCmpFlg), so it is the
+    # authoritative count even when some indices are unreferenced by site pairs.
+    # Fall back to max(idx)+1 only for the headerless legacy orbital.def format.
+    declared_count = if has_header
+        n_orbital_idx
+    elseif !isempty(terms)
+        maximum(t.idx for t in terms) + 1
+    else
+        0
+    end
+    return (result, opt_flags, declared_count)
 end
 
 """
