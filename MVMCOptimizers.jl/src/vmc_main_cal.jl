@@ -2646,7 +2646,7 @@ function vmc_main_cal!(
     data::ExpertModeData,
     state::VMCOptimizationState,
     c_timer::CTimer = CTIMER_DISABLED;
-    requested_threads::Integer = Base.Threads.nthreads(),
+    requested_threads::Integer = vmc_main_cal_requested_threads(),
     use_store::Bool = true,
 )
     n_site = data.modpara.nsite
@@ -3166,7 +3166,7 @@ function vmc_main_cal_fsz!(
     data::ExpertModeData,
     state::VMCOptimizationState,
     c_timer::CTimer = CTIMER_DISABLED;
-    requested_threads::Integer = Base.Threads.nthreads(),
+    requested_threads::Integer = vmc_main_cal_requested_threads(),
 )
     n_site = data.modpara.nsite
     n_site2 = 2 * n_site

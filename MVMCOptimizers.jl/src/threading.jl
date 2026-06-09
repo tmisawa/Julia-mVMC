@@ -36,12 +36,58 @@ end
 @inline vmc_threading_enabled(config::VMCThreadConfig) = config.effective_threads > 1
 @inline effective_thread_count(config::VMCThreadConfig) = config.effective_threads
 
+function vmc_main_cal_requested_threads()
+    raw = strip(get(ENV, "JULIA_MVMC_MAINCAL_THREADS", ""))
+    isempty(raw) && return 1
+
+    parsed = tryparse(Int, raw)
+    parsed !== nothing && parsed >= 1 ||
+        error("JULIA_MVMC_MAINCAL_THREADS must be a positive integer, got '$raw'")
+    return min(parsed, Base.Threads.nthreads())
+end
+
+@inline function vmc_inner_threading_requested(threaded::Bool)
+    raw = strip(get(ENV, "JULIA_MVMC_INNER_THREADS", "0"))
+    if isempty(raw) || raw == "0"
+        return false
+    end
+    raw == "1" ||
+        error("JULIA_MVMC_INNER_THREADS must be 0 or 1, got '$raw'")
+    return threaded &&
+        Base.Threads.nthreads() > 1
+end
+
+@inline function vmc_pfapack_threading_requested(threaded::Bool)
+    raw = strip(get(ENV, "JULIA_MVMC_PFAPACK_THREADS", "0"))
+    if isempty(raw) || raw == "0"
+        return false
+    end
+    raw == "1" ||
+        error("JULIA_MVMC_PFAPACK_THREADS must be 0 or 1, got '$raw'")
+    return vmc_inner_threading_requested(threaded)
+end
+
+const PFAPACK_CALL_LOCK = ReentrantLock()
+
+function with_pfapack_call_lock(f)
+    if get(ENV, "JULIA_MVMC_PFAPACK_LOCK", "1") == "0"
+        return f()
+    end
+
+    lock(PFAPACK_CALL_LOCK)
+    try
+        return f()
+    finally
+        unlock(PFAPACK_CALL_LOCK)
+    end
+end
+
 @inline function vmc_inner_threading_enabled(
     work_items::Integer,
     threaded::Bool;
     min_work_per_thread::Integer = 64,
 )
-    if !threaded || Base.Threads.nthreads() == 1 || work_items <= 0
+    if !vmc_inner_threading_requested(threaded) || work_items <= 0
         return false
     end
     threshold = max(Int(min_work_per_thread), Base.Threads.nthreads())

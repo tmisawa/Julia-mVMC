@@ -1398,20 +1398,22 @@ function calculate_m_all_fcmp!(
     # Note: PfaPack uses 1-based indexing for qp_start and qp_end
     # n_elec in PfaPack = n_size (2*Ne) in MVMCOptimizers
     # The subset views are passed directly (1-based relative to the subset)
-    pfapack_workspace = threaded ?
+    pfapack_workspace = vmc_pfapack_threading_requested(threaded) ?
         state.workspace.pfapack_workspace :
         state.workspace.pfapack_workspace.workspaces[1]
-    info = calculate_m_all_fcmp_pfapack!(
-        ele_idx,
-        slater_elm_subset,
-        inv_m_temp,
-        pf_m_temp,
-        1,  # qp_start relative to the subset (always 1 for the subset)
-        qp_num + 1,  # qp_end relative to the subset (exclusive)
-        n_site,
-        n_size,  # n_elec in PfaPack = total electrons (2*Ne)
-        pfapack_workspace,  # Pre-allocated workspace
-    )
+    info = with_pfapack_call_lock() do
+        calculate_m_all_fcmp_pfapack!(
+            ele_idx,
+            slater_elm_subset,
+            inv_m_temp,
+            pf_m_temp,
+            1,  # qp_start relative to the subset (always 1 for the subset)
+            qp_num + 1,  # qp_end relative to the subset (exclusive)
+            n_site,
+            n_size,  # n_elec in PfaPack = total electrons (2*Ne)
+            pfapack_workspace,  # Pre-allocated workspace
+        )
+    end
 
     if info != 0
         return info
@@ -4832,20 +4834,22 @@ function calculate_m_all_real!(
     # Call PfaPack's calculate_m_all_real!
     # Note: We use the imported function from PfaPack
     # PfaPack expects n_elec to be total number of electrons (2*Ne), not Ne
-    pfapack_workspace = threaded ?
+    pfapack_workspace = vmc_pfapack_threading_requested(threaded) ?
         ws.pfapack_workspace :
         ws.pfapack_workspace.workspaces[1]
-    info = calculate_m_all_real_pfapack!(
-        ele_idx,
-        slater_elm_real_subset,
-        inv_m_real_temp,
-        pf_m_real_temp,
-        1,  # qp_start (1-based, relative to subset)
-        qp_num + 1,  # qp_end (1-based, exclusive, relative to subset)
-        n_site,
-        n_size,  # Pass n_size (2*Ne) instead of n_elec (Ne)
-        pfapack_workspace,  # Pre-allocated workspace
-    )
+    info = with_pfapack_call_lock() do
+        calculate_m_all_real_pfapack!(
+            ele_idx,
+            slater_elm_real_subset,
+            inv_m_real_temp,
+            pf_m_real_temp,
+            1,  # qp_start (1-based, relative to subset)
+            qp_num + 1,  # qp_end (1-based, exclusive, relative to subset)
+            n_site,
+            n_size,  # Pass n_size (2*Ne) instead of n_elec (Ne)
+            pfapack_workspace,  # Pre-allocated workspace
+        )
+    end
 
     if info != 0
         return info
