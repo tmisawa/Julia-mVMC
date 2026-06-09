@@ -2352,7 +2352,7 @@ function update_m_all_two_real!(
 
         # Calculate vecP[i] = sum_j invM[i][j] * vecS[j]
         # Calculate vecQ[i] = sum_j invM[i][j] * vecT[j]
-        @inbounds for msi = 0:(n_size-1)
+        @turbo for msi = 0:(n_size-1)
             msi_next = msi + 1
             for msj = 0:(n_size-1)
                 msj_next = msj + 1
@@ -2390,7 +2390,7 @@ function update_m_all_two_real!(
         end
 
         # Update InvM
-        @inbounds for msi = 0:(n_size-1)
+        @turbo for msi = 0:(n_size-1)
             msi_next = msi + 1
             p_i = vec_p[msi_next]
             q_i = vec_q[msi_next]
@@ -5196,7 +5196,7 @@ function calculate_new_pf_m_two2_real!(
         inv_offset = (qpidx - 1) * n_size * n_size
 
         # Calculate vec_a[i] = sltE_real[rsa][rsi] and vec_b[i] = sltE_real[rsb][rsi]
-        @inbounds for msi = 0:(n_size-1)
+        @turbo for msi = 0:(n_size-1)
             #=
             if msi < n_elec
                 rsi = ele_idx[msi + 1]  # up-spin (0-based)
@@ -5228,7 +5228,7 @@ function calculate_new_pf_m_two2_real!(
 
         # Calculate bMa = sum_i vec_b[i] * (sum_j invM[i][j] * vec_a[j])
         bMa = 0.0
-        @inbounds for msi = 0:(n_size-1)
+        @turbo for msi = 0:(n_size-1)
             tmp = 0.0
             for msj = 0:(n_size-1)
                 tmp += inv_m_real[inv_offset+msi*n_size+msj+1] * vec_a[msj+1]
