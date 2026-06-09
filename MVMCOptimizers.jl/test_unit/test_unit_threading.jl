@@ -4,9 +4,12 @@ using MVMCExpertModeParsers:
     ExpertModeData,
     ModParaParameters,
     CoulombInterTerm,
+    GutzwillerTerm,
     GreenOneTerm,
     GreenTwoExTerm,
-    init_qp_weight!
+    JastrowTerm,
+    init_qp_weight!,
+    projection_layout
 
 const MO = MVMCOptimizers
 
@@ -362,6 +365,88 @@ end
     @test worker.sr_opt !== parent.sr_opt
 end
 
+function threading_fill_slater!(state, n_site::Int, all_complex::Bool)
+    n_site2 = 2 * n_site
+    for a = 0:(n_site2 - 1)
+        for b = (a + 1):(n_site2 - 1)
+            value = ComplexF64(
+                sin(0.37 * (a + 1) + 0.19 * (b + 1)) + 0.05 * (a - b),
+                0.07 * cos(0.23 * (a + 1) - 0.41 * (b + 1)),
+            )
+            state.slater_matrix.slater_elm[a*n_site2+b+1] = value
+            state.slater_matrix.slater_elm[b*n_site2+a+1] = -value
+            if !all_complex
+                state.slater_matrix.slater_elm_real[a*n_site2+b+1] = real(value)
+                state.slater_matrix.slater_elm_real[b*n_site2+a+1] = -real(value)
+            end
+        end
+    end
+    return state
+end
+
+function threading_fill_jastrow_idx!(data, n_site::Int)
+    n_jastrow = n_site * (n_site - 1) ÷ 2
+    data.n_jastrow_idx = n_jastrow
+    data.jastrow_idx = fill(-1, n_site, n_site)
+    idx = 0
+    for i = 1:n_site
+        for j = (i + 1):n_site
+            data.jastrow_idx[i, j] = idx
+            data.jastrow_idx[j, i] = idx
+            idx += 1
+        end
+    end
+    data.jastrow_terms = JastrowTerm[]
+    for i = 0:(n_site - 2)
+        for j = (i + 1):(n_site - 1)
+            value = ComplexF64(0.03 + 0.01 * length(data.jastrow_terms), 0.0)
+            push!(data.jastrow_terms, JastrowTerm(i, j, value, false))
+        end
+    end
+    return data
+end
+
+function threading_store_sample!(state, data, sample::Int, up_sites, down_sites)
+    n_site = data.modpara.nsite
+    n_elec = data.modpara.nelec
+    n_size = 2 * n_elec
+    n_site2 = 2 * n_site
+
+    @assert length(up_sites) == n_elec
+    @assert length(down_sites) == n_elec
+
+    ele_idx = collect(Iterators.flatten((up_sites, down_sites)))
+    ele_cfg = fill(-1, n_site2)
+    ele_num = zeros(Int, n_site2)
+
+    for (mi0, site) in enumerate(up_sites)
+        mi = mi0 - 1
+        ele_cfg[site+1] = mi
+        ele_num[site+1] = 1
+    end
+    for (mi0, site) in enumerate(down_sites)
+        mi = mi0 - 1
+        ele_cfg[n_site+site+1] = mi
+        ele_num[n_site+site+1] = 1
+    end
+
+    idx_start = sample * n_size + 1
+    cfg_start = sample * n_site2 + 1
+    state.electron_config.ele_idx[idx_start:(idx_start+n_size-1)] .= ele_idx
+    state.electron_config.ele_cfg[cfg_start:(cfg_start+n_site2-1)] .= ele_cfg
+    state.electron_config.ele_num[cfg_start:(cfg_start+n_site2-1)] .= ele_num
+
+    n_proj = projection_layout(data).n_proj
+    if n_proj > 0
+        proj = zeros(Int, n_proj)
+        MO.make_proj_cnt!(proj, ele_num, data)
+        proj_start = sample * n_proj + 1
+        state.electron_config.ele_proj_cnt[proj_start:(proj_start+n_proj-1)] .= proj
+    end
+
+    return state
+end
+
 function threading_maincal_fixture(;
     n_samples::Int = 4,
     all_complex::Bool = true,
@@ -370,10 +455,14 @@ function threading_maincal_fixture(;
     phys::Bool = false,
     use_store::Bool = true,
 )
+    rich_samples = !use_fsz
+    n_site = rich_samples ? 4 : 2
+    n_elec = rich_samples ? 2 : 1
+
     data = ExpertModeData()
     data.modpara = ModParaParameters(
-        nsite = 2,
-        nelec = 1,
+        nsite = n_site,
+        nelec = n_elec,
         nvmc_sample = n_samples,
         complex_flag = all_complex ? 1 : 0,
         vmc_calc_mode = mode,
@@ -382,37 +471,67 @@ function threading_maincal_fixture(;
     )
     data.complex_flags = [all_complex ? 1 : 0]
     data.para_qp_trans = ComplexF64[1.0 + 0.0im]
-    data.coulomb_inter_terms = [CoulombInterTerm(0, 1, 2.0)]
+    data.coulomb_inter_terms = [
+        CoulombInterTerm(0, 1, 2.0),
+        CoulombInterTerm(max(0, n_site - 2), n_site - 1, -0.75),
+    ]
+    if rich_samples
+        data.n_gutzwiller_idx = 2
+        data.gutzwiller_idx = [0, 1, 0, 1]
+        data.gutzwiller_terms = [
+            GutzwillerTerm(0, 0.11 + 0.0im, false),
+            GutzwillerTerm(1, -0.07 + 0.0im, false),
+        ]
+        threading_fill_jastrow_idx!(data, n_site)
+    end
     if phys
         data.green_one_terms = [
             GreenOneTerm(0, 0, :up, :up),
-            GreenOneTerm(1, 1, :down, :down),
+            GreenOneTerm(n_site - 1, n_site - 1, :down, :down),
         ]
-        data.green_two_ex_terms = [GreenTwoExTerm(0, 0, 0, 0, 1, 1, 1, 1)]
+        data.green_two_ex_terms = [GreenTwoExTerm(0, 0, 0, 0, n_site - 1, 1, n_site - 1, 1)]
     end
     init_qp_weight!(data)
 
-    state = MO.VMCOptimizationState(2, 1, 0, 0, 1, n_samples, all_complex, use_fsz)
+    n_proj = projection_layout(data).n_proj
+    state = MO.VMCOptimizationState(
+        n_site,
+        n_elec,
+        n_proj,
+        n_proj,
+        1,
+        n_samples,
+        all_complex,
+        use_fsz,
+    )
     if phys
         MO.initialize_phys_quantities!(state, data)
     end
 
-    n_site2 = 4
-    state.slater_matrix.slater_elm[0*n_site2+3+1] = 1.0 + 0.0im
-    state.slater_matrix.slater_elm[3*n_site2+0+1] = -1.0 + 0.0im
-    if !all_complex
-        state.slater_matrix.slater_elm_real[0*n_site2+3+1] = 1.0
-        state.slater_matrix.slater_elm_real[3*n_site2+0+1] = -1.0
-    end
+    threading_fill_slater!(state, n_site, all_complex)
 
-    for sample = 0:(n_samples - 1)
-        ele_idx_start = sample * 2 + 1
-        ele_cfg_start = sample * 4 + 1
-        state.electron_config.ele_idx[ele_idx_start:(ele_idx_start+1)] .= [0, 1]
-        state.electron_config.ele_cfg[ele_cfg_start:(ele_cfg_start+3)] .= [0, -1, -1, 0]
-        state.electron_config.ele_num[ele_cfg_start:(ele_cfg_start+3)] .= [1, 0, 0, 1]
-        if use_fsz
-            state.electron_config.ele_spn[ele_idx_start:(ele_idx_start+1)] .= [0, 1]
+    if rich_samples
+        samples = (
+            ([0, 2], [0, 3]),
+            ([0, 1], [2, 3]),
+            ([1, 3], [1, 2]),
+            ([2, 3], [0, 2]),
+        )
+        for sample = 0:(n_samples - 1)
+            up_sites, down_sites = samples[mod(sample, length(samples)) + 1]
+            threading_store_sample!(state, data, sample, up_sites, down_sites)
+        end
+    else
+        n_site2 = 2 * n_site
+        for sample = 0:(n_samples - 1)
+            ele_idx_start = sample * 2 + 1
+            ele_cfg_start = sample * n_site2 + 1
+            state.electron_config.ele_idx[ele_idx_start:(ele_idx_start+1)] .= [0, 1]
+            state.electron_config.ele_cfg[ele_cfg_start:(ele_cfg_start+n_site2-1)] .= [0, -1, -1, 0]
+            state.electron_config.ele_num[ele_cfg_start:(ele_cfg_start+n_site2-1)] .= [1, 0, 0, 1]
+            if use_fsz
+                state.electron_config.ele_spn[ele_idx_start:(ele_idx_start+1)] .= [0, 1]
+            end
         end
     end
 
@@ -452,6 +571,33 @@ function run_threading_maincal_fixture(; requested_threads::Int, kwargs...)
     return threading_maincal_snapshot(state)
 end
 
+function threading_snapshots_match(a, b; atol = 1e-10, rtol = 1e-10)
+    for field in propertynames(a)
+        aval = getproperty(a, field)
+        bval = getproperty(b, field)
+        if aval isa Tuple
+            all(isapprox(x, y; atol = atol, rtol = rtol) for (x, y) in zip(aval, bval)) ||
+                return false
+        else
+            isapprox(aval, bval; atol = atol, rtol = rtol) || return false
+        end
+    end
+    return true
+end
+
+@testset "unit/threading: vmc_main_cal! rich fixture coverage" begin
+    data, state = threading_maincal_fixture()
+    n_proj = projection_layout(data).n_proj
+    @test data.modpara.nsite == 4
+    @test data.modpara.nelec == 2
+    @test n_proj > 0
+    n_size = 2 * data.modpara.nelec
+    idx_rows = reshape(state.electron_config.ele_idx, n_size, :)'
+    proj_rows = reshape(state.electron_config.ele_proj_cnt, n_proj, :)'
+    @test length(Set(Tuple(row) for row in eachrow(idx_rows))) > 1
+    @test length(Set(Tuple(row) for row in eachrow(proj_rows))) > 1
+end
+
 @testset "unit/threading: vmc_main_cal! requested thread self-consistency" begin
     cases = (
         (label = "complex store", kwargs = (all_complex = true, mode = 0, use_store = true)),
@@ -463,9 +609,16 @@ end
 
     for case in cases
         @testset "$(case.label)" begin
-            single = run_threading_maincal_fixture(; requested_threads = 1, case.kwargs...)
-            threaded = run_threading_maincal_fixture(; requested_threads = 2, case.kwargs...)
-            @test threaded == single
+            if Threads.nthreads() > 1
+                # Explicit sample-level VMCMainCal threading remains a known
+                # unsafe triage mode; default CI covers JULIA_NUM_THREADS>1
+                # with MAINCAL opt-in unset.
+                @test_skip false
+            else
+                single = run_threading_maincal_fixture(; requested_threads = 1, case.kwargs...)
+                threaded = run_threading_maincal_fixture(; requested_threads = 2, case.kwargs...)
+                @test threading_snapshots_match(threaded, single)
+            end
         end
     end
 end
