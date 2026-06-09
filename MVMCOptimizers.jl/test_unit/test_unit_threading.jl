@@ -31,6 +31,86 @@ const MO = MVMCOptimizers
     @test_throws ErrorException MO.VMCThreadConfig(1; min_work_per_thread = 0)
 end
 
+@testset "unit/threading: JULIA_MVMC_MAINCAL_THREADS override" begin
+    old = get(ENV, "JULIA_MVMC_MAINCAL_THREADS", nothing)
+    try
+        delete!(ENV, "JULIA_MVMC_MAINCAL_THREADS")
+        @test MO.vmc_main_cal_requested_threads() == 1
+
+        ENV["JULIA_MVMC_MAINCAL_THREADS"] = string(Threads.nthreads())
+        @test MO.vmc_main_cal_requested_threads() == Threads.nthreads()
+
+        ENV["JULIA_MVMC_MAINCAL_THREADS"] = string(Threads.nthreads() + 2)
+        @test MO.vmc_main_cal_requested_threads() == Threads.nthreads()
+
+        ENV["JULIA_MVMC_MAINCAL_THREADS"] = "0"
+        @test_throws ErrorException MO.vmc_main_cal_requested_threads()
+    finally
+        if old === nothing
+            delete!(ENV, "JULIA_MVMC_MAINCAL_THREADS")
+        else
+            ENV["JULIA_MVMC_MAINCAL_THREADS"] = old
+        end
+    end
+end
+
+@testset "unit/threading: JULIA_MVMC_INNER_THREADS override" begin
+    old = get(ENV, "JULIA_MVMC_INNER_THREADS", nothing)
+    try
+        delete!(ENV, "JULIA_MVMC_INNER_THREADS")
+        @test !MO.vmc_inner_threading_requested(true)
+        @test !MO.vmc_inner_threading_enabled(1024, true)
+
+        ENV["JULIA_MVMC_INNER_THREADS"] = "0"
+        @test !MO.vmc_inner_threading_requested(true)
+        @test !MO.vmc_inner_threading_enabled(1024, true)
+
+        ENV["JULIA_MVMC_INNER_THREADS"] = "1"
+        expected = Threads.nthreads() > 1
+        @test MO.vmc_inner_threading_requested(true) == expected
+        @test MO.vmc_inner_threading_enabled(1024, true) == expected
+
+        ENV["JULIA_MVMC_INNER_THREADS"] = "true"
+        @test_throws ErrorException MO.vmc_inner_threading_requested(true)
+    finally
+        if old === nothing
+            delete!(ENV, "JULIA_MVMC_INNER_THREADS")
+        else
+            ENV["JULIA_MVMC_INNER_THREADS"] = old
+        end
+    end
+end
+
+@testset "unit/threading: JULIA_MVMC_PFAPACK_THREADS override" begin
+    old_inner = get(ENV, "JULIA_MVMC_INNER_THREADS", nothing)
+    old_pfapack = get(ENV, "JULIA_MVMC_PFAPACK_THREADS", nothing)
+    try
+        ENV["JULIA_MVMC_INNER_THREADS"] = "1"
+        delete!(ENV, "JULIA_MVMC_PFAPACK_THREADS")
+        @test !MO.vmc_pfapack_threading_requested(true)
+
+        ENV["JULIA_MVMC_PFAPACK_THREADS"] = "0"
+        @test !MO.vmc_pfapack_threading_requested(true)
+
+        ENV["JULIA_MVMC_PFAPACK_THREADS"] = "1"
+        @test MO.vmc_pfapack_threading_requested(true) == (Threads.nthreads() > 1)
+
+        ENV["JULIA_MVMC_PFAPACK_THREADS"] = "auto"
+        @test_throws ErrorException MO.vmc_pfapack_threading_requested(true)
+    finally
+        if old_inner === nothing
+            delete!(ENV, "JULIA_MVMC_INNER_THREADS")
+        else
+            ENV["JULIA_MVMC_INNER_THREADS"] = old_inner
+        end
+        if old_pfapack === nothing
+            delete!(ENV, "JULIA_MVMC_PFAPACK_THREADS")
+        else
+            ENV["JULIA_MVMC_PFAPACK_THREADS"] = old_pfapack
+        end
+    end
+end
+
 @testset "unit/threading: sample chunks" begin
     chunks = MO.vmc_sample_chunks(10, 3)
     @test collect.(chunks) == [collect(0:3), collect(4:6), collect(7:9)]

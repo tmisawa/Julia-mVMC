@@ -87,6 +87,38 @@ for provenance and regeneration instructions.
   measured columns and 1e-9 for `<H²>` and variance; see
   `test/integration/runtests.jl`.
 
+## Threading compatibility
+
+Julia-mVMC uses `JULIA_NUM_THREADS` for single-process shared-memory
+parallelism. The C-compatible threading policy is conservative:
+
+- Independent copy loops and SR OO-store/finalize loops may use gated inner
+  threading when writes are disjoint and `JULIA_MVMC_INNER_THREADS=1` is set.
+- `VMCMakeSample` keeps the C-style sequential Markov-chain semantics. The
+  outer sampling loop (`outStep` / `inStep`, RNG, accept/reject, and burn
+  sample updates) is not split into independent chains by `JULIA_NUM_THREADS`.
+
+Two additional opt-ins are kept for debugging and benchmark triage only:
+
+- `JULIA_MVMC_MAINCAL_THREADS=<n>` enables sample-level `VMCMainCal` worker
+  splitting. This path is known not to be C-compatible yet for standard
+  fixtures with `n >= 2`; do not use it for production numbers.
+- `JULIA_MVMC_PFAPACK_THREADS=1` enables PfaPack QP-level threading. This path
+  is also known not to pass the ctest-equivalent gates yet.
+
+PfaPack calls are guarded by a process-local lock by default. Setting
+`JULIA_MVMC_PFAPACK_LOCK=0` disables that lock for diagnosis only; it is not a
+C-compatible mode.
+
+Independent-chain sampling would require separate RNG stream rules and new
+acceptance criteria. Treat it as a future numerical mode, not as C-compatible
+OpenMP-equivalent threading.
+
+For C-parity checks, run with `OMP_NUM_THREADS=1` and leave
+`JULIA_MVMC_MAINCAL_THREADS` and `JULIA_MVMC_PFAPACK_THREADS` unset. Any
+threaded opt-in must pass the same committed integration, ctest-equivalent, and
+PhysCal gates before its numbers are treated as C-compatible.
+
 ## BLAS / LAPACK / OS notes
 
 - Tested on Linux (Ubuntu 22.04+, OpenBLAS) and macOS (Apple
