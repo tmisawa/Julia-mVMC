@@ -1,5 +1,53 @@
 # Changelog
 
+## v0.3.0 - 2026-06-10
+
+This release expands the C-reference coverage for physical-quantity
+calculation, tightens unsupported-input handling, and adds conservative
+single-process threading infrastructure. The default execution path remains
+C-parity oriented; MPI and independent-chain sampling are still unsupported.
+
+### Added
+
+- Added `VMCPhysCal` runner support from `namelist.def` and C-referenced
+  end-to-end fixtures for one-body, direct two-body, and factored/product
+  two-body Green-function output.
+- Added `greentwoex.def` / `TwoBodyGEx` parsing and factored two-body Green
+  output (`zvo_cisajscktaltex`) for the supported non-FSZ path.
+- Added DH2/DH4 projection-layout parsing and runtime support, including
+  C-reference regression fixtures.
+- Added `InOrbitalParallel` offset handling, warn-only `OptTrans` input
+  handling, and additional `ReadInputParameters` / parameter-sync regression
+  tests.
+- Added conservative threading helpers for selected inner loops, local
+  accumulator construction/merge, and CI guards for `JULIA_NUM_THREADS > 1`.
+- Added explicit unsupported-input gates for `NSplitSize > 1` and
+  `NLanczosMode > 0`.
+
+### Changed
+
+- Updated the public version metadata for the in-repo packages
+  `MVMCOptimizers` and `MVMCExpertModeParsers` to `0.3.0`.
+- Expanded the C ctest-equivalent and PhysCal reference gates used by CI.
+- Kept `VMCMainCal` sample processing sequential by default and removed the
+  sample-level threading opt-in to preserve C-compatible stochastic semantics.
+- Documented the threading policy, PhysCal coverage, and unsupported-input
+  contract in the manual and package README files.
+
+### Notes
+
+- `JULIA_MVMC_INNER_THREADS=1` enables only selected C OpenMP-equivalent
+  inner-loop threading. Leave it unset for the default C-parity path.
+- `JULIA_MVMC_PFAPACK_THREADS=1` remains a debug/benchmark triage mode and is
+  not yet treated as C-compatible.
+- `NSplitSize > 1` still raises an unsupported-MPI error. MPI support is
+  planned as a separate design/review track.
+- GitHub-generated source ZIP/TAR archives do not include submodule contents.
+  Use `git clone --recurse-submodules https://github.com/tmisawa/Julia-mVMC`
+  for a functional checkout.
+- `PfaPack.jl` and `SFMT.jl` are submodules and remain at their own package
+  version `0.1.0` in this release.
+
 ## v0.2.0 - 2026-06-03
 
 This release is an infrastructure, verification, and diagnostics update.

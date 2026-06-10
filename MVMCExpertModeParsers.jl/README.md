@@ -12,7 +12,7 @@ A Julia package for parsing mVMC Expert Mode definition files (`*.def`) and init
 - **Quantum-projection weight initialization** (Gauss-Legendre + Legendre polynomials, mirrors C's `InitQPWeight()` / `UpdateQPWeight()`).
 - **Validation helpers** for individual term types.
 
-Note: this release does **not** include writers / `.def` file generation. Reading and consuming existing `.def` files is the supported path; producing new ones from scratch is a v0.3+ concern.
+Note: this release does **not** include writers / `.def` file generation. Reading and consuming existing `.def` files is the supported path; producing new ones from scratch is a future concern.
 
 ## Installation
 
