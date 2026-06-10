@@ -74,3 +74,25 @@ end
         @test_throws ErrorException resolve_mpi_mode()             # 不正値は明示 error
     end
 end
+
+using MVMCOptimizers: bcast!, bcast_scalar, allreduce_sum!, reduce_sum_to_root!,
+                      barrier, reduce_counter!, _chunk_ranges
+
+@testset "serial wrappers are no-ops" begin
+    ctx = serial_context()
+    v = ComplexF64[1.0 + 2.0im, 3.0]
+    @test bcast!(ctx, v) === v && v == ComplexF64[1.0 + 2.0im, 3.0]
+    @test bcast_scalar(ctx, 42) == 42
+    @test allreduce_sum!(ctx, v) === v && v == ComplexF64[1.0 + 2.0im, 3.0]
+    @test reduce_sum_to_root!(ctx, v) === v
+    @test barrier(ctx) === nothing
+    c = collect(1:11)
+    @test reduce_counter!(ctx, c) === c && c == collect(1:11)   # F10: 不変
+end
+
+@testset "_chunk_ranges (C SafeMpiAllReduce, safempi.c:29 D_MpiSendMax)" begin
+    @test _chunk_ranges(0, 4) == UnitRange{Int}[]
+    @test _chunk_ranges(3, 4) == [1:3]
+    @test _chunk_ranges(8, 4) == [1:4, 5:8]
+    @test _chunk_ranges(9, 4) == [1:4, 5:8, 9:9]
+end

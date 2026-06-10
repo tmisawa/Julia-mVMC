@@ -157,3 +157,89 @@ function build_parallel_context(nsplit_size::Int)
     return ParallelContext(true, comm0, comm1, comm2,
                            rank0, size0, rank1, size1, rank2, size2, group1)
 end
+
+@inline function _comm(ctx::ParallelContext, which::Symbol)
+    which === :comm0 && return ctx.comm0
+    which === :comm1 && return ctx.comm1
+    which === :comm2 && return ctx.comm2
+    throw(ArgumentError("which must be :comm0, :comm1, or :comm2; got $which"))
+end
+
+"C SafeMpiAllReduce の chunk 分割（1 chunk あたり最大 `maxlen` 要素）。"
+function _chunk_ranges(n::Int, maxlen::Int)
+    n <= 0 && return UnitRange{Int}[]
+    return [i:min(i + maxlen - 1, n) for i in 1:maxlen:n]
+end
+
+"C `MPI_Bcast` 相当。serial では no-op で buf を返す。"
+function bcast!(ctx::ParallelContext, buf::AbstractArray; root::Int = 0,
+                which::Symbol = :comm0)
+    ctx.is_mpi || return buf
+    # MPI.jl stable docs 掲載形式（keyword root）。positional 形式も実装上は存在するが
+    # documented API に揃える（2026-06-10 plan review F2）。
+    MPI.Bcast!(buf, _comm(ctx, which); root = root)
+    return buf
+end
+
+"scalar の rank0 → 全 rank broadcast（seed 配布用、spec §5-1）。"
+function bcast_scalar(ctx::ParallelContext, x::T; which::Symbol = :comm0) where {T<:Number}
+    ctx.is_mpi || return x
+    buf = T[x]
+    MPI.Bcast!(buf, _comm(ctx, which); root = 0)
+    return buf[1]
+end
+
+"C SafeMpiAllReduce 相当（sum、D_MpiSendMax 要素ごとに chunk 分割、in-place）。"
+function allreduce_sum!(ctx::ParallelContext, buf::AbstractArray;
+                        which::Symbol = :comm0)
+    ctx.is_mpi || return buf
+    comm = _comm(ctx, which)
+    for r in _chunk_ranges(length(buf), D_MPI_SEND_MAX)
+        MPI.Allreduce!(view(buf, r), +, comm)
+    end
+    return buf
+end
+
+"C weightAverageReduce 相当の reduce-to-root（Green 用、F9）。root のみ合計値を持つ。"
+function reduce_sum_to_root!(ctx::ParallelContext, buf::AbstractArray;
+                             root::Int = 0, which::Symbol = :comm0)
+    ctx.is_mpi || return buf
+    comm = _comm(ctx, which)
+    for r in _chunk_ranges(length(buf), D_MPI_SEND_MAX)
+        MPI.Reduce!(view(buf, r), +, comm; root = root)
+    end
+    return buf
+end
+
+function barrier(ctx::ParallelContext; which::Symbol = :comm0)
+    ctx.is_mpi && MPI.Barrier(_comm(ctx, which))
+    return nothing
+end
+
+"""
+    reduce_counter!(ctx, counter)
+
+C `ReduceCounter` 相当（mVMC/src/mVMC/vmcmake.c:496-508）: 先頭 6 要素
+（C `Counter_max=6`、global.h:369-373）だけを comm2 で allreduce し、
+**`ctx.rank2 == 0`（comm2-local root）だけ**へ書き戻す（A2。global rank0 ではない）。
+`counter[7:end]`（Julia の burn flag `counter[11]` を含む）は対象外（F10）。
+"""
+function reduce_counter!(ctx::ParallelContext, counter::AbstractVector{<:Integer})
+    ctx.is_mpi || return counter
+    n = min(length(counter), 6)
+    n == 0 && return counter
+    recv = MPI.Allreduce(counter[1:n], +, ctx.comm2)
+    if ctx.rank2 == 0
+        counter[1:n] .= recv
+    end
+    return counter
+end
+
+"fatal error 時の全 rank 停止（F13）。serial は単に error。"
+function abort_parallel(ctx::ParallelContext, code::Int = 1)
+    if ctx.is_mpi
+        MPI.Abort(ctx.comm0, code)
+    else
+        error("fatal error (abort code=$code)")
+    end
+end
