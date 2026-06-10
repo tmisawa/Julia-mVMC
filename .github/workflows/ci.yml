@@ -77,6 +77,15 @@ jobs:
         run: |
           julia --project=@. test/integration/phys_cal_equivalent.jl
 
+      - name: Run threading default C-parity guard
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.julia-version == '1.12' }}
+        shell: bash
+        run: |
+          unset JULIA_MVMC_MAINCAL_THREADS JULIA_MVMC_INNER_THREADS JULIA_MVMC_PFAPACK_THREADS
+          OMP_NUM_THREADS=1 JULIA_NUM_THREADS=2 julia --project=@. test/integration/runtests.jl
+          OMP_NUM_THREADS=1 JULIA_NUM_THREADS=2 julia --project=@. test/integration/ctest_equivalent.jl
+          OMP_NUM_THREADS=1 JULIA_NUM_THREADS=2 julia --project=@. test/integration/phys_cal_equivalent.jl
+
       - name: Run examples (smoke test, JULIA_MVMC_EXAMPLE_STEPS=5)
         run: |
           for f in examples/*.jl; do
