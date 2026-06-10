@@ -117,6 +117,22 @@ using MVMCOptimizers: count_total_parameters, get_parameter_value,
                       set_parameter_value!, pack_parameters, unpack_parameters!
 using MVMCExpertModeParsers
 
+@testset "ModPara rnd_seed default matches C readdef.c:1967 (review F2)" begin
+    # RndSeed 行が欠落した modpara.def は C では 11272 で走る。parser の kwdef
+    # default が 12345 だと C parity が missing の行で崩れる（review 2026-06-11 F2）。
+    @test MVMCExpertModeParsers.ModParaParameters().rnd_seed == 11272
+end
+
+@testset "PhysCal runner fails fast under MPI (review F7)" begin
+    # R0 では PhysCal は MPI 未対応。mpiexec 検出下で走らせると全 rank が同一
+    # output へ書くため、entry で error する（guard は parse より前なので
+    # ダミーパスで検証できる）。
+    withenv("JULIA_MVMC_MPI" => "1") do
+        @test_throws ErrorException MVMCOptimizers.run_phys_cal_from_namelist(
+            "nonexistent_namelist.def"; opt_para = "nonexistent.dat", mode = :real)
+    end
+end
+
 @testset "parameter pack/unpack roundtrip (spec §5-2, F4)" begin
     fixture = joinpath(@__DIR__, "..", "..", "test", "integration", "reference",
                        "heisenberg_chain_real", "inputs", "namelist.def")

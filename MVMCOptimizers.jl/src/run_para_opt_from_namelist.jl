@@ -34,8 +34,11 @@ integration tests in `test/integration/runtests.jl`.
 - `output_dir::AbstractString = tempname()`: directory that receives
   `zvo_out.dat`, `zqp_opt.dat`, etc. Created if absent.
 - `seed::Union{Integer,Nothing} = nothing`: SFMT19937 seed. `nothing` means
-  use `modpara.def`'s `RndSeed` field, falling back to the C-compatible
-  default `11272` when `RndSeed` is non-positive.
+  resolve `modpara.def`'s `RndSeed` with the C-parity rule (`resolve_rnd_seed`,
+  v0.4 R0): missing → `11272` (parser default, C `readdef.c:1967`), `< 0` →
+  rank0 time seed broadcast over comm0, `== 0` → `0`, `> 0` → the value; the
+  per-group `+ group1` offset is added under MPI (C `vmcmain.c:257`). An
+  explicit integer overrides the table (still `+ group1` under MPI).
 - `initial_def`: starting variational parameters. `:auto` (default) loads
   `initial.def` from the namelist directory if present (mirrors C's
   `vmc.out -s StdFace.def initial.def` test driver). Pass a path to load

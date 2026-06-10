@@ -248,7 +248,8 @@ end
     resolve_rnd_seed(ctx, modpara_rnd_seed, seed_override) -> Int
 
 C parity の seed 解決（spec §5-1、A5）:
-missing/default → 11272（parser が既に格納）、`< 0` → rank0 が時刻 seed を決め
+missing/default → 11272（parser の kwdef default。C readdef.c:1967。
+2026-06-11 review F2 で 12345 から修正）、`< 0` → rank0 が時刻 seed を決め
 comm0 bcast（C readdef.c:2161-2163）、`== 0` → 0、`> 0` → その値。
 最後に `+ ctx.group1`（C vmcmain.c:257 `init_gen_rand(RndSeed+group1)`）。
 `seed_override`（runner の `seed` kwarg）は表より優先される。
