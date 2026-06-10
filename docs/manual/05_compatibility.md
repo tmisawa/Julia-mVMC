@@ -94,15 +94,15 @@ parallelism. The C-compatible threading policy is conservative:
 
 - Independent copy loops and SR OO-store/finalize loops may use gated inner
   threading when writes are disjoint and `JULIA_MVMC_INNER_THREADS=1` is set.
+- The `VMCMainCal` sample loop remains sequential inside one process, matching
+  C-mVMC's rank-local loop. Sample-level worker splitting is not part of the
+  v0.3 C-compatible threading path.
 - `VMCMakeSample` keeps the C-style sequential Markov-chain semantics. The
   outer sampling loop (`outStep` / `inStep`, RNG, accept/reject, and burn
   sample updates) is not split into independent chains by `JULIA_NUM_THREADS`.
 
-Two additional opt-ins are kept for debugging and benchmark triage only:
+One additional opt-in is kept for debugging and benchmark triage only:
 
-- `JULIA_MVMC_MAINCAL_THREADS=<n>` enables sample-level `VMCMainCal` worker
-  splitting. This path is known not to be C-compatible yet for standard
-  fixtures with `n >= 2`; do not use it for production numbers.
 - `JULIA_MVMC_PFAPACK_THREADS=1` enables PfaPack QP-level threading. This path
   is also known not to pass the ctest-equivalent gates yet.
 
@@ -115,9 +115,9 @@ acceptance criteria. Treat it as a future numerical mode, not as C-compatible
 OpenMP-equivalent threading.
 
 For C-parity checks, run with `OMP_NUM_THREADS=1` and leave
-`JULIA_MVMC_MAINCAL_THREADS` and `JULIA_MVMC_PFAPACK_THREADS` unset. Any
-threaded opt-in must pass the same committed integration, ctest-equivalent, and
-PhysCal gates before its numbers are treated as C-compatible.
+`JULIA_MVMC_PFAPACK_THREADS` unset. Any threaded opt-in must pass the same
+committed integration, ctest-equivalent, and PhysCal gates before its numbers
+are treated as C-compatible.
 
 ## BLAS / LAPACK / OS notes
 
