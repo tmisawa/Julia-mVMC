@@ -1,50 +1,10 @@
 """
-Threading support for VMCMainCal sample-level parallelism.
+Threading and local-accumulator support for C-mVMC OpenMP-equivalent inner loops.
 
-Provides deterministic per-worker accumulators, timer reduction, and chunk
-selection used by `vmc_main_cal!` and `vmc_main_cal_fsz!`.
+`VMCMainCal` keeps the C rank-local sample loop sequential. Threading in this
+file is limited to explicitly gated inner loops with disjoint writes and to
+serial local accumulation before merging into the parent state.
 """
-
-struct VMCThreadConfig
-    requested_threads::Int
-    effective_threads::Int
-    work_items::Int
-    min_work_per_thread::Int
-end
-
-function VMCThreadConfig(
-    work_items::Integer;
-    requested_threads::Integer = Base.Threads.nthreads(),
-    min_work_per_thread::Integer = 1,
-)
-    requested_threads >= 1 ||
-        error("requested_threads must be >= 1, got $requested_threads")
-    work_items >= 0 || error("work_items must be >= 0, got $work_items")
-    min_work_per_thread >= 1 ||
-        error("min_work_per_thread must be >= 1, got $min_work_per_thread")
-
-    max_threads_by_work = work_items == 0 ? 1 : cld(work_items, min_work_per_thread)
-    effective = min(Int(requested_threads), Int(max_threads_by_work), max(1, Int(work_items)))
-    return VMCThreadConfig(
-        Int(requested_threads),
-        effective,
-        Int(work_items),
-        Int(min_work_per_thread),
-    )
-end
-
-@inline vmc_threading_enabled(config::VMCThreadConfig) = config.effective_threads > 1
-@inline effective_thread_count(config::VMCThreadConfig) = config.effective_threads
-
-function vmc_main_cal_requested_threads()
-    raw = strip(get(ENV, "JULIA_MVMC_MAINCAL_THREADS", ""))
-    isempty(raw) && return 1
-
-    parsed = tryparse(Int, raw)
-    parsed !== nothing && parsed >= 1 ||
-        error("JULIA_MVMC_MAINCAL_THREADS must be a positive integer, got '$raw'")
-    return min(parsed, Base.Threads.nthreads())
-end
 
 @inline function vmc_inner_threading_requested(threaded::Bool)
     raw = strip(get(ENV, "JULIA_MVMC_INNER_THREADS", "0"))
@@ -409,14 +369,6 @@ function VMCThreadAccumulator(state::VMCOptimizationState, parent_timer::CTimer 
     )
 end
 
-function make_thread_accumulators(
-    state::VMCOptimizationState,
-    config::VMCThreadConfig,
-    parent_timer::CTimer = CTIMER_DISABLED,
-)
-    return [VMCThreadAccumulator(state, parent_timer) for _ = 1:config.effective_threads]
-end
-
 function merge_thread_accumulator!(
     state::VMCOptimizationState,
     parent_timer::CTimer,
@@ -427,16 +379,5 @@ function merge_thread_accumulator!(
     merge_phys_accumulators!(state.phys_quantities, (local_acc.phys,))
     merge_counter_accumulator!(state.electron_config.counter, local_acc.counter)
     ctimer_merge!(parent_timer, local_acc.timer)
-    return state
-end
-
-function merge_thread_accumulators!(
-    state::VMCOptimizationState,
-    parent_timer::CTimer,
-    locals,
-)
-    for local_acc in locals
-        merge_thread_accumulator!(state, parent_timer, local_acc)
-    end
     return state
 end

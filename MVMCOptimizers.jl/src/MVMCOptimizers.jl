@@ -42,7 +42,7 @@ include("workspace.jl")
 # Include type definitions
 include("types.jl")
 
-# Threading/reduction infrastructure used by VMCMainCal sample parallelism.
+# Threading helpers for C OpenMP-equivalent inner loops and local accumulation.
 include("threading.jl")
 
 # calculate_m_all helpers (GPL helpers, formerly in MVMCPfaPack).

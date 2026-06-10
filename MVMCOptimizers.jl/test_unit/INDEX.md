@@ -89,18 +89,14 @@
   - `unit/types: ElectronConfiguration sizes (fsz vs non-fsz)` → `ElectronConfiguration(..., use_fsz)`
   - `unit/types: SlaterMatrixData size normalization` → `SlaterMatrixData(n_qp_full, n_site, n_elec, all_complex)`
 
-### `src/threading.jl`（VMCMainCal sample threading）
+### `src/threading.jl`（inner-loop threading helpers / local accumulators）
 - `test_unit/test_unit_threading.jl`
-  - `unit/threading: VMCThreadConfig` → effective thread count and validation
-  - `unit/threading: sample chunks` → 0-based contiguous sample range split and validation
   - `unit/threading: inner copy helpers` → R3 real/complex copy helper の threaded/serial 一致
   - `unit/threading: energy accumulator reduction` → deterministic local energy merge
   - `unit/threading: SR accumulator reduction` → complex/real SR array merge
   - `unit/threading: PhysCal accumulator reduction` → `phys_*` merge without touching local scratch、factored Green の local accumulator 加算
   - `unit/threading: counter and timer reductions` → counter sum and `CTimer` elapsed merge
-  - `unit/threading: whole-thread accumulator construction and merge` → combined local accumulator allocation and ordered merge
-  - `unit/threading: VMCMainCal worker state boundaries` → saved sample 配列のみ共有し、scratch / counter / workspace は worker-local
-  - `unit/threading: vmc_main_cal! requested thread self-consistency` → `requested_threads=1/2` で complex store/non-store、real、measurement PhysCal、FSZ の accumulators が一致
+  - `unit/threading: local accumulator construction and merge` → serial VMCMainCal local accumulator allocation and parent-state merge
 
 ### `src/unsupported_inputs.jl`（runtime contract）
 - `test_unit/test_unit_unsupported_inputs.jl`

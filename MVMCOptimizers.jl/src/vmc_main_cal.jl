@@ -2571,67 +2571,6 @@ function finalize_oo_store!(
     end
 end
 
-function vmc_sample_chunks(n_samples::Integer, n_chunks::Integer)
-    n = Int(n_samples)
-    c = Int(n_chunks)
-    c >= 1 || error("n_chunks must be >= 1, got $c")
-    n >= 0 || error("n_samples must be >= 0, got $n")
-    chunk_size = div(n, c)
-    remainder = rem(n, c)
-    chunks = Vector{UnitRange{Int}}(undef, c)
-    first_sample = 0
-    for chunk = 1:c
-        len = chunk_size + (chunk <= remainder ? 1 : 0)
-        last_sample = first_sample + len - 1
-        chunks[chunk] = first_sample:last_sample
-        first_sample += len
-    end
-    return chunks
-end
-
-function make_vmc_main_cal_worker_state(
-    data::ExpertModeData,
-    parent::VMCOptimizationState,
-)
-    n_site = data.modpara.nsite
-    n_elec = data.modpara.nelec
-    n_proj = MVMCExpertModeParsers.projection_layout(data).n_proj
-    n_para = parent.sr_opt.sr_opt_size - 1
-    n_qp_full = length(parent.slater_matrix.pf_m)
-    n_vmc_sample = data.modpara.nvmc_sample
-    all_complex = get_all_complex_flag(data)
-    use_fsz = !isempty(parent.electron_config.ele_spn)
-
-    worker = VMCOptimizationState(
-        n_site,
-        n_elec,
-        n_proj,
-        n_para,
-        n_qp_full,
-        n_vmc_sample,
-        all_complex,
-        use_fsz,
-    )
-
-    # Saved sample arrays are read-only in VMCMainCal; avoid duplicating them.
-    # Scratch arrays and counters remain worker-local.
-    worker.electron_config.ele_idx = parent.electron_config.ele_idx
-    worker.electron_config.ele_cfg = parent.electron_config.ele_cfg
-    worker.electron_config.ele_num = parent.electron_config.ele_num
-    worker.electron_config.ele_proj_cnt = parent.electron_config.ele_proj_cnt
-    worker.electron_config.ele_spn = parent.electron_config.ele_spn
-    worker.phys_quantities = parent.phys_quantities
-    worker.slater_matrix.slater_elm = parent.slater_matrix.slater_elm
-    worker.slater_matrix.slater_elm_real = parent.slater_matrix.slater_elm_real
-    copyto!(worker.slater_matrix.inv_m, parent.slater_matrix.inv_m)
-    copyto!(worker.slater_matrix.pf_m, parent.slater_matrix.pf_m)
-    if !isempty(worker.slater_matrix.inv_m_real)
-        copyto!(worker.slater_matrix.inv_m_real, parent.slater_matrix.inv_m_real)
-        copyto!(worker.slater_matrix.pf_m_real, parent.slater_matrix.pf_m_real)
-    end
-    return worker
-end
-
 # ============================================================================
 # Main Calculation Functions
 # ============================================================================
@@ -2646,7 +2585,6 @@ function vmc_main_cal!(
     data::ExpertModeData,
     state::VMCOptimizationState,
     c_timer::CTimer = CTIMER_DISABLED;
-    requested_threads::Integer = vmc_main_cal_requested_threads(),
     use_store::Bool = true,
 )
     n_site = data.modpara.nsite
@@ -3046,68 +2984,30 @@ function vmc_main_cal!(
         return nothing
     end
 
-    config = VMCThreadConfig(n_vmc_sample; requested_threads = requested_threads)
-    if vmc_threading_enabled(config)
-        local_accs = make_thread_accumulators(state, config, c_timer)
-        worker_states = [
-            make_vmc_main_cal_worker_state(data, state)
-            for _ = 1:config.effective_threads
-        ]
-        chunks = vmc_sample_chunks(n_vmc_sample, config.effective_threads)
+    local_acc = VMCThreadAccumulator(state, c_timer)
+    process_sample_range!(
+        0:(n_vmc_sample-1),
+        state,
+        local_acc,
+        c_timer,
+        true,
+    )
 
-        Base.Threads.@threads :static for worker_id = 1:config.effective_threads
-            process_sample_range!(
-                chunks[worker_id],
-                worker_states[worker_id],
-                local_accs[worker_id],
-                local_accs[worker_id].timer,
-                false,
-            )
-        end
-
-        # Finalize OO from stored samples ([45] multiply store OO)
-        if nvmc_cal_mode == 0 && use_store && all_complex
-            ctimer_start!(c_timer, 45)
-            for local_acc in local_accs
-                finalize_oo_store!(
-                    local_acc.sr_opt.sr_opt_oo,
-                    local_acc.sr_opt.sr_opt_o_store,
-                    sr_opt_size,
-                    n_vmc_sample,
-                    threaded = true,
-                )
-            end
-            ctimer_stop!(c_timer, 45)
-        end
-
-        clear_sropt_store!(state.sr_opt)
-        merge_thread_accumulators!(state, c_timer, local_accs)
-    else
-        local_acc = VMCThreadAccumulator(state, c_timer)
-        process_sample_range!(
-            0:(n_vmc_sample-1),
-            state,
-            local_acc,
-            c_timer,
-            true,
+    # Finalize OO from stored samples ([45] multiply store OO)
+    if nvmc_cal_mode == 0 && use_store && all_complex
+        ctimer_start!(c_timer, 45)
+        finalize_oo_store!(
+            local_acc.sr_opt.sr_opt_oo,
+            local_acc.sr_opt.sr_opt_o_store,
+            sr_opt_size,
+            n_vmc_sample,
+            threaded = true,
         )
-
-        # Finalize OO from stored samples ([45] multiply store OO)
-        if nvmc_cal_mode == 0 && use_store && all_complex
-            ctimer_start!(c_timer, 45)
-            finalize_oo_store!(
-                local_acc.sr_opt.sr_opt_oo,
-                local_acc.sr_opt.sr_opt_o_store,
-                sr_opt_size,
-                n_vmc_sample,
-                threaded = true,
-            )
-            ctimer_stop!(c_timer, 45)
-        end
-
-        clear_sropt_store!(state.sr_opt)
-        merge_thread_accumulator!(state, c_timer, local_acc)
+        ctimer_stop!(c_timer, 45)
     end
+
+    clear_sropt_store!(state.sr_opt)
+    merge_thread_accumulator!(state, c_timer, local_acc)
 
     # Debug: Check etot at the end of vmc_main_cal!
     if abs(state.energy.etot) < 1e-15 && real(state.energy.wc) > 0
@@ -3165,8 +3065,7 @@ Equivalent to C's `VMCMainCal_fsz()`.
 function vmc_main_cal_fsz!(
     data::ExpertModeData,
     state::VMCOptimizationState,
-    c_timer::CTimer = CTIMER_DISABLED;
-    requested_threads::Integer = vmc_main_cal_requested_threads(),
+    c_timer::CTimer = CTIMER_DISABLED,
 )
     n_site = data.modpara.nsite
     n_site2 = 2 * n_site
@@ -3352,34 +3251,11 @@ function vmc_main_cal_fsz!(
         return nothing
     end
 
-    config = VMCThreadConfig(n_vmc_sample; requested_threads = requested_threads)
-    if vmc_threading_enabled(config)
-        local_accs = make_thread_accumulators(state, config, c_timer)
-        worker_states = [
-            make_vmc_main_cal_worker_state(data, state)
-            for _ = 1:config.effective_threads
-        ]
-        chunks = vmc_sample_chunks(n_vmc_sample, config.effective_threads)
+    local_acc = VMCThreadAccumulator(state, c_timer)
+    process_sample_range_fsz!(0:(n_vmc_sample-1), state, local_acc, c_timer, true)
 
-        Base.Threads.@threads :static for worker_id = 1:config.effective_threads
-            process_sample_range_fsz!(
-                chunks[worker_id],
-                worker_states[worker_id],
-                local_accs[worker_id],
-                local_accs[worker_id].timer,
-                false,
-            )
-        end
-
-        clear_sropt_store!(state.sr_opt)
-        merge_thread_accumulators!(state, c_timer, local_accs)
-    else
-        local_acc = VMCThreadAccumulator(state, c_timer)
-        process_sample_range_fsz!(0:(n_vmc_sample-1), state, local_acc, c_timer, true)
-
-        clear_sropt_store!(state.sr_opt)
-        merge_thread_accumulator!(state, c_timer, local_acc)
-    end
+    clear_sropt_store!(state.sr_opt)
+    merge_thread_accumulator!(state, c_timer, local_acc)
 
     # Debug: Check final energy accumulation
     if abs(state.energy.etot) < 1e-15 && real(state.energy.wc) > 0
