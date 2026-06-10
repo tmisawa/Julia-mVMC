@@ -104,7 +104,7 @@ parallelism. The C-compatible threading policy is conservative:
 One additional opt-in is kept for debugging and benchmark triage only:
 
 - `JULIA_MVMC_PFAPACK_THREADS=1` enables PfaPack QP-level threading. This path
-  is also known not to pass the ctest-equivalent gates yet.
+  is known not to pass the ctest-equivalent gates yet.
 
 PfaPack calls are guarded by a process-local lock by default. Setting
 `JULIA_MVMC_PFAPACK_LOCK=0` disables that lock for diagnosis only; it is not a
