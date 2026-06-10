@@ -78,6 +78,7 @@ function vmc_para_opt!(
     output_dir::Union{String,Nothing} = nothing,
     skip_sr::Bool = false,
     c_timer::Union{CTimer,Nothing} = nothing,
+    ctx::ParallelContext = serial_context(),
 )::Int
     # Reject unsupported ModPara inputs (e.g. NSplitSize > 1) before any work.
     validate_supported_modpara(data.modpara)
@@ -199,8 +200,9 @@ function vmc_para_opt!(
 
     # Optimization loop
     for step = 0:(n_steps-1)
-        # Progress output
-        if step == 0 || (n_steps < 20) || (step % max(1, n_steps ÷ 20) == 0)
+        # Progress output (rank0 のみ; C の CLI 出力は rank0 限定。plan review F5)
+        if is_output_rank(ctx) &&
+           (step == 0 || (n_steps < 20) || (step % max(1, n_steps ÷ 20) == 0))
             progress = floor(Int, 100.0 * step / n_steps)
             println("Progress of Optimization: $progress %")
         end
@@ -293,7 +295,8 @@ function vmc_para_opt!(
         # [22] outputData (C vmcmain.c:437-440)
         ctimer_start!(timer, 22)
         # 7. Output data (before optimization, matching C implementation order)
-        output_data!(data, state, step; output_dir=output_dir)
+        # C vmcmain.c:441 `if(rank==0) outputData()` — 出力は rank0 のみ（spec §5-9）
+        is_output_rank(ctx) && output_data!(data, state, step; output_dir=output_dir)
         ctimer_stop!(timer, 22)
 
         # If skip_sr is set, only run step 0 and return after output
@@ -322,10 +325,10 @@ function vmc_para_opt!(
             return info
         end
 
-        # [23] SyncModifiedParameter (C vmcmain.c:507-509)
+        # [23] SyncModifiedParameter (C vmcmain.c:509-510, comm_parent で bcast)
         ctimer_start!(timer, 23)
         # 9. Sync modified parameters
-        sync_modified_parameter!(data)
+        sync_modified_parameter!(ctx, data)
         ctimer_stop!(timer, 23)
 
         # 10. Store optimization data (for averaging)
@@ -340,10 +343,10 @@ function vmc_para_opt!(
         end
     end
 
-    # Final output
-    println("Start: Output opt params.")
-    output_opt_data!(data; output_dir=output_dir)
-    println("End: Output opt params.")
+    # Final output (rank0 のみ; C `if(rank==0) outputData()` 相当)
+    is_output_rank(ctx) && println("Start: Output opt params.")
+    is_output_rank(ctx) && output_opt_data!(data; output_dir=output_dir)
+    is_output_rank(ctx) && println("End: Output opt params.")
 
     ctimer_stop!(timer, 2)
 

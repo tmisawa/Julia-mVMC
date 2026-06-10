@@ -186,7 +186,7 @@ function run_para_opt_from_namelist(namelist_path::AbstractString;
     #    C's SyncModifiedParameter call at vmcmain.c:276. This shifts
     #    correlation factors, rescales Slater, and normalizes OptTrans
     #    when the OptTrans mode is active.
-    sync_modified_parameter!(data)
+    sync_modified_parameter!(ctx, data)
     ctimer_stop!(c_timer, 13)
 
     # 7. Quantum projection weights (C's InitQPWeight, vmcmain.c:281).
@@ -208,11 +208,27 @@ function run_para_opt_from_namelist(namelist_path::AbstractString;
         rng = rng,
         output_dir = String(output_dir),
         c_timer = c_timer,
+        ctx = ctx,
     )
 
     ctimer_stop!(c_timer, 0)   # end [0] All (post-run zvo readback below is bookkeeping, not timed)
-    if timer_enabled
+    if timer_enabled && is_output_rank(ctx)
         write_ctimer_para_opt(c_timer, String(output_dir))
+    end
+
+    # rank0 の write 完了を待ってから読み返す（spec §5-9、F11）。
+    barrier(ctx)
+    if !is_output_rank(ctx)
+        # 非 rank0 は readback しない。minimal result を返す。
+        return (
+            status = status,
+            output_dir = abspath(output_dir),
+            zvo_first_n = String[],
+            ctest_values = Float64[],
+            final_energy_per_site = NaN,
+            effective_nsteps = effective_nsteps,
+            effective_nsmp = effective_nsmp,
+        )
     end
 
     # 5. Read back outputs for caller convenience. Julia writes zvo_out.dat
