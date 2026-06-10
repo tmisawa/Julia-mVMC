@@ -96,3 +96,19 @@ end
     @test _chunk_ranges(8, 4) == [1:4, 5:8]
     @test _chunk_ranges(9, 4) == [1:4, 5:8, 9:9]
 end
+
+using MVMCOptimizers: resolve_rnd_seed
+
+@testset "resolve_rnd_seed C parity (spec §5-1, A5)" begin
+    ctx = serial_context()
+    @test resolve_rnd_seed(ctx, 11272, nothing) == 11272   # missing → parser default
+    @test resolve_rnd_seed(ctx, 0, nothing) == 0           # RndSeed==0 → seed 0 (C parity)
+    @test resolve_rnd_seed(ctx, 123, nothing) == 123       # 正値
+    t = resolve_rnd_seed(ctx, -1, nothing)                 # 負値 → 時刻 seed
+    @test t isa Int && t > 0
+    @test resolve_rnd_seed(ctx, 123, 777) == 777           # 明示 seed kwarg が優先
+    # group1 offset (C vmcmain.c:257)
+    ctx2 = MVMCOptimizers.ParallelContext(false, nothing, nothing, nothing,
+                                          3, 4, 0, 1, 0, 1, 3)   # group1=3 の擬似 ctx
+    @test resolve_rnd_seed(ctx2, 100, nothing) == 103
+end

@@ -243,3 +243,25 @@ function abort_parallel(ctx::ParallelContext, code::Int = 1)
         error("fatal error (abort code=$code)")
     end
 end
+
+"""
+    resolve_rnd_seed(ctx, modpara_rnd_seed, seed_override) -> Int
+
+C parity の seed 解決（spec §5-1、A5）:
+missing/default → 11272（parser が既に格納）、`< 0` → rank0 が時刻 seed を決め
+comm0 bcast（C readdef.c:2161-2163）、`== 0` → 0、`> 0` → その値。
+最後に `+ ctx.group1`（C vmcmain.c:257 `init_gen_rand(RndSeed+group1)`）。
+`seed_override`（runner の `seed` kwarg）は表より優先される。
+"""
+function resolve_rnd_seed(ctx::ParallelContext, modpara_rnd_seed::Integer,
+                          seed_override::Union{Integer,Nothing})
+    base = if seed_override !== nothing
+        Int(seed_override)
+    elseif modpara_rnd_seed < 0
+        t = ctx.rank0 == 0 ? Int(floor(time())) : 0
+        Int(bcast_scalar(ctx, t))
+    else
+        Int(modpara_rnd_seed)
+    end
+    return base + ctx.group1
+end

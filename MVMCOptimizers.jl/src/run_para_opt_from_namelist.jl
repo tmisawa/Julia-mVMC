@@ -107,6 +107,18 @@ function run_para_opt_from_namelist(namelist_path::AbstractString;
     ctimer_start!(c_timer, 11)   # [11] ReadDefFile
     data = MVMCExpertModeParsers.parse_expert_mode_files(namelist_str)
     ctimer_stop!(c_timer, 11)
+
+    # v0.4 R0: unsupported input の検証は MPI context 構築より前（plan review F4）。
+    # 現行は vmc_para_opt!（vmc_para_opt.jl:83）内でのみ呼ばれるが、R0 で
+    # build_parallel_context を parse 直後へ移すため、invalid な NSplitSize
+    #（< 1、または R0 では > 1 も未 support）で MPI context を作らないよう
+    # ここで先に検証する。vmc_para_opt! 側の既存呼び出しは defense-in-depth
+    # としてそのまま残す（重複呼び出しは無害）。
+    validate_supported_modpara(data.modpara)
+
+    # v0.4 R0: MPI context は seed / init_parameter! より前に作る（spec §4.2, F3）。
+    ctx = build_parallel_context(data.modpara.nsplit_size)
+
     effective_nsteps = Int(nsteps)
     effective_nsmp = nsmp === nothing ? data.modpara.nsr_opt_itr_smp : Int(nsmp)
     effective_nsmp > 0 || throw(ArgumentError("effective nsmp must be positive; got $effective_nsmp"))
@@ -116,11 +128,8 @@ function run_para_opt_from_namelist(namelist_path::AbstractString;
 
     # 2. Construct and seed the SFMT19937 RNG with the C-compatible convention.
     rng = SFMT19937RNG()
-    actual_seed = if seed === nothing
-        data.modpara.rnd_seed > 0 ? data.modpara.rnd_seed : 11272
-    else
-        Int(seed)
-    end
+    # C parity seed 解決 + group1 offset（spec §5-1; C vmcmain.c:257）。
+    actual_seed = resolve_rnd_seed(ctx, data.modpara.rnd_seed, seed)
     Random.seed!(rng, actual_seed)
 
     # 3. Random-seeded variational parameter initialisation. We call
