@@ -26,6 +26,89 @@ function get_opt_flag_for_parameter(data::ExpertModeData, pi::Int)::Int
 end
 
 """
+    get_parameter_value(data, para_idx) -> ComplexF64
+
+flat parameter index（1-based、Proj → RBM → Slater → OptTrans）の現在値を返す。
+`update_parameter_value` の read 版で、block 境界は同関数と同一。範囲外や
+layout の隙間（spin-jastrow 等）は 0 を返す（update 側が no-op になる index と対応）。
+"""
+function get_parameter_value(data::ExpertModeData, para_idx::Int)::ComplexF64
+    layout = MVMCExpertModeParsers.projection_layout(data)
+    n_proj = layout.n_proj
+    n_rbm = has_rbm_terms(data) ? MVMCExpertModeParsers.count_rbm_parameters(data) : 0
+    n_orbital_idx = MVMCExpertModeParsers.count_orbital_parameters(data)
+    n_opt_trans = MVMCExpertModeParsers.count_opt_trans_parameters(data)
+
+    if para_idx <= n_proj
+        if para_idx <= layout.gutzwiller_offset + layout.n_gutzwiller
+            local_idx = para_idx - layout.gutzwiller_offset
+            if 1 <= local_idx <= length(data.gutzwiller_terms)
+                return ComplexF64(data.gutzwiller_terms[local_idx].value)
+            end
+        elseif para_idx <= layout.jastrow_offset + layout.n_jastrow
+            local_idx = para_idx - layout.jastrow_offset
+            if 1 <= local_idx <= length(data.jastrow_terms)
+                return ComplexF64(data.jastrow_terms[local_idx].value)
+            end
+        elseif layout.dh2_offset < para_idx <= layout.dh2_offset + 6 * layout.n_dh2
+            local_idx = para_idx - layout.dh2_offset
+            if 1 <= local_idx <= length(data.doublon_holon_2site_params)
+                return ComplexF64(data.doublon_holon_2site_params[local_idx])
+            end
+        elseif layout.dh4_offset < para_idx <= layout.dh4_offset + 10 * layout.n_dh4
+            local_idx = para_idx - layout.dh4_offset
+            if 1 <= local_idx <= length(data.doublon_holon_4site_params)
+                return ComplexF64(data.doublon_holon_4site_params[local_idx])
+            end
+        end
+        return ComplexF64(0)
+    elseif para_idx <= n_proj + n_rbm
+        rbm_idx = para_idx - n_proj - 1
+        rbm_sections = (
+            data.charge_rbm_phys_layer_terms,
+            data.spin_rbm_phys_layer_terms,
+            data.general_rbm_phys_layer_terms,
+            data.charge_rbm_hidden_layer_terms,
+            data.spin_rbm_hidden_layer_terms,
+            data.general_rbm_hidden_layer_terms,
+            data.charge_rbm_phys_hidden_terms,
+            data.spin_rbm_phys_hidden_terms,
+            data.general_rbm_phys_hidden_terms,
+        )
+        section_offset = 0
+        for terms in rbm_sections
+            n_section = isempty(terms) ? 0 : (maximum(t.idx for t in terms) + 1)
+            if rbm_idx < section_offset + n_section
+                local_idx = rbm_idx - section_offset
+                for term in terms
+                    if term.idx == local_idx
+                        return ComplexF64(term.value)
+                    end
+                end
+                return ComplexF64(0)
+            end
+            section_offset += n_section
+        end
+        return ComplexF64(0)
+    else
+        slater_start = n_proj + n_rbm + 1
+        opt_trans_start = n_proj + n_rbm + n_orbital_idx + 1
+        if slater_start <= para_idx < opt_trans_start
+            orbital_idx = para_idx - n_proj - n_rbm - 1
+            for term in data.orbital_terms
+                if term.idx == orbital_idx
+                    return ComplexF64(term.value)
+                end
+            end
+        elseif opt_trans_start <= para_idx < opt_trans_start + n_opt_trans
+            opt_idx = para_idx - opt_trans_start + 1
+            return ComplexF64(data.opt_trans[opt_idx])
+        end
+        return ComplexF64(0)
+    end
+end
+
+"""
     update_parameter_value(data::ExpertModeData, para_idx::Int, delta_real::Float64, delta_imag::Float64)
 
 Update a variational parameter value.

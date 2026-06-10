@@ -112,3 +112,77 @@ using MVMCOptimizers: resolve_rnd_seed
                                           3, 4, 0, 1, 0, 1, 3)   # group1=3 の擬似 ctx
     @test resolve_rnd_seed(ctx2, 100, nothing) == 103
 end
+
+using MVMCOptimizers: count_total_parameters, get_parameter_value,
+                      set_parameter_value!, pack_parameters, unpack_parameters!
+using MVMCExpertModeParsers
+
+@testset "parameter pack/unpack roundtrip (spec §5-2, F4)" begin
+    fixture = joinpath(@__DIR__, "..", "..", "test", "integration", "reference",
+                       "heisenberg_chain_real", "inputs", "namelist.def")
+    data = MVMCExpertModeParsers.parse_expert_mode_files(fixture)
+    n = count_total_parameters(data)
+    @test n > 0
+
+    para = pack_parameters(data)
+    @test length(para) == n
+
+    # update_parameter_value との整合: i 番目に δ を足すと pack[i] が δ 増える
+    for i in (1, n)
+        before = pack_parameters(data)[i]
+        MVMCOptimizers.update_parameter_value(data, i, 0.25, -0.5)
+        @test pack_parameters(data)[i] ≈ before + ComplexF64(0.25, -0.5)
+    end
+
+    # roundtrip: 摂動 → unpack で元に戻る
+    original = pack_parameters(data)
+    perturbed = original .+ ComplexF64(0.01, 0.02)
+    unpack_parameters!(data, perturbed)
+    @test pack_parameters(data) ≈ perturbed
+    unpack_parameters!(data, original)
+    @test pack_parameters(data) ≈ original
+
+    @test_throws ArgumentError unpack_parameters!(data, original[1:max(n - 1, 0)])
+end
+
+@testset "duplicate idx invariant (plan review F7 / addendum C1)" begin
+    fixture = joinpath(@__DIR__, "..", "..", "test", "integration", "reference",
+                       "heisenberg_chain_real", "inputs", "namelist.def")
+    data = MVMCExpertModeParsers.parse_expert_mode_files(fixture)
+
+    # unpack 後、同一 idx の duplicate term は全て同値であること。
+    para = pack_parameters(data) .+ ComplexF64(0.1, -0.1)
+    unpack_parameters!(data, para)
+    for idx in unique(t.idx for t in data.orbital_terms)
+        vals = [t.value for t in data.orbital_terms if t.idx == idx]
+        @test all(v -> v == vals[1], vals)
+    end
+
+    # orbital duplicate を人為的に不一致にすると fail-fast すること。
+    dup_idx = findfirst(i -> count(t -> t.idx == data.orbital_terms[i].idx,
+                                   data.orbital_terms) > 1,
+                        eachindex(data.orbital_terms))
+    if dup_idx !== nothing
+        data.orbital_terms[dup_idx].value += ComplexF64(1.0, 0.0)
+        @test_throws ErrorException unpack_parameters!(data, para)
+    end
+
+    # RBM duplicate も検査対象であること（addendum C1）。fixture に RBM がないため
+    # synthetic に同一 idx・異値の term を 2 つ作る（fresh parse で orbital 側の
+    # 不一致と混ざらないようにする）。
+    data_rbm = MVMCExpertModeParsers.parse_expert_mode_files(fixture)
+    push!(data_rbm.charge_rbm_phys_layer_terms,
+          MVMCExpertModeParsers.ChargeRBMPhysLayerTerm(0, ComplexF64(0.1, 0.0), true, 0),
+          MVMCExpertModeParsers.ChargeRBMPhysLayerTerm(1, ComplexF64(0.2, 0.0), true, 0))
+    @test_throws ErrorException MVMCOptimizers.check_duplicate_consistency(data_rbm)
+end
+
+@testset "sync_modified_parameter!(ctx, data) serial == legacy" begin
+    fixture = joinpath(@__DIR__, "..", "..", "test", "integration", "reference",
+                       "heisenberg_chain_real", "inputs", "namelist.def")
+    data_a = MVMCExpertModeParsers.parse_expert_mode_files(fixture)
+    data_b = MVMCExpertModeParsers.parse_expert_mode_files(fixture)
+    MVMCOptimizers.sync_modified_parameter!(data_a)                       # legacy
+    MVMCOptimizers.sync_modified_parameter!(serial_context(), data_b)     # ctx 版
+    @test pack_parameters(data_a) ≈ pack_parameters(data_b)
+end
