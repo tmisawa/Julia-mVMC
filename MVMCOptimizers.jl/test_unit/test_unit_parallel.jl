@@ -32,3 +32,45 @@ end
     # size0=3, NSplitSize=2: 最後の group が小さい (F8, warning のみで継続)
     @test [div(r, 2) for r in 0:2] == [0, 0, 1]
 end
+
+using MVMCOptimizers: ParallelContext, serial_context, is_output_rank,
+                      mpi_env_detected, resolve_mpi_mode
+
+@testset "serial_context" begin
+    ctx = serial_context()
+    @test ctx.is_mpi == false
+    @test ctx.comm0 === nothing && ctx.comm1 === nothing && ctx.comm2 === nothing
+    @test (ctx.rank0, ctx.size0) == (0, 1)
+    @test (ctx.rank1, ctx.size1) == (0, 1)
+    @test (ctx.rank2, ctx.size2) == (0, 1)
+    @test ctx.group1 == 0
+    @test is_output_rank(ctx)
+end
+
+@testset "JULIA_MVMC_MPI policy (spec §4.1, F12+A7)" begin
+    clean = ("JULIA_MVMC_MPI" => nothing, "OMPI_COMM_WORLD_SIZE" => nothing,
+             "PMI_SIZE" => nothing, "PMI_RANK" => nothing)
+    withenv(clean...) do
+        @test !mpi_env_detected()
+        @test resolve_mpi_mode() === :serial                       # auto + 未検出
+    end
+    withenv(clean..., "OMPI_COMM_WORLD_SIZE" => "2") do
+        @test mpi_env_detected()
+        @test resolve_mpi_mode() === :mpi                          # auto + 検出
+    end
+    withenv(clean..., "PMI_SIZE" => "2") do
+        @test resolve_mpi_mode() === :mpi                          # MPICH hydra
+    end
+    withenv(clean..., "JULIA_MVMC_MPI" => "1") do
+        @test resolve_mpi_mode() === :mpi                          # =1 は常に MPI 必須
+    end
+    withenv(clean..., "JULIA_MVMC_MPI" => "0") do
+        @test resolve_mpi_mode() === :serial                       # =0 + 未検出 → serial
+    end
+    withenv(clean..., "JULIA_MVMC_MPI" => "0", "PMI_RANK" => "0") do
+        @test resolve_mpi_mode() === :mpi_guarded_serial           # =0 + 検出 → guarded
+    end
+    withenv(clean..., "JULIA_MVMC_MPI" => "yes") do
+        @test_throws ErrorException resolve_mpi_mode()             # 不正値は明示 error
+    end
+end

@@ -78,6 +78,7 @@ include("run_para_opt_from_namelist.jl")
 include("run_phys_cal_from_namelist.jl")
 
 # Export main functions
+export ParallelContext, serial_context, build_parallel_context, is_output_rank
 export vmc_para_opt!
 export vmc_phys_cal!
 export run_para_opt_from_namelist
