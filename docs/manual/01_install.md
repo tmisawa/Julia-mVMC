@@ -67,7 +67,7 @@ the larger checkout, and the submodules are not pulled in either, so
 the dependency resolver fails (the subpackages are not on a registry).
 
 The clone-based workflow above sidesteps this entirely. Adding a
-URL-based install path is a v0.3+ concern and would require committing
+URL-based install path is a future concern and would require committing
 the GitHub URL into each subpackage's `[sources]` block.
 
 ## Manifest files

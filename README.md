@@ -2,14 +2,15 @@
 
 Julia port of the [mVMC](https://github.com/issp-center-dev/mVMC) (many-variable Variational Monte Carlo) solver for quantum lattice models.
 
-## Status (v0.2)
+## Status (v0.3)
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| VMCParaOpt (parameter optimization) | ✅ Verified | Bit-level match to C reference for HeisenbergChain (real / cmp / fsz) and HubbardChain (real); see `test/integration/`. |
-| VMCPhysCal (physical quantities) | 🚧 Experimental | Limited Green-function output. |
+| VMCParaOpt (parameter optimization) | ✅ Verified | Strict first-10-step C-reference checks plus C ctest-equivalent gates for supported standard fixtures; see `test/integration/`. |
+| VMCPhysCal (physical quantities) | 🚧 Experimental | C-referenced one-body, direct two-body, and factored/product two-body Green-function output for supported fixtures. |
+| Shared-memory threading | 🚧 Experimental | Conservative inner-loop opt-ins only; sample-level `VMCMainCal` threading is intentionally disabled for C-parity. |
 | Lanczos | ⚠️ Step-0 only | Single-step comparison verified; full Lanczos not yet ported. |
-| BackFlow | ❌ Not supported | Planned for v0.3+. |
+| BackFlow | ❌ Not supported | Planned for a future release. |
 | MPI parallelization | ❌ Not supported | Single-process only in this release. |
 
 ## Installation
@@ -74,7 +75,7 @@ GPL-3.0-or-later. See [LICENSE](LICENSE) and [THIRD_PARTY_LICENSES.md](THIRD_PAR
 
 See [CITATION.cff](CITATION.cff). Plain-text:
 
-> Misawa, T. (2026). Julia-mVMC v0.2.0. https://github.com/tmisawa/Julia-mVMC
+> Misawa, T. (2026). Julia-mVMC v0.3.0. https://github.com/tmisawa/Julia-mVMC
 
 ## Acknowledgments
 
