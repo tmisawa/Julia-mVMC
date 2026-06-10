@@ -7,6 +7,7 @@ authors = ["Takahiro Misawa <tmisawa@issp.u-tokyo.ac.jp>"]
 FastGaussQuadrature = "442a2c76-b920-505d-bb47-c5924d526838"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 LoopVectorization = "bdcacae8-1622-11e9-2a5c-532679323890"
+MPI = "da04e1cc-30fd-572f-bb4f-1f8673147195"
 MVMCExpertModeParsers = "f8463493-42a4-4c1a-8bf4-93a3cbd844bc"
 PfaPack = "fb1811a7-9b9e-407c-aa55-948d91a1aed1"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
@@ -21,6 +22,7 @@ SFMT = {path = "../SFMT.jl"}
 [compat]
 FastGaussQuadrature = "1.0"
 LoopVectorization = "0.12.173"
+MPI = "0.20"
 julia = "1.11"
 
 [extras]
