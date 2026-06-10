@@ -27,7 +27,7 @@ result = run_para_opt_from_namelist(
 | `mode` | Sanity label (one of `:real`, `:cmp`, `:fsz`); the actual run mode is determined by `complex_flag` and orbital files in the parsed input. |
 | `nsmp` | Number of final optimisation samples used for C ctest-style averaging. `nothing` preserves `NSROptItrSmp`; an integer overrides it and must satisfy `nsteps >= nsmp`. |
 | `output_dir` | Where `zvo_out.dat`, `zqp_opt.dat`, etc. are written. Defaults to a fresh tempdir. |
-| `seed` | SFMT19937 seed. `nothing` → use `RndSeed` from `modpara.def` (fallback `11272` when ≤ 0). |
+| `seed` | SFMT19937 seed. `nothing` → resolve `RndSeed` from `modpara.def` with the C-parity rule (v0.4): missing → `11272`, `0` → `0`, negative → time-derived seed, positive → the value; `+ group1` under MPI. |
 | `initial_def` | `:auto` (default) loads `inputs/initial.def` if present and aborts on a present-but-broken file; `:none` / `nothing` skips entirely; an explicit path errors if loading fails. |
 
 Returns a `NamedTuple` with `status`, `output_dir`, `zvo_first_n` (first
