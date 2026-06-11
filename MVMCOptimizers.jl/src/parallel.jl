@@ -87,28 +87,74 @@ serial_context() =
 "出力（zvo_*.dat / readback / 進捗 print）を担う rank か（C: `if(rank==0)`)。"
 is_output_rank(ctx::ParallelContext) = ctx.rank0 == 0
 
-# mpiexec 起動の検出に使う環境変数（spec §4.1）。
-const MPI_ENV_KEYS = ("OMPI_COMM_WORLD_SIZE", "PMI_SIZE", "PMI_RANK")
+# MPI launcher 配下でのみ注入される強シグナル（detection-policy spec、F3/F5）:
+# OMPI_COMM_WORLD_SIZE は mpirun/prte、PMIX_RANK は srun --mpi=pmix。
+# PMI_SIZE / PMI_RANK は SLURM pmi2 が非 MPI の単独 task にも注入するため
+# 強シグナルにしない — mpi_launch_detected() で多重 task 条件と組み合わせる。
+const MPI_STRONG_ENV_KEYS = ("OMPI_COMM_WORLD_SIZE", "PMIX_RANK")
 
-mpi_env_detected() = any(k -> haskey(ENV, k), MPI_ENV_KEYS)
+"強シグナル（launcher が MPI process にのみ注入する env key）の検出。"
+mpi_env_detected() = any(k -> haskey(ENV, k), MPI_STRONG_ENV_KEYS)
+
+"SLURM が複数 task を同時起動しているか（`SLURM_NTASKS` / `SLURM_NPROCS` > 1）。"
+function slurm_multi_task()
+    for key in ("SLURM_NTASKS", "SLURM_NPROCS")
+        n = tryparse(Int, get(ENV, key, ""))
+        n !== nothing && return n > 1
+    end
+    return false
+end
+
+"""
+    mpi_launch_detected() -> Bool
+
+「MPI launcher 配下」の判定（detection-policy spec の判定表）。強シグナル
+（`OMPI_COMM_WORLD_SIZE` / `PMIX_RANK`）は無条件で true。`PMI_SIZE` は
+SLURM pmi2 が非 MPI の単独 task にも注入するため（F5）、`PMI_SIZE > 1` または
+`slurm_multi_task()` と組み合わせた場合のみ true。
+"""
+function mpi_launch_detected()
+    mpi_env_detected() && return true
+    pmi_size = tryparse(Int, get(ENV, "PMI_SIZE", ""))
+    return pmi_size !== nothing && (pmi_size > 1 || slurm_multi_task())
+end
 
 """
     resolve_mpi_mode() -> :serial | :mpi | :mpi_guarded_serial
 
-`JULIA_MVMC_MPI` の 3 値 semantics（spec §4.1、F12+A7）:
-auto/unset → 検出時のみ :mpi。`0` → 未検出なら :serial、検出時は
-:mpi_guarded_serial（MPI.Init 後に size>1 なら error+Abort、size==1 なら serial）。
-`1` → 常に :mpi（Init 失敗はそのまま error）。
+`JULIA_MVMC_MPI` の 3 値 semantics（detection-policy spec の判定表、F3/F5/F12+A7）:
+
+| 条件 | 判定 |
+|------|------|
+| `=1` | `:mpi`（無条件。Init 失敗はそのまま error） |
+| `=0` + launch 検出 | `:mpi_guarded_serial`（MPI.Init 後 size>1 なら abort） |
+| `=0` + 未検出 | `:serial`（job array 等の意図的な非 MPI 実行） |
+| auto + launch 検出 | `:mpi` |
+| auto + 未検出 + SLURM 多重 task | error（F3 fail-fast: MPI plugin を認識できない） |
+| auto + 完全未検出 | `:serial` |
+
+launch 検出は `mpi_launch_detected()`。`PMI_SIZE == 1` の単独 task は
+serial 扱い（F5: pmi2 が非 MPI task にも PMI_* を注入するため）。
 """
 function resolve_mpi_mode()
     raw = strip(get(ENV, "JULIA_MVMC_MPI", ""))
-    detected = mpi_env_detected()
     if raw == "1"
         return :mpi
     elseif raw == "0"
-        return detected ? :mpi_guarded_serial : :serial
+        return mpi_launch_detected() ? :mpi_guarded_serial : :serial
     elseif raw == "" || raw == "auto"
-        return detected ? :mpi : :serial
+        mpi_launch_detected() && return :mpi
+        if slurm_multi_task()
+            # F3: srun 直下なのに MPI signal が無い（pmi2/pmix を認識できない）。
+            # serial に落とすと全 rank が同一 zvo_* へ書く silent corruption になる。
+            error("SLURM multi-task run detected (SLURM_NTASKS > 1) but no MPI " *
+                  "launch signal (OMPI_COMM_WORLD_SIZE / PMIX_RANK / PMI_SIZE) " *
+                  "was found; the srun MPI plugin (pmi2/pmix) could not be " *
+                  "recognized. Set JULIA_MVMC_MPI=1 to force MPI, or " *
+                  "JULIA_MVMC_MPI=0 for an intentional non-MPI run " *
+                  "(e.g. independent serial tasks in a job array).")
+        end
+        return :serial
     else
         error("JULIA_MVMC_MPI must be \"0\", \"1\", \"auto\", or unset; got \"$raw\"")
     end

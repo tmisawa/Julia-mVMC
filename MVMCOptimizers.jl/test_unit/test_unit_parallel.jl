@@ -47,28 +47,63 @@ using MVMCOptimizers: ParallelContext, serial_context, is_output_rank,
     @test is_output_rank(ctx)
 end
 
-@testset "JULIA_MVMC_MPI policy (spec §4.1, F12+A7)" begin
+using MVMCOptimizers: mpi_launch_detected, slurm_multi_task
+
+@testset "JULIA_MVMC_MPI policy (detection-policy spec 判定表, F3/F5/F12+A7)" begin
     clean = ("JULIA_MVMC_MPI" => nothing, "OMPI_COMM_WORLD_SIZE" => nothing,
-             "PMI_SIZE" => nothing, "PMI_RANK" => nothing)
+             "PMIX_RANK" => nothing, "PMIX_SIZE" => nothing,
+             "PMI_SIZE" => nothing, "PMI_RANK" => nothing,
+             "SLURM_NTASKS" => nothing, "SLURM_NPROCS" => nothing,
+             "SLURM_PROCID" => nothing)
     withenv(clean...) do
         @test !mpi_env_detected()
-        @test resolve_mpi_mode() === :serial                       # auto + 未検出
+        @test !mpi_launch_detected()
+        @test !slurm_multi_task()
+        @test resolve_mpi_mode() === :serial                       # auto + 完全未検出
     end
     withenv(clean..., "OMPI_COMM_WORLD_SIZE" => "2") do
         @test mpi_env_detected()
-        @test resolve_mpi_mode() === :mpi                          # auto + 検出
+        @test resolve_mpi_mode() === :mpi                          # auto + mpirun/prte
+    end
+    withenv(clean..., "PMIX_RANK" => "1", "PMIX_SIZE" => "2",
+            "SLURM_NTASKS" => "2", "SLURM_PROCID" => "1") do
+        @test mpi_env_detected()
+        @test resolve_mpi_mode() === :mpi                          # F3: srun --mpi=pmix
     end
     withenv(clean..., "PMI_SIZE" => "2") do
-        @test resolve_mpi_mode() === :mpi                          # MPICH hydra
+        @test resolve_mpi_mode() === :mpi                          # MPICH hydra (PMI_SIZE>1)
+    end
+    withenv(clean..., "PMI_RANK" => "0", "PMI_SIZE" => "1", "SLURM_NTASKS" => "2") do
+        @test resolve_mpi_mode() === :mpi                          # pmi2 + 多重 task
+    end
+    withenv(clean..., "PMI_RANK" => "0", "PMI_SIZE" => "1") do
+        @test !mpi_launch_detected()
+        @test resolve_mpi_mode() === :serial                       # F5: pmi2 単独 task → serial
+    end
+    withenv(clean..., "PMI_RANK" => "0", "PMI_SIZE" => "1", "SLURM_NTASKS" => "1") do
+        @test resolve_mpi_mode() === :serial                       # F5: 明示 1 task も serial
+    end
+    withenv(clean..., "SLURM_NTASKS" => "2") do
+        @test slurm_multi_task()
+        @test_throws ErrorException resolve_mpi_mode()             # F3: 無シグナル多重 task → fail-fast
+    end
+    withenv(clean..., "SLURM_NPROCS" => "2") do
+        @test_throws ErrorException resolve_mpi_mode()             # F3: SLURM_NPROCS fallback
     end
     withenv(clean..., "JULIA_MVMC_MPI" => "1") do
-        @test resolve_mpi_mode() === :mpi                          # =1 は常に MPI 必須
+        @test resolve_mpi_mode() === :mpi                          # =1 は常に MPI 必須 (A7)
     end
     withenv(clean..., "JULIA_MVMC_MPI" => "0") do
         @test resolve_mpi_mode() === :serial                       # =0 + 未検出 → serial
     end
-    withenv(clean..., "JULIA_MVMC_MPI" => "0", "PMI_RANK" => "0") do
-        @test resolve_mpi_mode() === :mpi_guarded_serial           # =0 + 検出 → guarded
+    withenv(clean..., "JULIA_MVMC_MPI" => "0", "PMIX_RANK" => "0") do
+        @test resolve_mpi_mode() === :mpi_guarded_serial           # =0 + 検出 → guarded (F12)
+    end
+    withenv(clean..., "JULIA_MVMC_MPI" => "0", "PMI_SIZE" => "2") do
+        @test resolve_mpi_mode() === :mpi_guarded_serial           # =0 + hydra 検出 → guarded
+    end
+    withenv(clean..., "JULIA_MVMC_MPI" => "0", "SLURM_NTASKS" => "2") do
+        @test resolve_mpi_mode() === :serial                       # =0: job array 等の意図的非 MPI
     end
     withenv(clean..., "JULIA_MVMC_MPI" => "yes") do
         @test_throws ErrorException resolve_mpi_mode()             # 不正値は明示 error
@@ -128,6 +163,13 @@ end
     # output へ書くため、entry で error する（guard は parse より前なので
     # ダミーパスで検証できる）。
     withenv("JULIA_MVMC_MPI" => "1") do
+        @test_throws ErrorException MVMCOptimizers.run_phys_cal_from_namelist(
+            "nonexistent_namelist.def"; opt_para = "nonexistent.dat", mode = :real)
+    end
+    # follow-up review C-F1: srun --mpi=pmix 直接起動（auto 検出経路）でも guard が
+    # 効くこと。改訂前は PMIX_RANK を見ず :serial 判定 → guard 素通りだった。
+    withenv("JULIA_MVMC_MPI" => nothing, "PMIX_RANK" => "1", "PMIX_SIZE" => "2",
+            "SLURM_NTASKS" => "2") do
         @test_throws ErrorException MVMCOptimizers.run_phys_cal_from_namelist(
             "nonexistent_namelist.def"; opt_para = "nonexistent.dat", mode = :real)
     end
