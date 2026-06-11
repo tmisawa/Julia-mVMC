@@ -34,6 +34,10 @@ using PfaPack: julia_zsktf2!, utu2pfa, cimpl_utu2inv!
 # included first so later files (vmc_para_opt.jl, etc.) can reference it.
 include("c_timer.jl")
 
+# MPI infrastructure for v0.4 (ParallelContext, split_loop, communication
+# wrappers, seed resolution). Serial runs never touch MPI APIs.
+include("parallel.jl")
+
 # Thread-local Pfaffian workspaces (GPL helpers, formerly in MVMCPfaPack).
 # Must be included before types.jl because some types reference
 # ThreadedPfaPackWorkspace.
@@ -74,6 +78,11 @@ include("run_para_opt_from_namelist.jl")
 include("run_phys_cal_from_namelist.jl")
 
 # Export main functions
+export ParallelContext, serial_context, build_parallel_context, is_output_rank
+export bcast!, bcast_scalar, allreduce_sum!, reduce_sum_to_root!, barrier,
+       reduce_counter!, abort_parallel, split_loop, split_range, resolve_rnd_seed
+export count_total_parameters, pack_parameters, unpack_parameters!,
+       set_parameter_value!, get_parameter_value
 export vmc_para_opt!
 export vmc_phys_cal!
 export run_para_opt_from_namelist

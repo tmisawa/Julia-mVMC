@@ -55,7 +55,8 @@ function run_model(name, mode)
 
     # Drive Julia VMCParaOpt via the public wrapper. The wrapper internally:
     #   - parses .def files (relative paths resolved from namelist_path),
-    #   - seeds the SFMT19937 RNG with modpara.def's RndSeed (fallback 11272),
+    #   - seeds the SFMT19937 RNG with modpara.def's RndSeed (C-parity
+    #     resolve_rnd_seed: missing → 11272, 0 → 0, < 0 → time seed),
     #   - runs nsteps SR steps,
     #   - returns the first N output lines as Vector{String}.
     result = MVMCOptimizers.run_para_opt_from_namelist(

@@ -153,7 +153,7 @@ mutable struct ModParaParameters
         nsr_opt_cg_max_iter::Int = 1000,
         nsrcg::Int = 0,
         nstore_o::Int = 1,
-        rnd_seed::Int = 12345,
+        rnd_seed::Int = 11272,  # C parity: RndSeed 行欠落時の default (readdef.c:1967)
         nsplit_size::Int = 1,
         nsp_gauss_leg::Int = 1,
         nsp_stot::Int = 0,

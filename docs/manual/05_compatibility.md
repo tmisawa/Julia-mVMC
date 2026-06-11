@@ -77,8 +77,11 @@ for provenance and regeneration instructions.
 ## Numerical reproducibility
 
 - C and Julia use the same SFMT19937 stream seeded by `RndSeed` from
-  `modpara.def` (fallback `11272`). Variational-parameter init is
-  bit-level identical given the same seed and same input.
+  `modpara.def`, resolved with the C-parity rule (v0.4): missing line →
+  `11272` (C `readdef.c` default), `0` → `0`, negative → time-derived
+  seed, positive → the value (`+ group1` per MPI group, `vmcmain.c:257`).
+  Variational-parameter init is bit-level identical given the same seed
+  and same input.
 - Energy accumulators (`<H>`, `<H²>`, `<Sz>`, `<Sz²>`) match the C
   reference within ~1e-13 absolute, dominated by BLAS summation-order
   differences.

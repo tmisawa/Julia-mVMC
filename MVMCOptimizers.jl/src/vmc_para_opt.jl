@@ -18,9 +18,11 @@ This function performs the same optimization loop as C's `VMCParaOpt()`.
 - `callback::Union{Nothing, Function}`: Optional callback function called at each step
   with signature `callback(step, data, energy, info)`
 - `rng::Union{AbstractRNG, Nothing}`: Random number generator (default: `nothing`).
-  When `nothing`, a fresh `SFMT19937RNG()` is constructed and seeded with
-  `data.modpara.rnd_seed` (with the C-compatible fallback of `11272` when
-  the recorded seed is `<= 0`).
+  When `nothing`, a fresh `SFMT19937RNG()` is constructed and seeded via
+  `resolve_rnd_seed(ctx, data.modpara.rnd_seed, nothing)` — the same C-parity
+  rule as `run_para_opt_from_namelist` (`< 0` → rank0 time seed + bcast,
+  `== 0` → `0`, `> 0` → the value, plus the per-group `+ group1` offset
+  under MPI; see `resolve_rnd_seed`).
   When a non-`nothing` RNG is passed in, it is used **as-is**; the caller
   is responsible for seeding it. This applies to both `SFMT19937RNG` and
   any other `AbstractRNG` (for example a stable `Random.MersenneTwister`
@@ -48,7 +50,8 @@ using SFMT
 data = parse_expert_mode_files("namelist.def")
 
 rng = SFMT19937RNG()
-actual_seed = data.modpara.rnd_seed > 0 ? data.modpara.rnd_seed : 11272
+actual_seed = MVMCOptimizers.resolve_rnd_seed(
+    MVMCOptimizers.serial_context(), data.modpara.rnd_seed, nothing)
 Random.seed!(rng, actual_seed)
 
 MVMCExpertModeParsers.initialize_parameters!(data; rng=rng)
@@ -78,6 +81,7 @@ function vmc_para_opt!(
     output_dir::Union{String,Nothing} = nothing,
     skip_sr::Bool = false,
     c_timer::Union{CTimer,Nothing} = nothing,
+    ctx::ParallelContext = serial_context(),
 )::Int
     # Reject unsupported ModPara inputs (e.g. NSplitSize > 1) before any work.
     validate_supported_modpara(data.modpara)
@@ -88,13 +92,14 @@ function vmc_para_opt!(
     # entry, after which the loop-level ctimer_* calls specialise on its type.
     timer = c_timer === nothing ? CTIMER_DISABLED : c_timer
 
-    # If no RNG was passed in, fall back to a SFMT19937RNG seeded with
-    # data.modpara.rnd_seed (matches the C-compatible convention used by
-    # run_para_opt_from_namelist: <= 0 → 11272 fallback).
+    # If no RNG was passed in, fall back to a SFMT19937RNG seeded with the
+    # same C-parity rule as run_para_opt_from_namelist (resolve_rnd_seed:
+    # < 0 → rank0 time seed + bcast, == 0 → 0, > 0 → value, + ctx.group1).
+    # Review 2026-06-11 F6-(1): the old `> 0 ? : 11272` rule here diverged
+    # from the runner and ignored the MPI group1 offset.
     if rng === nothing
         rng = SFMT19937RNG()
-        actual_seed = data.modpara.rnd_seed > 0 ? data.modpara.rnd_seed : 11272
-        Random.seed!(rng, actual_seed)
+        Random.seed!(rng, resolve_rnd_seed(ctx, data.modpara.rnd_seed, nothing))
     end
 
     # Get optimization parameters
@@ -199,8 +204,9 @@ function vmc_para_opt!(
 
     # Optimization loop
     for step = 0:(n_steps-1)
-        # Progress output
-        if step == 0 || (n_steps < 20) || (step % max(1, n_steps ÷ 20) == 0)
+        # Progress output (rank0 のみ; C の CLI 出力は rank0 限定。plan review F5)
+        if is_output_rank(ctx) &&
+           (step == 0 || (n_steps < 20) || (step % max(1, n_steps ÷ 20) == 0))
             progress = floor(Int, 100.0 * step / n_steps)
             println("Progress of Optimization: $progress %")
         end
@@ -293,7 +299,8 @@ function vmc_para_opt!(
         # [22] outputData (C vmcmain.c:437-440)
         ctimer_start!(timer, 22)
         # 7. Output data (before optimization, matching C implementation order)
-        output_data!(data, state, step; output_dir=output_dir)
+        # C vmcmain.c:441 `if(rank==0) outputData()` — 出力は rank0 のみ（spec §5-9）
+        is_output_rank(ctx) && output_data!(data, state, step; output_dir=output_dir)
         ctimer_stop!(timer, 22)
 
         # If skip_sr is set, only run step 0 and return after output
@@ -316,16 +323,23 @@ function vmc_para_opt!(
         end
         ctimer_stop!(timer, 5)
 
+        # C stcopt.c:171 は SR の info を rank0 から MPI_Bcast してから return 判定
+        # （vmcmain.c:504-506）するため、全 rank が同じ判断で loop を抜ける。
+        # rank-local な info のまま early return すると、失敗 rank だけが loop を
+        # 抜けて comm0 の collective（sync の Bcast! / readback の barrier）が
+        # 不整合になり hang する（review 2026-06-11 F1）。
+        info = Int(bcast_scalar(ctx, info))
         if info != 0
-            @error "Stochastic optimization error: info=$info at step=$step"
+            is_output_rank(ctx) &&
+                @error "Stochastic optimization error: info=$info at step=$step"
             ctimer_stop!(timer, 2)
             return info
         end
 
-        # [23] SyncModifiedParameter (C vmcmain.c:507-509)
+        # [23] SyncModifiedParameter (C vmcmain.c:509-510, comm_parent で bcast)
         ctimer_start!(timer, 23)
         # 9. Sync modified parameters
-        sync_modified_parameter!(data)
+        sync_modified_parameter!(ctx, data)
         ctimer_stop!(timer, 23)
 
         # 10. Store optimization data (for averaging)
@@ -340,10 +354,10 @@ function vmc_para_opt!(
         end
     end
 
-    # Final output
-    println("Start: Output opt params.")
-    output_opt_data!(data; output_dir=output_dir)
-    println("End: Output opt params.")
+    # Final output (rank0 のみ; C `if(rank==0) outputData()` 相当)
+    is_output_rank(ctx) && println("Start: Output opt params.")
+    is_output_rank(ctx) && output_opt_data!(data; output_dir=output_dir)
+    is_output_rank(ctx) && println("End: Output opt params.")
 
     ctimer_stop!(timer, 2)
 

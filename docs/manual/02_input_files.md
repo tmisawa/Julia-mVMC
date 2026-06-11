@@ -74,7 +74,10 @@ active is not reproducible bit-for-bit.
   in addition to the canonical 4-column form.
 - For `interall.def`, fsz-style spin-flip terms are honoured.
 - The RNG layout matches C: `RndSeed` from `modpara.def` seeds an
-  SFMT19937 stream; values <= 0 fall back to `11272`. See
+  SFMT19937 stream with the C-parity rule (v0.4): missing line → `11272`
+  (C `readdef.c` default), `0` → `0`, negative → a time-derived seed
+  (rank 0, broadcast under MPI), positive → the value; under MPI the
+  per-group offset `+ group1` is added (C `vmcmain.c:257`). See
   `MVMCOptimizers.run_para_opt_from_namelist` for the precise phase
   ordering (`init_parameter!` → `read_initial_def!` →
   `read_input_parameters!` → `sync_modified_parameter!` →

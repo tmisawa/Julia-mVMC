@@ -34,8 +34,11 @@ integration tests in `test/integration/runtests.jl`.
 - `output_dir::AbstractString = tempname()`: directory that receives
   `zvo_out.dat`, `zqp_opt.dat`, etc. Created if absent.
 - `seed::Union{Integer,Nothing} = nothing`: SFMT19937 seed. `nothing` means
-  use `modpara.def`'s `RndSeed` field, falling back to the C-compatible
-  default `11272` when `RndSeed` is non-positive.
+  resolve `modpara.def`'s `RndSeed` with the C-parity rule (`resolve_rnd_seed`,
+  v0.4 R0): missing → `11272` (parser default, C `readdef.c:1967`), `< 0` →
+  rank0 time seed broadcast over comm0, `== 0` → `0`, `> 0` → the value; the
+  per-group `+ group1` offset is added under MPI (C `vmcmain.c:257`). An
+  explicit integer overrides the table (still `+ group1` under MPI).
 - `initial_def`: starting variational parameters. `:auto` (default) loads
   `initial.def` from the namelist directory if present (mirrors C's
   `vmc.out -s StdFace.def initial.def` test driver). Pass a path to load
@@ -107,6 +110,18 @@ function run_para_opt_from_namelist(namelist_path::AbstractString;
     ctimer_start!(c_timer, 11)   # [11] ReadDefFile
     data = MVMCExpertModeParsers.parse_expert_mode_files(namelist_str)
     ctimer_stop!(c_timer, 11)
+
+    # v0.4 R0: unsupported input の検証は MPI context 構築より前（plan review F4）。
+    # 現行は vmc_para_opt!（vmc_para_opt.jl:83）内でのみ呼ばれるが、R0 で
+    # build_parallel_context を parse 直後へ移すため、invalid な NSplitSize
+    #（< 1、または R0 では > 1 も未 support）で MPI context を作らないよう
+    # ここで先に検証する。vmc_para_opt! 側の既存呼び出しは defense-in-depth
+    # としてそのまま残す（重複呼び出しは無害）。
+    validate_supported_modpara(data.modpara)
+
+    # v0.4 R0: MPI context は seed / init_parameter! より前に作る（spec §4.2, F3）。
+    ctx = build_parallel_context(data.modpara.nsplit_size)
+
     effective_nsteps = Int(nsteps)
     effective_nsmp = nsmp === nothing ? data.modpara.nsr_opt_itr_smp : Int(nsmp)
     effective_nsmp > 0 || throw(ArgumentError("effective nsmp must be positive; got $effective_nsmp"))
@@ -116,11 +131,8 @@ function run_para_opt_from_namelist(namelist_path::AbstractString;
 
     # 2. Construct and seed the SFMT19937 RNG with the C-compatible convention.
     rng = SFMT19937RNG()
-    actual_seed = if seed === nothing
-        data.modpara.rnd_seed > 0 ? data.modpara.rnd_seed : 11272
-    else
-        Int(seed)
-    end
+    # C parity seed 解決 + group1 offset（spec §5-1; C vmcmain.c:257）。
+    actual_seed = resolve_rnd_seed(ctx, data.modpara.rnd_seed, seed)
     Random.seed!(rng, actual_seed)
 
     # 3. Random-seeded variational parameter initialisation. We call
@@ -177,7 +189,7 @@ function run_para_opt_from_namelist(namelist_path::AbstractString;
     #    C's SyncModifiedParameter call at vmcmain.c:276. This shifts
     #    correlation factors, rescales Slater, and normalizes OptTrans
     #    when the OptTrans mode is active.
-    sync_modified_parameter!(data)
+    sync_modified_parameter!(ctx, data)
     ctimer_stop!(c_timer, 13)
 
     # 7. Quantum projection weights (C's InitQPWeight, vmcmain.c:281).
@@ -199,11 +211,27 @@ function run_para_opt_from_namelist(namelist_path::AbstractString;
         rng = rng,
         output_dir = String(output_dir),
         c_timer = c_timer,
+        ctx = ctx,
     )
 
     ctimer_stop!(c_timer, 0)   # end [0] All (post-run zvo readback below is bookkeeping, not timed)
-    if timer_enabled
+    if timer_enabled && is_output_rank(ctx)
         write_ctimer_para_opt(c_timer, String(output_dir))
+    end
+
+    # rank0 の write 完了を待ってから読み返す（spec §5-9、F11）。
+    barrier(ctx)
+    if !is_output_rank(ctx)
+        # 非 rank0 は readback しない。minimal result を返す。
+        return (
+            status = status,
+            output_dir = abspath(output_dir),
+            zvo_first_n = String[],
+            ctest_values = Float64[],
+            final_energy_per_site = NaN,
+            effective_nsteps = effective_nsteps,
+            effective_nsmp = effective_nsmp,
+        )
     end
 
     # 5. Read back outputs for caller convenience. Julia writes zvo_out.dat

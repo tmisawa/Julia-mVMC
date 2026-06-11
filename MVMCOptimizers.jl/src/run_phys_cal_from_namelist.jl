@@ -38,7 +38,11 @@ arrays and set `modpara.n_orbital_idx`; the loader only sets each term's
   documented set; the real execution path is determined by the parsed `.def`
   files, as in `run_para_opt_from_namelist`, so it is not passed downstream).
 - `seed::Union{Integer,Nothing} = nothing`: SFMT19937 seed; `nothing` uses
-  `modpara.RndSeed` (falling back to the C-compatible default `11272`).
+  `modpara.RndSeed` with the **legacy rule** (`<= 0` → `11272`). Note: unlike
+  `run_para_opt_from_namelist`, which uses the C-parity `resolve_rnd_seed`
+  (`0` → `0`, `< 0` → time seed) as of v0.4 R0, this runner keeps the legacy
+  rule until its R1 MPI-aware rewrite (review 2026-06-11 F6-(2)) — `RndSeed 0`
+  therefore seeds `11272` here but `0` in the para-opt runner.
 - `output_dir::AbstractString = tempname()`: directory for the `zvo_*` outputs
   (created if absent).
 
@@ -62,6 +66,20 @@ function run_phys_cal_from_namelist(
 )
     mode in (:real, :cmp, :fsz) ||
         throw(ArgumentError("mode must be :real, :cmp, or :fsz; got :$mode"))
+
+    # v0.4 R0: PhysCal runner は MPI 未対応（R1 で対応予定）。mpiexec 配下で
+    # そのまま走らせると全 rank が同一 output_dir の zvo_* へ並行書き込みして
+    # silent corruption になるため fail-fast する（review 2026-06-11 F7）。
+    # JULIA_MVMC_MPI=0 の明示時（:mpi_guarded_serial）は build_parallel_context が
+    # size>1 なら MPI.Abort、size==1 なら serial で続行する（F12 と同じ guard）。
+    mpi_mode = resolve_mpi_mode()
+    if mpi_mode === :mpi
+        error("run_phys_cal_from_namelist is not MPI-aware in v0.4 R0 " *
+              "(planned for R1). Run it without mpiexec, or set JULIA_MVMC_MPI=0 " *
+              "to force a single-rank serial run.")
+    elseif mpi_mode === :mpi_guarded_serial
+        build_parallel_context(1)
+    end
 
     namelist_str = String(namelist_path)
 
