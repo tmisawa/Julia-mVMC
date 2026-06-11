@@ -21,9 +21,12 @@ C implementation: vmcmain.c:VMCPhysCal()
   with signature `callback(ismp, data, energy, info)`
 - `rng`: Random number generator (default: `nothing`).
   When `nothing`, a fresh `SFMT19937RNG()` is constructed and seeded
-  with `data.modpara.rnd_seed`, using the C-compatible fallback of
-  `11272` when the recorded seed is `<= 0` (matches `vmc_para_opt!`
-  and `run_para_opt_from_namelist`).
+  with `data.modpara.rnd_seed`, using the **legacy rule** (`<= 0` →
+  `11272`), matching `run_phys_cal_from_namelist`. Note: as of v0.4 R0
+  `vmc_para_opt!` / `run_para_opt_from_namelist` use the C-parity
+  `resolve_rnd_seed` instead (`0` → `0`, `< 0` → time seed), so
+  `RndSeed 0` seeds `11272` here but `0` on the para-opt side
+  (review 2026-06-11 F6-(2), follow-up C-F3).
   When a non-`nothing` RNG is passed in, it is used **as-is**; the
   caller is responsible for seeding it.
 
