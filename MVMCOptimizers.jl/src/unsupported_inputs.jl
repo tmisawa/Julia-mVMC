@@ -22,9 +22,10 @@ Currently rejected:
 - `NSplitSize < 1` (i.e. `0` or negative): invalid value. NSplitSize is a
   process-split count and must be at least 1. Thrown as `ArgumentError`,
   matching the codebase convention for invalid parameter *values*.
-- `NSplitSize > 1`: MPI parallelization is not supported in Julia-mVMC.
-  Thrown as `error(...)` / `ErrorException`, matching the codebase's
-  unsupported-*feature* convention (the BackFlow stubs).
+- `NSplitSize > 1`: C's grouped MPI/QP split by `NSplitSize` is not yet
+  implemented in Julia-mVMC. Multi-rank MPI sample parallel runs are supported
+  only with `NSplitSize = 1`. Thrown as `error(...)` / `ErrorException`,
+  matching the codebase's unsupported-*feature* convention (the BackFlow stubs).
 - `NLanczosMode > 0`: full Lanczos is not supported (only the step-0
   comparison matches C; the post-Lanczos eigenvector / overlap pipeline is
   not ported — see `docs/manual/05_compatibility.md`). Rejected early because
@@ -32,9 +33,9 @@ Currently rejected:
   (`readdef.c`), which the Julia canonical-list path does not reproduce.
   Thrown as `error(...)` / `ErrorException` (unsupported-feature convention).
 
-`NSplitSize = 1` (single process) and `NLanczosMode = 0` are the only
-supported settings. The fields are parsed for input-format fidelity but have
-no runtime effect at those values.
+`NSplitSize = 1` and `NLanczosMode = 0` are the only supported settings. The
+fields are parsed for input-format fidelity; `NSplitSize = 1` supports both
+serial execution and v0.4 MPI sample-parallel execution.
 """
 function validate_supported_modpara(modpara::ModParaParameters)
     if modpara.nsplit_size < 1
@@ -45,9 +46,11 @@ function validate_supported_modpara(modpara::ModParaParameters)
         )
     elseif modpara.nsplit_size > 1
         error(
-            "NSplitSize > 1 is not supported: MPI parallelization is not supported " *
-            "in Julia-mVMC (got NSplitSize = $(modpara.nsplit_size)). " *
-            "Set NSplitSize = 1, or fall back to the C reference at " *
+            "NSplitSize > 1 is not supported: grouped MPI/QP splitting by " *
+            "NSplitSize is not implemented in Julia-mVMC " *
+            "(got NSplitSize = $(modpara.nsplit_size)). " *
+            "Set NSplitSize = 1 for serial or supported multi-rank MPI " *
+            "sample-parallel runs, or fall back to the C reference at " *
             "https://github.com/issp-center-dev/mVMC.",
         )
     end
@@ -58,6 +61,32 @@ function validate_supported_modpara(modpara::ModParaParameters)
             "Only the step-0 (variational) quantities match the C reference. " *
             "Set NLanczosMode = 0, or fall back to the C reference at " *
             "https://github.com/issp-center-dev/mVMC.",
+        )
+    end
+    return nothing
+end
+
+"""
+    validate_supported_para_opt_parallel_modpara(ctx, modpara)
+
+Reject parameter-optimization settings whose MPI path is not C-compatible yet.
+
+`NSRCG != 0` selects the CG SR solver. C's CG `operate_by_S` broadcasts the
+search vector and allreduces the sampled matrix-vector product inside each CG
+iteration. Julia's current CG solver is still rank-local, so under MPI it would
+silently solve a non-C-equivalent system. Serial CG remains available.
+"""
+function validate_supported_para_opt_parallel_modpara(
+    ctx::ParallelContext,
+    modpara::ModParaParameters,
+)
+    if ctx.is_mpi && modpara.nsrcg != 0
+        error(
+            "NSRCG != 0 is not supported under MPI in Julia-mVMC v0.4 R1: " *
+            "the CG SR solver does not yet implement C-compatible " *
+            "operate_by_S broadcast/allreduce. Set NSRCG = 0 for MPI " *
+            "runs, run this input without MPI, or fall back to the C " *
+            "reference at https://github.com/issp-center-dev/mVMC.",
         )
     end
     return nothing

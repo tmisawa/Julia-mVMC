@@ -152,27 +152,44 @@ using MVMCOptimizers: count_total_parameters, get_parameter_value,
                       set_parameter_value!, pack_parameters, unpack_parameters!
 using MVMCExpertModeParsers
 
+@testset "MPI para-opt rejects NSRCG CG solver before collectives (R1-F1)" begin
+    fake_mpi_ctx = ParallelContext(true, nothing, nothing, nothing,
+                                   0, 2, 0, 1, 0, 2, 0)
+    modpara = MVMCExpertModeParsers.ModParaParameters()
+    modpara.nsrcg = 1
+
+    err = try
+        MVMCOptimizers.validate_supported_para_opt_parallel_modpara(fake_mpi_ctx, modpara)
+        nothing
+    catch e
+        e
+    end
+    @test err isa ErrorException
+    @test occursin("NSRCG != 0", sprint(showerror, err))
+    @test occursin("operate_by_S broadcast/allreduce", sprint(showerror, err))
+
+    serial_modpara = MVMCExpertModeParsers.ModParaParameters()
+    serial_modpara.nsrcg = 1
+    @test MVMCOptimizers.validate_supported_para_opt_parallel_modpara(
+        serial_context(), serial_modpara) === nothing
+
+    # Direct API also fails before RNG seeding / MPI collectives / data-shape work.
+    data = MVMCExpertModeParsers.ExpertModeData()
+    data.modpara.nsrcg = 1
+    err = try
+        MVMCOptimizers.vmc_para_opt!(data; ctx = fake_mpi_ctx)
+        nothing
+    catch e
+        e
+    end
+    @test err isa ErrorException
+    @test occursin("NSRCG != 0", sprint(showerror, err))
+end
+
 @testset "ModPara rnd_seed default matches C readdef.c:1967 (review F2)" begin
     # RndSeed 行が欠落した modpara.def は C では 11272 で走る。parser の kwdef
     # default が 12345 だと C parity が missing の行で崩れる（review 2026-06-11 F2）。
     @test MVMCExpertModeParsers.ModParaParameters().rnd_seed == 11272
-end
-
-@testset "PhysCal runner fails fast under MPI (review F7)" begin
-    # R0 では PhysCal は MPI 未対応。mpiexec 検出下で走らせると全 rank が同一
-    # output へ書くため、entry で error する（guard は parse より前なので
-    # ダミーパスで検証できる）。
-    withenv("JULIA_MVMC_MPI" => "1") do
-        @test_throws ErrorException MVMCOptimizers.run_phys_cal_from_namelist(
-            "nonexistent_namelist.def"; opt_para = "nonexistent.dat", mode = :real)
-    end
-    # follow-up review C-F1: srun --mpi=pmix 直接起動（auto 検出経路）でも guard が
-    # 効くこと。改訂前は PMIX_RANK を見ず :serial 判定 → guard 素通りだった。
-    withenv("JULIA_MVMC_MPI" => nothing, "PMIX_RANK" => "1", "PMIX_SIZE" => "2",
-            "SLURM_NTASKS" => "2") do
-        @test_throws ErrorException MVMCOptimizers.run_phys_cal_from_namelist(
-            "nonexistent_namelist.def"; opt_para = "nonexistent.dat", mode = :real)
-    end
 end
 
 @testset "parameter pack/unpack roundtrip (spec §5-2, F4)" begin
@@ -203,7 +220,7 @@ end
     @test_throws ArgumentError unpack_parameters!(data, original[1:max(n - 1, 0)])
 end
 
-@testset "duplicate idx invariant (plan review F7 / addendum C1)" begin
+@testset "direct-assignment unpack repairs duplicate idx and preserves signed zero (R1)" begin
     fixture = joinpath(@__DIR__, "..", "..", "test", "integration", "reference",
                        "heisenberg_chain_real", "inputs", "namelist.def")
     data = MVMCExpertModeParsers.parse_expert_mode_files(fixture)
@@ -216,23 +233,39 @@ end
         @test all(v -> v == vals[1], vals)
     end
 
-    # orbital duplicate を人為的に不一致にすると fail-fast すること。
+    # orbital duplicate を人為的に不一致にしても、direct-assignment unpack は C の
+    # contiguous Para bcast と同じく flat parameter 値へ修復できる。
     dup_idx = findfirst(i -> count(t -> t.idx == data.orbital_terms[i].idx,
                                    data.orbital_terms) > 1,
                         eachindex(data.orbital_terms))
     if dup_idx !== nothing
+        orbital_idx = data.orbital_terms[dup_idx].idx
+        para_idx = MVMCExpertModeParsers.projection_layout(data).n_proj +
+                   (MVMCOptimizers.has_rbm_terms(data) ? MVMCExpertModeParsers.count_rbm_parameters(data) : 0) +
+                   orbital_idx + 1
         data.orbital_terms[dup_idx].value += ComplexF64(1.0, 0.0)
-        @test_throws ErrorException unpack_parameters!(data, para)
+        unpack_parameters!(data, para)
+        vals = [t.value for t in data.orbital_terms if t.idx == orbital_idx]
+        @test all(v -> v == para[para_idx], vals)
     end
 
-    # RBM duplicate も検査対象であること（addendum C1）。fixture に RBM がないため
-    # synthetic に同一 idx・異値の term を 2 つ作る（fresh parse で orbital 側の
-    # 不一致と混ざらないようにする）。
+    # Manual invariant check は手動検査用に残す。
     data_rbm = MVMCExpertModeParsers.parse_expert_mode_files(fixture)
     push!(data_rbm.charge_rbm_phys_layer_terms,
           MVMCExpertModeParsers.ChargeRBMPhysLayerTerm(0, ComplexF64(0.1, 0.0), true, 0),
           MVMCExpertModeParsers.ChargeRBMPhysLayerTerm(1, ComplexF64(0.2, 0.0), true, 0))
     @test_throws ErrorException MVMCOptimizers.check_duplicate_consistency(data_rbm)
+
+    # R0 の delta-based unpack は -0.0 を +0.0 に変え得た。R1 の direct assignment は
+    # byte-level sign bit を保持する。
+    data_zero = MVMCExpertModeParsers.parse_expert_mode_files(fixture)
+    para_zero = pack_parameters(data_zero)
+    para_zero[1] = complex(-0.0, -0.0)
+    unpack_parameters!(data_zero, para_zero)
+    packed_zero = pack_parameters(data_zero)
+    @test packed_zero[1] == complex(-0.0, -0.0)
+    @test signbit(real(packed_zero[1]))
+    @test signbit(imag(packed_zero[1]))
 end
 
 @testset "sync_modified_parameter!(ctx, data) serial == legacy" begin

@@ -121,6 +121,7 @@ function run_para_opt_from_namelist(namelist_path::AbstractString;
 
     # v0.4 R0: MPI context は seed / init_parameter! より前に作る（spec §4.2, F3）。
     ctx = build_parallel_context(data.modpara.nsplit_size)
+    validate_supported_para_opt_parallel_modpara(ctx, data.modpara)
 
     effective_nsteps = Int(nsteps)
     effective_nsmp = nsmp === nothing ? data.modpara.nsr_opt_itr_smp : Int(nsmp)

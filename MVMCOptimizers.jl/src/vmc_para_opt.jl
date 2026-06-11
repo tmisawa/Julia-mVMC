@@ -85,6 +85,7 @@ function vmc_para_opt!(
 )::Int
     # Reject unsupported ModPara inputs (e.g. NSplitSize > 1) before any work.
     validate_supported_modpara(data.modpara)
+    validate_supported_para_opt_parallel_modpara(ctx, data.modpara)
 
     # C-compatible section timer. `nothing` -> disabled singleton (no-op
     # start/stop). When run_para_opt_from_namelist enables it, a concretely
@@ -282,18 +283,18 @@ function vmc_para_opt!(
         # [25] nested inside [21] exactly as in C (vmcmain.c:419-436).
         ctimer_start!(timer, 21)
         # 5. Weighted averages
-        weight_average_we!(state)
+        weight_average_we!(ctx, state)
 
         ctimer_start!(timer, 25)
         if !all_complex
-            weight_average_sr_opt_real!(state)
+            weight_average_sr_opt_real!(ctx, state)
         else
-            weight_average_sr_opt!(state)
+            weight_average_sr_opt!(ctx, state)
         end
         ctimer_stop!(timer, 25)
 
-        # 6. Reduce counters (MPI reduction in C, no-op in single process)
-        reduce_counter!(state)
+        # 6. Reduce counters (C ReduceCounter(comm_child2); serial is no-op)
+        reduce_counter!(ctx, state)
         ctimer_stop!(timer, 21)
 
         # [22] outputData (C vmcmain.c:437-440)

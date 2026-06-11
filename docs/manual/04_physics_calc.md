@@ -32,9 +32,9 @@
   any `BackFlow*` keyword in `namelist.def`) are not supported; remove
   those keywords or fall back to the C reference at
   <https://github.com/issp-center-dev/mVMC>.
-- **MPI parallelisation** — `reduce_counter!` is a no-op in this release, and
-  `NSplitSize > 1` is rejected with an unsupported-MPI error until MPI
-  support is implemented. `NSplitSize = 1` is the only supported setting.
+- **MPI parallelisation** — v0.4 supports multi-rank sample-parallel execution
+  with `NSplitSize = 1` through MPI.jl-compatible launchers. C's grouped
+  MPI/QP split (`NSplitSize > 1`) is still rejected.
 - **`InterAllTerm` spin metadata** — when the input does not provide
   spin information, `vmc_main_cal.jl` substitutes default values (see
   the TODO at `src/vmc_main_cal.jl` near the InterAll loop).
@@ -52,7 +52,7 @@ For published physics results, the safest path in this release is:
    can be run via
    [`run_phys_cal_from_namelist`](../../MVMCOptimizers.jl/src/run_phys_cal_from_namelist.jl);
    still fall back to C-mVMC for FSZ factored Green, Backflow, Lanczos
-   (`NLanczosMode > 0`), or MPI (`NSplitSize > 1`).
+   (`NLanczosMode > 0`), or grouped MPI/QP splitting (`NSplitSize > 1`).
 
 The output formats of `zqp_opt.dat` are byte-compatible (same column
 layout), so the hand-off requires no conversion script.

@@ -30,6 +30,14 @@ result = run_para_opt_from_namelist(
 | `seed` | SFMT19937 seed. `nothing` → resolve `RndSeed` from `modpara.def` with the C-parity rule (v0.4): missing → `11272`, `0` → `0`, negative → time-derived seed, positive → the value; `+ group1` under MPI. |
 | `initial_def` | `:auto` (default) loads `inputs/initial.def` if present and aborts on a present-but-broken file; `:none` / `nothing` skips entirely; an explicit path errors if loading fails. |
 
+## MPI limitations
+
+v0.4 R1 supports `VMCParaOpt` sample-parallel MPI only with the direct SR solver
+(`NSRCG = 0`). Inputs with `NSRCG != 0` select the CG SR solver; that path is
+still serial-only because Julia has not yet ported C's CG `operate_by_S`
+broadcast/allreduce. Run those inputs without MPI, set `NSRCG = 0`, or use
+C-mVMC for MPI CG runs.
+
 Returns a `NamedTuple` with `status`, `output_dir`, `zvo_first_n` (first
 `nsteps` raw lines of `zvo_out.dat`), `ctest_values` (the first two
 final-sample averages used by the C ctest-equivalent runner),
