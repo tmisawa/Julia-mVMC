@@ -170,11 +170,7 @@ end
 C の NPara 相当（Proj + RBM + Slater idx + OptTrans）。
 """
 function count_total_parameters(data::ExpertModeData)::Int
-    layout = MVMCExpertModeParsers.projection_layout(data)
-    n_rbm = has_rbm_terms(data) ? MVMCExpertModeParsers.count_rbm_parameters(data) : 0
-    return layout.n_proj + n_rbm +
-           MVMCExpertModeParsers.count_orbital_parameters(data) +
-           MVMCExpertModeParsers.count_opt_trans_parameters(data)
+    return MVMCExpertModeParsers.count_variational_parameters(data)
 end
 
 """
@@ -228,12 +224,13 @@ end
 
 "C の contiguous `Para` 相当へ pack（spec §5-2 の pack/unpack helper）。"
 function pack_parameters(data::ExpertModeData)
-    para = zeros(ComplexF64, count_total_parameters(data))
-    layout = MVMCExpertModeParsers.projection_layout(data)
-    n_proj = layout.n_proj
-    n_rbm = has_rbm_terms(data) ? MVMCExpertModeParsers.count_rbm_parameters(data) : 0
-    n_orbital_idx = MVMCExpertModeParsers.count_orbital_parameters(data)
-    n_opt_trans = MVMCExpertModeParsers.count_opt_trans_parameters(data)
+    counts = _parameter_count_breakdown(data)
+    para = zeros(ComplexF64, counts.n_para)
+    layout = counts.layout
+    n_proj = counts.n_proj
+    n_rbm = counts.n_rbm
+    n_orbital_idx = counts.n_orbital_idx
+    n_opt_trans = counts.n_opt_trans
 
     for i = 1:min(layout.n_gutzwiller, length(data.gutzwiller_terms))
         para[layout.gutzwiller_offset+i] = ComplexF64(data.gutzwiller_terms[i].value)
@@ -276,14 +273,15 @@ function pack_parameters(data::ExpertModeData)
 end
 
 function unpack_parameters!(data::ExpertModeData, para::AbstractVector{ComplexF64})
-    n = count_total_parameters(data)
+    counts = _parameter_count_breakdown(data)
+    n = counts.n_para
     length(para) == n || throw(ArgumentError(
         "parameter vector length $(length(para)) != NPara $n"))
-    layout = MVMCExpertModeParsers.projection_layout(data)
-    n_proj = layout.n_proj
-    n_rbm = has_rbm_terms(data) ? MVMCExpertModeParsers.count_rbm_parameters(data) : 0
-    n_orbital_idx = MVMCExpertModeParsers.count_orbital_parameters(data)
-    n_opt_trans = MVMCExpertModeParsers.count_opt_trans_parameters(data)
+    layout = counts.layout
+    n_proj = counts.n_proj
+    n_rbm = counts.n_rbm
+    n_orbital_idx = counts.n_orbital_idx
+    n_opt_trans = counts.n_opt_trans
 
     for i = 1:min(layout.n_gutzwiller, length(data.gutzwiller_terms))
         data.gutzwiller_terms[i].value = para[layout.gutzwiller_offset+i]

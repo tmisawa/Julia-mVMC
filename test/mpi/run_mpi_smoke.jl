@@ -59,6 +59,18 @@ end
     @test count("weight-average worker: non-root rank ok", out) == 1
 end
 
+@testset "R2 mpiexec -n 2 WeightAverage warning rank0 gate" begin
+    cmd = addenv(
+        `$(mpiexec()) -n 2 $(Base.julia_cmd()) --project=$project $weight_average_worker`,
+        "JULIA_MVMC_SMOKE_LOG_STDOUT" => "1",
+        "JULIA_MVMC_SMOKE_TINY_WC" => "1",
+    )
+    out = read(cmd, String)
+    @test count("Weight Wc is too small after MPI allreduce", out) == 1
+    @test count("weight-average worker: root rank ok", out) == 1
+    @test count("weight-average worker: non-root rank ok", out) == 1
+end
+
 @testset "R1 mpiexec -n 4 para-opt smoke" begin
     mpi_dir = mktempdir()
     run(`$(mpiexec()) -n 4 $(Base.julia_cmd()) --project=$project $worker $mpi_dir`)
@@ -85,10 +97,14 @@ end
 # end-to-end 検証。R0 gate の必須条件ではないが、F5/F12/A7 の回帰を防ぐ。
 @testset "rank0-only stdout under mpiexec -n 2 (plan review F5)" begin
     outdir = mktempdir()
-    out = read(`$(mpiexec()) -n 2 $(Base.julia_cmd()) --project=$project $worker $outdir`,
-               String)
+    cmd = addenv(
+        `$(mpiexec()) -n 2 $(Base.julia_cmd()) --project=$project $worker $outdir`,
+        "JULIA_MVMC_SMOKE_LOG_STDOUT" => "1",
+    )
+    out = read(cmd, String)
     @test count("Progress of Optimization: 0 %", out) == 1
     @test count("Start: Output opt params.", out) == 1
+    @test count("NPara=14", out) == 1
     @test count("worker: non-root rank ok", out) == 1
     @test count("worker: root rank ok", out) == 1
 end

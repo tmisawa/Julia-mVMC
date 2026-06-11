@@ -2,6 +2,11 @@
 # 使い方: julia --project=<workspace> test/mpi/mpi_weight_average_smoke.jl
 using MVMCOptimizers
 using MPI
+using Logging
+
+if get(ENV, "JULIA_MVMC_SMOKE_LOG_STDOUT", "0") == "1"
+    global_logger(ConsoleLogger(stdout, Logging.Info))
+end
 
 try
     ctx = MVMCOptimizers.build_parallel_context(1)
@@ -24,6 +29,12 @@ try
     @assert state.energy.etot2 ≈ 100.0 + 0.0im
     @assert state.energy.sztot ≈ 2.0 + 0.0im
     @assert state.energy.sztot2 ≈ 3.0 + 0.0im
+
+    if get(ENV, "JULIA_MVMC_SMOKE_TINY_WC", "0") == "1"
+        state.energy.wc = 0.0 + 0.0im
+        state.energy.etot = 0.0 + 0.0im
+        MVMCOptimizers.weight_average_we!(ctx, state)
+    end
 
     if ctx.rank0 == 0
         println("weight-average worker: root rank ok")

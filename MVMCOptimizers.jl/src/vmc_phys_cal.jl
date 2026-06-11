@@ -104,7 +104,8 @@ function vmc_phys_cal!(
         end
         n_elec = (data.modpara.nlocspin + data.modpara.ncond) ÷ 2
         data.modpara.nelec = n_elec
-        @info "Calculated NElec = $n_elec from NLocSpin = $(data.modpara.nlocspin) and NCond = $(data.modpara.ncond)"
+        is_output_rank(ctx) &&
+            @info "Calculated NElec = $n_elec from NLocSpin = $(data.modpara.nlocspin) and NCond = $(data.modpara.ncond)"
     end
 
     # Validate n_elec
@@ -119,27 +120,14 @@ function vmc_phys_cal!(
         @debug "NMPTrans was negative (anti-periodic BC), converted to $(data.modpara.nmp_trans)"
     elseif data.modpara.nmp_trans == 0
         data.modpara.nmp_trans = 1
-        @warn "NMPTrans was 0, setting to 1"
+        is_output_rank(ctx) && @warn "NMPTrans was 0, setting to 1"
     end
 
     # Initialize state
     n_site = data.modpara.nsite
-    n_proj = MVMCExpertModeParsers.projection_layout(data).n_proj
-
-    n_orbital_idx = if data.modpara.n_orbital_idx > 0
-        data.modpara.n_orbital_idx
-    elseif !isempty(data.orbital_terms)
-        maximum(t.idx for t in data.orbital_terms) + 1
-    else
-        0
-    end
-
-    n_rbm = has_rbm_terms(data) ? MVMCExpertModeParsers.count_rbm_parameters(data) : 0
-    n_para =
-        n_proj +
-        n_rbm +
-        n_orbital_idx +
-        MVMCExpertModeParsers.count_opt_trans_parameters(data)
+    counts = _parameter_count_breakdown(data)
+    n_proj = counts.n_proj
+    n_para = counts.n_para
     n_qp_full = get_n_qp_full(data)
     n_vmc_sample = data.modpara.nvmc_sample
 

@@ -2,6 +2,11 @@
 # 使い方: julia --project=<workspace> test/mpi/mpi_smoke.jl <output_dir>
 using MVMCOptimizers
 using MPI
+using Logging
+
+if get(ENV, "JULIA_MVMC_SMOKE_LOG_STDOUT", "0") == "1"
+    global_logger(ConsoleLogger(stdout, Logging.Info))
+end
 
 const fixture = joinpath(@__DIR__, "..", "integration", "reference",
                          "heisenberg_chain_real", "inputs", "namelist.def")

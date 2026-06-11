@@ -42,6 +42,22 @@ end
 @inline _parameter_section_width(terms) =
     isempty(terms) ? 0 : maximum(t.idx for t in terms) + 1
 
+function _parameter_count_breakdown(data::ExpertModeData)
+    layout = MVMCExpertModeParsers.projection_layout(data)
+    n_rbm = MVMCExpertModeParsers.count_rbm_parameters(data)
+    n_orbital_idx = MVMCExpertModeParsers.count_orbital_parameters(data)
+    n_opt_trans = MVMCExpertModeParsers.count_opt_trans_parameters(data)
+    n_para = MVMCExpertModeParsers.count_variational_parameters(data)
+    return (;
+        layout,
+        n_proj = layout.n_proj,
+        n_rbm,
+        n_orbital_idx,
+        n_opt_trans,
+        n_para,
+    )
+end
+
 """
     get_parameter_value(data, para_idx) -> ComplexF64
 
@@ -50,11 +66,12 @@ flat parameter index（1-based、Proj → RBM → Slater → OptTrans）の現�
 index と対応）。書き込み側は `set_parameter_value!` が同じ layout を使う。
 """
 function get_parameter_value(data::ExpertModeData, para_idx::Int)::ComplexF64
-    layout = MVMCExpertModeParsers.projection_layout(data)
-    n_proj = layout.n_proj
-    n_rbm = has_rbm_terms(data) ? MVMCExpertModeParsers.count_rbm_parameters(data) : 0
-    n_orbital_idx = MVMCExpertModeParsers.count_orbital_parameters(data)
-    n_opt_trans = MVMCExpertModeParsers.count_opt_trans_parameters(data)
+    counts = _parameter_count_breakdown(data)
+    layout = counts.layout
+    n_proj = counts.n_proj
+    n_rbm = counts.n_rbm
+    n_orbital_idx = counts.n_orbital_idx
+    n_opt_trans = counts.n_opt_trans
 
     if para_idx <= n_proj
         if para_idx <= layout.gutzwiller_offset + layout.n_gutzwiller
@@ -115,11 +132,12 @@ function get_parameter_value(data::ExpertModeData, para_idx::Int)::ComplexF64
 end
 
 function _set_parameter_value_direct!(data::ExpertModeData, para_idx::Int, value::ComplexF64)
-    layout = MVMCExpertModeParsers.projection_layout(data)
-    n_proj = layout.n_proj
-    n_rbm = has_rbm_terms(data) ? MVMCExpertModeParsers.count_rbm_parameters(data) : 0
-    n_orbital_idx = MVMCExpertModeParsers.count_orbital_parameters(data)
-    n_opt_trans = MVMCExpertModeParsers.count_opt_trans_parameters(data)
+    counts = _parameter_count_breakdown(data)
+    layout = counts.layout
+    n_proj = counts.n_proj
+    n_rbm = counts.n_rbm
+    n_orbital_idx = counts.n_orbital_idx
+    n_opt_trans = counts.n_opt_trans
 
     if para_idx <= n_proj
         if para_idx <= layout.gutzwiller_offset + layout.n_gutzwiller
@@ -182,11 +200,12 @@ function _set_parameter_value_direct!(data::ExpertModeData, para_idx::Int, value
 end
 
 function _add_parameter_delta_direct!(data::ExpertModeData, para_idx::Int, delta::ComplexF64)
-    layout = MVMCExpertModeParsers.projection_layout(data)
-    n_proj = layout.n_proj
-    n_rbm = has_rbm_terms(data) ? MVMCExpertModeParsers.count_rbm_parameters(data) : 0
-    n_orbital_idx = MVMCExpertModeParsers.count_orbital_parameters(data)
-    n_opt_trans = MVMCExpertModeParsers.count_opt_trans_parameters(data)
+    counts = _parameter_count_breakdown(data)
+    layout = counts.layout
+    n_proj = counts.n_proj
+    n_rbm = counts.n_rbm
+    n_orbital_idx = counts.n_orbital_idx
+    n_opt_trans = counts.n_opt_trans
 
     if para_idx <= n_proj
         if para_idx <= layout.gutzwiller_offset + layout.n_gutzwiller
@@ -367,21 +386,7 @@ Solves S*x = g where:
 """
 function stochastic_opt!(data::ExpertModeData, state::VMCOptimizationState, c_timer::CTimer = CTIMER_DISABLED)::Int
     # Get parameters
-    n_proj = MVMCExpertModeParsers.projection_layout(data).n_proj
-
-    # Calculate n_orbital_idx (number of unique orbital parameters)
-    # C implementation: NSlater = NOrbitalIdx
-    n_orbital_idx = if data.modpara.n_orbital_idx > 0
-        data.modpara.n_orbital_idx
-    elseif !isempty(data.orbital_terms)
-        maximum(t.idx for t in data.orbital_terms) + 1
-    else
-        0
-    end
-
-    # C implementation: NPara = NProj + FlagRBM*NRBM + NSlater + NOptTrans
-    n_rbm = has_rbm_terms(data) ? MVMCExpertModeParsers.count_rbm_parameters(data) : 0
-    n_para = n_proj + n_rbm + n_orbital_idx + MVMCExpertModeParsers.count_opt_trans_parameters(data)
+    n_para = _parameter_count_breakdown(data).n_para
     sr_opt_size = state.sr_opt.sr_opt_size
     sr_opt_oo = state.sr_opt.sr_opt_oo
     sr_opt_ho = state.sr_opt.sr_opt_ho
@@ -879,21 +884,7 @@ function stochastic_opt_cg!(data::ExpertModeData, state::VMCOptimizationState, c
     # The direct solver (stochastic_opt!) carries the [50]/[51]/[56]/[57]/[52]
     # breakdown. c_timer is accepted here for a uniform call from vmc_para_opt!.
     # Get parameters
-    n_proj = MVMCExpertModeParsers.projection_layout(data).n_proj
-
-    # Calculate n_orbital_idx (number of unique orbital parameters)
-    # C implementation: NSlater = NOrbitalIdx
-    n_orbital_idx = if data.modpara.n_orbital_idx > 0
-        data.modpara.n_orbital_idx
-    elseif !isempty(data.orbital_terms)
-        maximum(t.idx for t in data.orbital_terms) + 1
-    else
-        0
-    end
-
-    # C implementation: NPara = NProj + FlagRBM*NRBM + NSlater + NOptTrans
-    n_rbm = has_rbm_terms(data) ? MVMCExpertModeParsers.count_rbm_parameters(data) : 0
-    n_para = n_proj + n_rbm + n_orbital_idx + MVMCExpertModeParsers.count_opt_trans_parameters(data)
+    n_para = _parameter_count_breakdown(data).n_para
     sr_opt_size = state.sr_opt.sr_opt_size
     n_vmc_sample = data.modpara.nvmc_sample
     all_complex = get_all_complex_flag(data)
