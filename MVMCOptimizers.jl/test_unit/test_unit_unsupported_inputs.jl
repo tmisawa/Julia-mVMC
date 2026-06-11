@@ -16,8 +16,8 @@ function capture_error_message(f)
 end
 
 @testset "unit/unsupported_inputs: NSplitSize contract" begin
-    # NSplitSize = 1 (single process) remains accepted: the validator is a
-    # no-op returning `nothing`.
+    # NSplitSize = 1 remains accepted for both serial and v0.4 MPI
+    # sample-parallel runs: the validator is a no-op returning `nothing`.
     @testset "NSplitSize = 1 is accepted" begin
         modpara = ModParaParameters(nsplit_size = 1)
         @test MVMCOptimizers.validate_supported_modpara(modpara) === nothing
@@ -32,11 +32,11 @@ end
         )
         @test threw
         @test occursin("NSplitSize > 1", msg)
-        @test occursin("MPI parallelization is not supported", msg)
+        @test occursin("grouped MPI/QP splitting by NSplitSize is not implemented", msg)
     end
 
     # NSplitSize < 1 (0 or negative) is an invalid value: a process-split
-    # count must be at least 1. Rejected distinctly from the unsupported-MPI
+    # count must be at least 1. Rejected distinctly from the grouped-MPI
     # case (it is an invalid value, not a missing feature).
     @testset "NSplitSize <= 0 is rejected as an invalid value" begin
         for bad in (0, -1)
@@ -46,8 +46,8 @@ end
             )
             @test threw
             @test occursin(">= 1", msg)
-            # It must not be mislabeled as the MPI-unsupported case.
-            @test !occursin("MPI parallelization is not supported", msg)
+            # It must not be mislabeled as the unsupported grouped-MPI case.
+            @test !occursin("grouped MPI/QP splitting by NSplitSize is not implemented", msg)
         end
     end
 
@@ -62,7 +62,7 @@ end
             threw, msg = capture_error_message(() -> entry(data))
             @test threw
             @test occursin("NSplitSize > 1", msg)
-            @test occursin("MPI parallelization is not supported", msg)
+            @test occursin("grouped MPI/QP splitting by NSplitSize is not implemented", msg)
         end
     end
 end
@@ -90,8 +90,8 @@ end
             )
             @test threw
             @test occursin("NLanczosMode > 0", msg)
-            # Must not be mislabeled as the MPI-unsupported case.
-            @test !occursin("MPI parallelization is not supported", msg)
+            # Must not be mislabeled as the unsupported grouped-MPI case.
+            @test !occursin("grouped MPI/QP splitting by NSplitSize is not implemented", msg)
         end
     end
 

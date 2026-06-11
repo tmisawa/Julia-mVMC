@@ -31,6 +31,36 @@ function weight_average_we!(state::VMCOptimizationState)
 end
 
 """
+    weight_average_we!(ctx, state)
+
+C `WeightAverageWE(comm_parent)`: rank-local `Wc`, `Etot`, `Etot2`, `Sztot`,
+`Sztot2` を comm0 で allreduce してから、全 rank が global `Wc` で正規化する。
+serial context では既存の `weight_average_we!(state)` と同一経路。
+"""
+function weight_average_we!(ctx::ParallelContext, state::VMCOptimizationState)
+    ctx.is_mpi || return weight_average_we!(state)
+    buf = ComplexF64[
+        state.energy.wc,
+        state.energy.etot,
+        state.energy.etot2,
+        state.energy.sztot,
+        state.energy.sztot2,
+    ]
+    allreduce_sum!(ctx, buf; which = :comm0)
+    state.energy.wc = buf[1]
+    if abs(state.energy.wc) < 1e-15
+        @warn "Weight Wc is too small after MPI allreduce: $(state.energy.wc), etot=$(buf[2])"
+        return
+    end
+    inv_w = 1.0 / state.energy.wc
+    state.energy.etot = buf[2] * inv_w
+    state.energy.etot2 = buf[3] * inv_w
+    state.energy.sztot = buf[4] * inv_w
+    state.energy.sztot2 = buf[5] * inv_w
+    return
+end
+
+"""
     weight_average_sr_opt!(state::VMCOptimizationState)
 
 Calculate weighted average of SR optimization data (complex version).
@@ -53,6 +83,26 @@ function weight_average_sr_opt!(state::VMCOptimizationState)
 end
 
 """
+    weight_average_sr_opt!(ctx, state)
+
+C `WeightAverageSROpt(comm_parent)`: `SROptOO` / `SROptHO` の rank-local sum を
+comm0 allreduce し、`WeightAverageWE` 後の global `Wc` で全 rank が正規化する。
+"""
+function weight_average_sr_opt!(ctx::ParallelContext, state::VMCOptimizationState)
+    ctx.is_mpi || return weight_average_sr_opt!(state)
+    if abs(state.energy.wc) < 1e-15
+        @warn "Weight Wc is too small: $(state.energy.wc)"
+        return
+    end
+    allreduce_sum!(ctx, state.sr_opt.sr_opt_oo; which = :comm0)
+    allreduce_sum!(ctx, state.sr_opt.sr_opt_ho; which = :comm0)
+    inv_w = 1.0 / state.energy.wc
+    state.sr_opt.sr_opt_oo .*= inv_w
+    state.sr_opt.sr_opt_ho .*= inv_w
+    return
+end
+
+"""
     weight_average_sr_opt_real!(state::VMCOptimizationState)
 
 Calculate weighted average of SR optimization data (real version).
@@ -72,6 +122,25 @@ function weight_average_sr_opt_real!(state::VMCOptimizationState)
     # Normalize SROptOO_real and SROptHO_real (not SROptO_real - per C implementation)
     state.sr_opt.sr_opt_oo_real .*= inv_w
     state.sr_opt.sr_opt_ho_real .*= inv_w
+end
+
+"""
+    weight_average_sr_opt_real!(ctx, state)
+
+Real-valued counterpart of `WeightAverageSROpt_real(comm_parent)`.
+"""
+function weight_average_sr_opt_real!(ctx::ParallelContext, state::VMCOptimizationState)
+    ctx.is_mpi || return weight_average_sr_opt_real!(state)
+    if abs(state.energy.wc) < 1e-15
+        @warn "Weight Wc is too small: $(state.energy.wc)"
+        return
+    end
+    allreduce_sum!(ctx, state.sr_opt.sr_opt_oo_real; which = :comm0)
+    allreduce_sum!(ctx, state.sr_opt.sr_opt_ho_real; which = :comm0)
+    inv_w = 1.0 / real(state.energy.wc)
+    state.sr_opt.sr_opt_oo_real .*= inv_w
+    state.sr_opt.sr_opt_ho_real .*= inv_w
+    return
 end
 
 """
@@ -99,4 +168,33 @@ function weight_average_green_func!(state::VMCOptimizationState)
     phys.phys_cis_ajs .*= inv_w
     phys.phys_cis_ajs_ckt_alt .*= inv_w
     phys.phys_cis_ajs_ckt_alt_dc .*= inv_w
+end
+
+"""
+    weight_average_green_func!(ctx, state)
+
+C `WeightAverageGreenFunc(comm_parent)`: Green-function accumulators are reduced
+to rank0 only and normalized by global `Wc` there. Non-root ranks keep
+unspecified local values, matching the C contract that only rank0 writes output.
+"""
+function weight_average_green_func!(ctx::ParallelContext, state::VMCOptimizationState)
+    ctx.is_mpi || return weight_average_green_func!(state)
+    state.phys_quantities === nothing && return
+    if abs(state.energy.wc) < 1e-15
+        @warn "Weight Wc is too small: $(state.energy.wc), cannot normalize Green's functions"
+        return
+    end
+
+    phys = state.phys_quantities
+    reduce_sum_to_root!(ctx, phys.phys_cis_ajs; root = 0, which = :comm0)
+    reduce_sum_to_root!(ctx, phys.phys_cis_ajs_ckt_alt; root = 0, which = :comm0)
+    reduce_sum_to_root!(ctx, phys.phys_cis_ajs_ckt_alt_dc; root = 0, which = :comm0)
+
+    if is_output_rank(ctx)
+        inv_w = 1.0 / state.energy.wc
+        phys.phys_cis_ajs .*= inv_w
+        phys.phys_cis_ajs_ckt_alt .*= inv_w
+        phys.phys_cis_ajs_ckt_alt_dc .*= inv_w
+    end
+    return
 end

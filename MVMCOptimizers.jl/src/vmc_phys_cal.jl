@@ -21,12 +21,9 @@ C implementation: vmcmain.c:VMCPhysCal()
   with signature `callback(ismp, data, energy, info)`
 - `rng`: Random number generator (default: `nothing`).
   When `nothing`, a fresh `SFMT19937RNG()` is constructed and seeded
-  with `data.modpara.rnd_seed`, using the **legacy rule** (`<= 0` →
-  `11272`), matching `run_phys_cal_from_namelist`. Note: as of v0.4 R0
-  `vmc_para_opt!` / `run_para_opt_from_namelist` use the C-parity
-  `resolve_rnd_seed` instead (`0` → `0`, `< 0` → time seed), so
-  `RndSeed 0` seeds `11272` here but `0` on the para-opt side
-  (review 2026-06-11 F6-(2), follow-up C-F3).
+  with the C-parity `resolve_rnd_seed` rule (`0` → `0`, `< 0` → rank0
+  time seed + bcast, positive → that value, plus MPI `group1` offset),
+  matching `run_phys_cal_from_namelist` as of v0.4 R1.
   When a non-`nothing` RNG is passed in, it is used **as-is**; the
   caller is responsible for seeding it.
 
@@ -46,6 +43,7 @@ function vmc_phys_cal!(
     callback::Union{Nothing,Function} = nothing,
     rng::Union{AbstractRNG,Nothing} = nothing,
     output_dir::Union{String,Nothing} = nothing,
+    ctx::ParallelContext = serial_context(),
 )::Int
     # Reject unsupported ModPara inputs (e.g. NSplitSize > 1) before any work.
     validate_supported_modpara(data.modpara)
@@ -54,12 +52,11 @@ function vmc_phys_cal!(
     validate_factored_green_supported(data)
 
     # Initialize RNG if not provided. Match the C-compatible seed convention
-    # used by vmc_para_opt! and run_para_opt_from_namelist: when
-    # data.modpara.rnd_seed <= 0, fall back to 11272.
+    # used by vmc_para_opt! and run_para_opt_from_namelist.
     # Note: Do NOT re-seed an existing RNG - the caller should manage seeds.
     if rng === nothing
         rng = SFMT19937RNG()
-        actual_seed = data.modpara.rnd_seed > 0 ? data.modpara.rnd_seed : 11272
+        actual_seed = resolve_rnd_seed(ctx, data.modpara.rnd_seed, nothing)
         Random.seed!(rng, actual_seed)
     end
     # If rng is provided, use it as-is (caller manages the seed)
@@ -182,7 +179,7 @@ function vmc_phys_cal!(
 
     # Sampling loop
     for ismp = 0:(n_data_qty_smp-1)
-        println(
+        is_output_rank(ctx) && println(
             "Start: Calculate VMC physical quantities. Sampling: $ismp / $n_data_qty_smp",
         )
 
@@ -258,19 +255,19 @@ function vmc_phys_cal!(
         end
 
         # Weighted averages
-        weight_average_we!(state)
-        weight_average_green_func!(state)
+        weight_average_we!(ctx, state)
+        weight_average_green_func!(ctx, state)
 
-        # Reduce counters (no-op in single process)
-        reduce_counter!(state)
+        # Reduce counters (C ReduceCounter(comm_child2); serial is no-op)
+        reduce_counter!(ctx, state)
 
         # Output data. Pass the 0-based sample counter; output_data_phys! drives
         # the energy/param write mode from it (first sample truncates) and numbers
         # the Green files with ismp + NDataIdxStart internally.
-        output_data_phys!(data, state, ismp; output_dir = output_dir)
+        is_output_rank(ctx) && output_data_phys!(data, state, ismp; output_dir = output_dir)
 
         # Close files
-        close_file_phys_cal!(data, ismp)
+        is_output_rank(ctx) && close_file_phys_cal!(data, ismp)
 
         # Callback
         if callback !== nothing
@@ -278,7 +275,7 @@ function vmc_phys_cal!(
             callback(ismp, data, energy, info)
         end
 
-        println(
+        is_output_rank(ctx) && println(
             "End  : Calculate VMC physical quantities. Sampling: $ismp / $n_data_qty_smp",
         )
     end

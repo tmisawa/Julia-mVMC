@@ -31,3 +31,16 @@ function reduce_counter!(state::VMCOptimizationState)
     # For now, this is a no-op
     return
 end
+
+"""
+    reduce_counter!(ctx, state)
+
+C `ReduceCounter(comm_child2)` の state 版。MPI では `Counter_max=6` 相当だけを
+`ctx.comm2` で allreduce し、`ctx.rank2 == 0` の rank にだけ書き戻す。
+serial context では既存 `reduce_counter!(state)` と同じ no-op。
+"""
+function reduce_counter!(ctx::ParallelContext, state::VMCOptimizationState)
+    ctx.is_mpi || return reduce_counter!(state)
+    reduce_counter!(ctx, state.electron_config.counter)
+    return
+end

@@ -25,12 +25,29 @@ function get_opt_flag_for_parameter(data::ExpertModeData, pi::Int)::Int
     return data.optimization_flags[pi+1] ? 1 : 0
 end
 
+function _rbm_parameter_sections(data::ExpertModeData)
+    return (
+        data.charge_rbm_phys_layer_terms,
+        data.spin_rbm_phys_layer_terms,
+        data.general_rbm_phys_layer_terms,
+        data.charge_rbm_hidden_layer_terms,
+        data.spin_rbm_hidden_layer_terms,
+        data.general_rbm_hidden_layer_terms,
+        data.charge_rbm_phys_hidden_terms,
+        data.spin_rbm_phys_hidden_terms,
+        data.general_rbm_phys_hidden_terms,
+    )
+end
+
+@inline _parameter_section_width(terms) =
+    isempty(terms) ? 0 : maximum(t.idx for t in terms) + 1
+
 """
     get_parameter_value(data, para_idx) -> ComplexF64
 
 flat parameter index（1-based、Proj → RBM → Slater → OptTrans）の現在値を返す。
-`update_parameter_value` の read 版で、block 境界は同関数と同一。範囲外や
-layout の隙間（spin-jastrow 等）は 0 を返す（update 側が no-op になる index と対応）。
+範囲外や layout の隙間（spin-jastrow 等）は 0 を返す（update 側が no-op になる
+index と対応）。書き込み側は `set_parameter_value!` が同じ layout を使う。
 """
 function get_parameter_value(data::ExpertModeData, para_idx::Int)::ComplexF64
     layout = MVMCExpertModeParsers.projection_layout(data)
@@ -64,20 +81,9 @@ function get_parameter_value(data::ExpertModeData, para_idx::Int)::ComplexF64
         return ComplexF64(0)
     elseif para_idx <= n_proj + n_rbm
         rbm_idx = para_idx - n_proj - 1
-        rbm_sections = (
-            data.charge_rbm_phys_layer_terms,
-            data.spin_rbm_phys_layer_terms,
-            data.general_rbm_phys_layer_terms,
-            data.charge_rbm_hidden_layer_terms,
-            data.spin_rbm_hidden_layer_terms,
-            data.general_rbm_hidden_layer_terms,
-            data.charge_rbm_phys_hidden_terms,
-            data.spin_rbm_phys_hidden_terms,
-            data.general_rbm_phys_hidden_terms,
-        )
         section_offset = 0
-        for terms in rbm_sections
-            n_section = isempty(terms) ? 0 : (maximum(t.idx for t in terms) + 1)
+        for terms in _rbm_parameter_sections(data)
+            n_section = _parameter_section_width(terms)
             if rbm_idx < section_offset + n_section
                 local_idx = rbm_idx - section_offset
                 for term in terms
@@ -108,6 +114,140 @@ function get_parameter_value(data::ExpertModeData, para_idx::Int)::ComplexF64
     end
 end
 
+function _set_parameter_value_direct!(data::ExpertModeData, para_idx::Int, value::ComplexF64)
+    layout = MVMCExpertModeParsers.projection_layout(data)
+    n_proj = layout.n_proj
+    n_rbm = has_rbm_terms(data) ? MVMCExpertModeParsers.count_rbm_parameters(data) : 0
+    n_orbital_idx = MVMCExpertModeParsers.count_orbital_parameters(data)
+    n_opt_trans = MVMCExpertModeParsers.count_opt_trans_parameters(data)
+
+    if para_idx <= n_proj
+        if para_idx <= layout.gutzwiller_offset + layout.n_gutzwiller
+            local_idx = para_idx - layout.gutzwiller_offset
+            if 1 <= local_idx <= length(data.gutzwiller_terms)
+                data.gutzwiller_terms[local_idx].value = value
+            end
+        elseif para_idx <= layout.jastrow_offset + layout.n_jastrow
+            local_idx = para_idx - layout.jastrow_offset
+            if 1 <= local_idx <= length(data.jastrow_terms)
+                data.jastrow_terms[local_idx].value = value
+            end
+        elseif layout.dh2_offset < para_idx <= layout.dh2_offset + 6 * layout.n_dh2
+            local_idx = para_idx - layout.dh2_offset
+            if 1 <= local_idx <= length(data.doublon_holon_2site_params)
+                data.doublon_holon_2site_params[local_idx] = value
+            end
+        elseif layout.dh4_offset < para_idx <= layout.dh4_offset + 10 * layout.n_dh4
+            local_idx = para_idx - layout.dh4_offset
+            if 1 <= local_idx <= length(data.doublon_holon_4site_params)
+                data.doublon_holon_4site_params[local_idx] = value
+            end
+        end
+    elseif para_idx <= n_proj + n_rbm
+        rbm_idx = para_idx - n_proj - 1
+        section_offset = 0
+        for terms in _rbm_parameter_sections(data)
+            n_section = _parameter_section_width(terms)
+            if rbm_idx < section_offset + n_section
+                local_idx = rbm_idx - section_offset
+                for term in terms
+                    if term.idx == local_idx
+                        term.value = value
+                    end
+                end
+                return nothing
+            end
+            section_offset += n_section
+        end
+    else
+        slater_start = n_proj + n_rbm + 1
+        opt_trans_start = n_proj + n_rbm + n_orbital_idx + 1
+
+        if slater_start <= para_idx < opt_trans_start
+            orbital_idx = para_idx - n_proj - n_rbm - 1
+            for term in data.orbital_terms
+                if term.idx == orbital_idx
+                    term.value = value
+                end
+            end
+        elseif opt_trans_start <= para_idx < opt_trans_start + n_opt_trans
+            opt_idx = para_idx - opt_trans_start + 1
+            data.opt_trans[opt_idx] = value
+            if data.qp_weights !== nothing
+                MVMCExpertModeParsers.update_qp_weight!(data.qp_weights, data.opt_trans)
+            end
+        end
+    end
+    return nothing
+end
+
+function _add_parameter_delta_direct!(data::ExpertModeData, para_idx::Int, delta::ComplexF64)
+    layout = MVMCExpertModeParsers.projection_layout(data)
+    n_proj = layout.n_proj
+    n_rbm = has_rbm_terms(data) ? MVMCExpertModeParsers.count_rbm_parameters(data) : 0
+    n_orbital_idx = MVMCExpertModeParsers.count_orbital_parameters(data)
+    n_opt_trans = MVMCExpertModeParsers.count_opt_trans_parameters(data)
+
+    if para_idx <= n_proj
+        if para_idx <= layout.gutzwiller_offset + layout.n_gutzwiller
+            local_idx = para_idx - layout.gutzwiller_offset
+            if 1 <= local_idx <= length(data.gutzwiller_terms)
+                data.gutzwiller_terms[local_idx].value += delta
+            end
+        elseif para_idx <= layout.jastrow_offset + layout.n_jastrow
+            local_idx = para_idx - layout.jastrow_offset
+            if 1 <= local_idx <= length(data.jastrow_terms)
+                data.jastrow_terms[local_idx].value += delta
+            end
+        elseif layout.dh2_offset < para_idx <= layout.dh2_offset + 6 * layout.n_dh2
+            local_idx = para_idx - layout.dh2_offset
+            if 1 <= local_idx <= length(data.doublon_holon_2site_params)
+                data.doublon_holon_2site_params[local_idx] += delta
+            end
+        elseif layout.dh4_offset < para_idx <= layout.dh4_offset + 10 * layout.n_dh4
+            local_idx = para_idx - layout.dh4_offset
+            if 1 <= local_idx <= length(data.doublon_holon_4site_params)
+                data.doublon_holon_4site_params[local_idx] += delta
+            end
+        end
+    elseif para_idx <= n_proj + n_rbm
+        rbm_idx = para_idx - n_proj - 1
+        section_offset = 0
+        for terms in _rbm_parameter_sections(data)
+            n_section = _parameter_section_width(terms)
+            if rbm_idx < section_offset + n_section
+                local_idx = rbm_idx - section_offset
+                for term in terms
+                    if term.idx == local_idx
+                        term.value += delta
+                    end
+                end
+                return nothing
+            end
+            section_offset += n_section
+        end
+    else
+        slater_start = n_proj + n_rbm + 1
+        opt_trans_start = n_proj + n_rbm + n_orbital_idx + 1
+
+        if slater_start <= para_idx < opt_trans_start
+            orbital_idx = para_idx - n_proj - n_rbm - 1
+            for term in data.orbital_terms
+                if term.idx == orbital_idx
+                    term.value += delta
+                end
+            end
+        elseif opt_trans_start <= para_idx < opt_trans_start + n_opt_trans
+            opt_idx = para_idx - opt_trans_start + 1
+            data.opt_trans[opt_idx] += delta
+            if data.qp_weights !== nothing
+                MVMCExpertModeParsers.update_qp_weight!(data.qp_weights, data.opt_trans)
+            end
+        end
+    end
+    return nothing
+end
+
 """
     update_parameter_value(data::ExpertModeData, para_idx::Int, delta_real::Float64, delta_imag::Float64)
 
@@ -126,91 +266,9 @@ function update_parameter_value(
     delta_real::Float64,
     delta_imag::Float64,
 )
-    layout = MVMCExpertModeParsers.projection_layout(data)
-    n_proj = layout.n_proj
-    n_rbm = has_rbm_terms(data) ? MVMCExpertModeParsers.count_rbm_parameters(data) : 0
-    n_orbital_idx = MVMCExpertModeParsers.count_orbital_parameters(data)
-    n_opt_trans = MVMCExpertModeParsers.count_opt_trans_parameters(data)
     delta = ComplexF64(delta_real, delta_imag)
-
-    if para_idx <= n_proj
-        # Projection parameters: Gutzwiller | Jastrow | SpinJastrow(0) | DH2 | DH4.
-        if para_idx <= layout.gutzwiller_offset + layout.n_gutzwiller
-            # Gutzwiller parameter
-            local_idx = para_idx - layout.gutzwiller_offset
-            if 1 <= local_idx <= length(data.gutzwiller_terms)
-                data.gutzwiller_terms[local_idx].value += delta
-            end
-        elseif para_idx <= layout.jastrow_offset + layout.n_jastrow
-            # Jastrow parameter
-            local_idx = para_idx - layout.jastrow_offset
-            if 1 <= local_idx <= length(data.jastrow_terms)
-                data.jastrow_terms[local_idx].value += delta
-            end
-        elseif layout.dh2_offset < para_idx <= layout.dh2_offset + 6 * layout.n_dh2
-            local_idx = para_idx - layout.dh2_offset
-            if 1 <= local_idx <= length(data.doublon_holon_2site_params)
-                data.doublon_holon_2site_params[local_idx] += delta
-            end
-        elseif layout.dh4_offset < para_idx <= layout.dh4_offset + 10 * layout.n_dh4
-            local_idx = para_idx - layout.dh4_offset
-            if 1 <= local_idx <= length(data.doublon_holon_4site_params)
-                data.doublon_holon_4site_params[local_idx] += delta
-            end
-        end
-    elseif para_idx <= n_proj + n_rbm
-        # RBM parameters are laid out in 9 contiguous sections:
-        # phys(3) -> hidden(3) -> phys-hidden(3)
-        rbm_idx = para_idx - n_proj - 1  # 0-based index in RBM block
-        rbm_sections = (
-            data.charge_rbm_phys_layer_terms,
-            data.spin_rbm_phys_layer_terms,
-            data.general_rbm_phys_layer_terms,
-            data.charge_rbm_hidden_layer_terms,
-            data.spin_rbm_hidden_layer_terms,
-            data.general_rbm_hidden_layer_terms,
-            data.charge_rbm_phys_hidden_terms,
-            data.spin_rbm_phys_hidden_terms,
-            data.general_rbm_phys_hidden_terms,
-        )
-
-        section_offset = 0
-        for terms in rbm_sections
-            n_section = isempty(terms) ? 0 : (maximum(t.idx for t in terms) + 1)
-            if rbm_idx < section_offset + n_section
-                local_idx = rbm_idx - section_offset
-                for term in terms
-                    if term.idx == local_idx
-                        term.value += delta
-                    end
-                end
-                return
-            end
-            section_offset += n_section
-        end
-    else
-        slater_start = n_proj + n_rbm + 1
-        opt_trans_start = n_proj + n_rbm + n_orbital_idx + 1
-
-        if slater_start <= para_idx < opt_trans_start
-            # Slater (Orbital) parameters.
-            orbital_idx = para_idx - n_proj - n_rbm - 1  # 0-based orbital index
-
-            # Update ALL OrbitalTerms with the same idx.
-            # In C, Slater[idx] is a single parameter shared by all site pairs with that idx.
-            for term in data.orbital_terms
-                if term.idx == orbital_idx
-                    term.value += delta
-                end
-            end
-        elseif opt_trans_start <= para_idx < opt_trans_start + n_opt_trans
-            opt_idx = para_idx - opt_trans_start + 1
-            data.opt_trans[opt_idx] += delta
-            if data.qp_weights !== nothing
-                MVMCExpertModeParsers.update_qp_weight!(data.qp_weights, data.opt_trans)
-            end
-        end
-    end
+    _add_parameter_delta_direct!(data, para_idx, delta)
+    return nothing
 end
 
 """

@@ -180,45 +180,33 @@ end
 """
     set_parameter_value!(data, para_idx, value)
 
-flat index の値を `value` にする。書き込みは既存 `update_parameter_value`
-（optimizer と同じ経路）への差分適用で行い、対応の二重実装を避ける。
-
-**制限（plan review F7）:** `update_parameter_value` は同一 idx を持つ全
-duplicate term（RBM 各 section / `orbital_terms`）へ同じ delta を加算するため、
-duplicate 同士が何らかの理由で不一致になっている場合、この差分適用では root 値へ
-「代入」修復できない（C の contiguous `Para` bcast より修復力が弱い）。R0 では
-rank-local mutation が存在せず divergence は起きないため、delta 方式 + 下の
-invariant check（fail-fast）で対応する。R1 以降で rank-local mutation が増える
-場合は direct-assignment setter への refactor
-（`update_parameter_value` の layout walker 共通化）を再検討する。
+flat index の値を `value` に直接代入する。RBM / orbital の duplicate idx は同じ
+`value` へまとめて代入するため、C の contiguous `Para` broadcast と同じく rank-local
+divergence を root 値へ修復できる。`update_parameter_value` は別の delta 加算 helper
+を使うが、同じ flat-index layout に従う。
 """
 function set_parameter_value!(data::ExpertModeData, para_idx::Int, value::ComplexF64)
-    delta = value - get_parameter_value(data, para_idx)
-    update_parameter_value(data, para_idx, real(delta), imag(delta))
+    _set_parameter_value_direct!(data, para_idx, value)
     return data
 end
 
 """
-duplicate idx invariant（plan review F7 / addendum C1）: 同一 idx の duplicate term が
-全て同値であることを確認する。不一致なら error（silent な部分修復より fail-fast を
-選ぶ）。`unpack_parameters!` の冒頭で呼ぶ。
-
-検査対象は `update_parameter_value` が「同一 idx の全 term へ同じ delta」を適用する
-全 section: `orbital_terms` + RBM 9 sections（stochastic_opt.jl の `rbm_sections`
-tuple と同一順）。RBM を使わない入力では各 section は empty vector なので no-op。
+duplicate idx invariant: 同一 idx の duplicate term が全て同値であることを確認する。
+R1 の direct-assignment unpack は不一致 duplicate を修復できるため、この check は
+手動検査用に残す。RBM を使わない入力では各 section は empty vector なので no-op。
 """
 function _duplicate_checked_sections(data::ExpertModeData)
     return (
         (:orbital_terms, data.orbital_terms),
-        (:charge_rbm_phys_layer_terms, data.charge_rbm_phys_layer_terms),
-        (:spin_rbm_phys_layer_terms, data.spin_rbm_phys_layer_terms),
-        (:general_rbm_phys_layer_terms, data.general_rbm_phys_layer_terms),
-        (:charge_rbm_hidden_layer_terms, data.charge_rbm_hidden_layer_terms),
-        (:spin_rbm_hidden_layer_terms, data.spin_rbm_hidden_layer_terms),
-        (:general_rbm_hidden_layer_terms, data.general_rbm_hidden_layer_terms),
-        (:charge_rbm_phys_hidden_terms, data.charge_rbm_phys_hidden_terms),
-        (:spin_rbm_phys_hidden_terms, data.spin_rbm_phys_hidden_terms),
-        (:general_rbm_phys_hidden_terms, data.general_rbm_phys_hidden_terms),
+        (:charge_rbm_phys_layer_terms, _rbm_parameter_sections(data)[1]),
+        (:spin_rbm_phys_layer_terms, _rbm_parameter_sections(data)[2]),
+        (:general_rbm_phys_layer_terms, _rbm_parameter_sections(data)[3]),
+        (:charge_rbm_hidden_layer_terms, _rbm_parameter_sections(data)[4]),
+        (:spin_rbm_hidden_layer_terms, _rbm_parameter_sections(data)[5]),
+        (:general_rbm_hidden_layer_terms, _rbm_parameter_sections(data)[6]),
+        (:charge_rbm_phys_hidden_terms, _rbm_parameter_sections(data)[7]),
+        (:spin_rbm_phys_hidden_terms, _rbm_parameter_sections(data)[8]),
+        (:general_rbm_phys_hidden_terms, _rbm_parameter_sections(data)[9]),
     )
 end
 
@@ -231,8 +219,7 @@ function check_duplicate_consistency(data::ExpertModeData)
                 by_idx[term.idx] = term.value
             elseif v != term.value
                 error("$name idx=$(term.idx) has inconsistent duplicate values " *
-                      "($v vs $(term.value)); delta-based unpack cannot repair this. " *
-                      "See plan review F7 / addendum C1.")
+                      "($v vs $(term.value)).")
             end
         end
     end
@@ -240,16 +227,103 @@ function check_duplicate_consistency(data::ExpertModeData)
 end
 
 "C の contiguous `Para` 相当へ pack（spec §5-2 の pack/unpack helper）。"
-pack_parameters(data::ExpertModeData) =
-    ComplexF64[get_parameter_value(data, i) for i in 1:count_total_parameters(data)]
+function pack_parameters(data::ExpertModeData)
+    para = zeros(ComplexF64, count_total_parameters(data))
+    layout = MVMCExpertModeParsers.projection_layout(data)
+    n_proj = layout.n_proj
+    n_rbm = has_rbm_terms(data) ? MVMCExpertModeParsers.count_rbm_parameters(data) : 0
+    n_orbital_idx = MVMCExpertModeParsers.count_orbital_parameters(data)
+    n_opt_trans = MVMCExpertModeParsers.count_opt_trans_parameters(data)
+
+    for i = 1:min(layout.n_gutzwiller, length(data.gutzwiller_terms))
+        para[layout.gutzwiller_offset+i] = ComplexF64(data.gutzwiller_terms[i].value)
+    end
+    for i = 1:min(layout.n_jastrow, length(data.jastrow_terms))
+        para[layout.jastrow_offset+i] = ComplexF64(data.jastrow_terms[i].value)
+    end
+    for i = 1:min(6 * layout.n_dh2, length(data.doublon_holon_2site_params))
+        para[layout.dh2_offset+i] = ComplexF64(data.doublon_holon_2site_params[i])
+    end
+    for i = 1:min(10 * layout.n_dh4, length(data.doublon_holon_4site_params))
+        para[layout.dh4_offset+i] = ComplexF64(data.doublon_holon_4site_params[i])
+    end
+
+    rbm_offset = n_proj
+    for terms in _rbm_parameter_sections(data)
+        n_section = _parameter_section_width(terms)
+        for term in terms
+            idx = rbm_offset + term.idx + 1
+            if 1 <= idx <= length(para)
+                para[idx] = ComplexF64(term.value)
+            end
+        end
+        rbm_offset += n_section
+    end
+
+    slater_start = n_proj + n_rbm + 1
+    for term in data.orbital_terms
+        idx = slater_start + term.idx
+        if slater_start <= idx < slater_start + n_orbital_idx
+            para[idx] = ComplexF64(term.value)
+        end
+    end
+
+    opt_trans_start = n_proj + n_rbm + n_orbital_idx + 1
+    for i = 1:min(n_opt_trans, length(data.opt_trans))
+        para[opt_trans_start+i-1] = ComplexF64(data.opt_trans[i])
+    end
+    return para
+end
 
 function unpack_parameters!(data::ExpertModeData, para::AbstractVector{ComplexF64})
     n = count_total_parameters(data)
     length(para) == n || throw(ArgumentError(
         "parameter vector length $(length(para)) != NPara $n"))
-    check_duplicate_consistency(data)   # F7: 差分適用の前提（duplicate 同値）を保証
-    for i in 1:n
-        set_parameter_value!(data, i, para[i])
+    layout = MVMCExpertModeParsers.projection_layout(data)
+    n_proj = layout.n_proj
+    n_rbm = has_rbm_terms(data) ? MVMCExpertModeParsers.count_rbm_parameters(data) : 0
+    n_orbital_idx = MVMCExpertModeParsers.count_orbital_parameters(data)
+    n_opt_trans = MVMCExpertModeParsers.count_opt_trans_parameters(data)
+
+    for i = 1:min(layout.n_gutzwiller, length(data.gutzwiller_terms))
+        data.gutzwiller_terms[i].value = para[layout.gutzwiller_offset+i]
+    end
+    for i = 1:min(layout.n_jastrow, length(data.jastrow_terms))
+        data.jastrow_terms[i].value = para[layout.jastrow_offset+i]
+    end
+    for i = 1:min(6 * layout.n_dh2, length(data.doublon_holon_2site_params))
+        data.doublon_holon_2site_params[i] = para[layout.dh2_offset+i]
+    end
+    for i = 1:min(10 * layout.n_dh4, length(data.doublon_holon_4site_params))
+        data.doublon_holon_4site_params[i] = para[layout.dh4_offset+i]
+    end
+
+    rbm_offset = n_proj
+    for terms in _rbm_parameter_sections(data)
+        n_section = _parameter_section_width(terms)
+        for term in terms
+            idx = rbm_offset + term.idx + 1
+            if 1 <= idx <= length(para)
+                term.value = para[idx]
+            end
+        end
+        rbm_offset += n_section
+    end
+
+    slater_start = n_proj + n_rbm + 1
+    for term in data.orbital_terms
+        idx = slater_start + term.idx
+        if slater_start <= idx < slater_start + n_orbital_idx
+            term.value = para[idx]
+        end
+    end
+
+    opt_trans_start = n_proj + n_rbm + n_orbital_idx + 1
+    for i = 1:min(n_opt_trans, length(data.opt_trans))
+        data.opt_trans[i] = para[opt_trans_start+i-1]
+    end
+    if n_opt_trans > 0 && data.qp_weights !== nothing
+        MVMCExpertModeParsers.update_qp_weight!(data.qp_weights, data.opt_trans)
     end
     return data
 end
