@@ -226,48 +226,8 @@ end
 function pack_parameters(data::ExpertModeData)
     counts = _parameter_count_breakdown(data)
     para = zeros(ComplexF64, counts.n_para)
-    layout = counts.layout
-    n_proj = counts.n_proj
-    n_rbm = counts.n_rbm
-    n_orbital_idx = counts.n_orbital_idx
-    n_opt_trans = counts.n_opt_trans
-
-    for i = 1:min(layout.n_gutzwiller, length(data.gutzwiller_terms))
-        para[layout.gutzwiller_offset+i] = ComplexF64(data.gutzwiller_terms[i].value)
-    end
-    for i = 1:min(layout.n_jastrow, length(data.jastrow_terms))
-        para[layout.jastrow_offset+i] = ComplexF64(data.jastrow_terms[i].value)
-    end
-    for i = 1:min(6 * layout.n_dh2, length(data.doublon_holon_2site_params))
-        para[layout.dh2_offset+i] = ComplexF64(data.doublon_holon_2site_params[i])
-    end
-    for i = 1:min(10 * layout.n_dh4, length(data.doublon_holon_4site_params))
-        para[layout.dh4_offset+i] = ComplexF64(data.doublon_holon_4site_params[i])
-    end
-
-    rbm_offset = n_proj
-    for terms in _rbm_parameter_sections(data)
-        n_section = _parameter_section_width(terms)
-        for term in terms
-            idx = rbm_offset + term.idx + 1
-            if 1 <= idx <= length(para)
-                para[idx] = ComplexF64(term.value)
-            end
-        end
-        rbm_offset += n_section
-    end
-
-    slater_start = n_proj + n_rbm + 1
-    for term in data.orbital_terms
-        idx = slater_start + term.idx
-        if slater_start <= idx < slater_start + n_orbital_idx
-            para[idx] = ComplexF64(term.value)
-        end
-    end
-
-    opt_trans_start = n_proj + n_rbm + n_orbital_idx + 1
-    for i = 1:min(n_opt_trans, length(data.opt_trans))
-        para[opt_trans_start+i-1] = ComplexF64(data.opt_trans[i])
+    _foreach_parameter_location(data, counts) do para_idx, loc
+        para[para_idx] = _parameter_location_value(data, loc)
     end
     return para
 end
@@ -277,50 +237,14 @@ function unpack_parameters!(data::ExpertModeData, para::AbstractVector{ComplexF6
     n = counts.n_para
     length(para) == n || throw(ArgumentError(
         "parameter vector length $(length(para)) != NPara $n"))
-    layout = counts.layout
-    n_proj = counts.n_proj
-    n_rbm = counts.n_rbm
-    n_orbital_idx = counts.n_orbital_idx
-    n_opt_trans = counts.n_opt_trans
-
-    for i = 1:min(layout.n_gutzwiller, length(data.gutzwiller_terms))
-        data.gutzwiller_terms[i].value = para[layout.gutzwiller_offset+i]
-    end
-    for i = 1:min(layout.n_jastrow, length(data.jastrow_terms))
-        data.jastrow_terms[i].value = para[layout.jastrow_offset+i]
-    end
-    for i = 1:min(6 * layout.n_dh2, length(data.doublon_holon_2site_params))
-        data.doublon_holon_2site_params[i] = para[layout.dh2_offset+i]
-    end
-    for i = 1:min(10 * layout.n_dh4, length(data.doublon_holon_4site_params))
-        data.doublon_holon_4site_params[i] = para[layout.dh4_offset+i]
-    end
-
-    rbm_offset = n_proj
-    for terms in _rbm_parameter_sections(data)
-        n_section = _parameter_section_width(terms)
-        for term in terms
-            idx = rbm_offset + term.idx + 1
-            if 1 <= idx <= length(para)
-                term.value = para[idx]
-            end
-        end
-        rbm_offset += n_section
-    end
-
-    slater_start = n_proj + n_rbm + 1
-    for term in data.orbital_terms
-        idx = slater_start + term.idx
-        if slater_start <= idx < slater_start + n_orbital_idx
-            term.value = para[idx]
+    touched_opt_trans = Ref(false)
+    _foreach_parameter_location(data, counts) do para_idx, loc
+        _set_parameter_location_value!(data, loc, para[para_idx])
+        if loc.kind == _PARAM_OPTTRANS
+            touched_opt_trans[] = true
         end
     end
-
-    opt_trans_start = n_proj + n_rbm + n_orbital_idx + 1
-    for i = 1:min(n_opt_trans, length(data.opt_trans))
-        data.opt_trans[i] = para[opt_trans_start+i-1]
-    end
-    if n_opt_trans > 0 && data.qp_weights !== nothing
+    if touched_opt_trans[] && data.qp_weights !== nothing
         MVMCExpertModeParsers.update_qp_weight!(data.qp_weights, data.opt_trans)
     end
     return data

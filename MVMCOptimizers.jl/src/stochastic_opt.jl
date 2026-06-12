@@ -58,211 +58,215 @@ function _parameter_count_breakdown(data::ExpertModeData)
     )
 end
 
-"""
-    get_parameter_value(data, para_idx) -> ComplexF64
-
-flat parameter index（1-based、Proj → RBM → Slater → OptTrans）の現在値を返す。
-範囲外や layout の隙間（spin-jastrow 等）は 0 を返す（update 側が no-op になる
-index と対応）。書き込み側は `set_parameter_value!` が同じ layout を使う。
-"""
-function get_parameter_value(data::ExpertModeData, para_idx::Int)::ComplexF64
-    counts = _parameter_count_breakdown(data)
-    layout = counts.layout
-    n_proj = counts.n_proj
-    n_rbm = counts.n_rbm
-    n_orbital_idx = counts.n_orbital_idx
-    n_opt_trans = counts.n_opt_trans
-
-    if para_idx <= n_proj
-        if para_idx <= layout.gutzwiller_offset + layout.n_gutzwiller
-            local_idx = para_idx - layout.gutzwiller_offset
-            if 1 <= local_idx <= length(data.gutzwiller_terms)
-                return ComplexF64(data.gutzwiller_terms[local_idx].value)
-            end
-        elseif para_idx <= layout.jastrow_offset + layout.n_jastrow
-            local_idx = para_idx - layout.jastrow_offset
-            if 1 <= local_idx <= length(data.jastrow_terms)
-                return ComplexF64(data.jastrow_terms[local_idx].value)
-            end
-        elseif layout.dh2_offset < para_idx <= layout.dh2_offset + 6 * layout.n_dh2
-            local_idx = para_idx - layout.dh2_offset
-            if 1 <= local_idx <= length(data.doublon_holon_2site_params)
-                return ComplexF64(data.doublon_holon_2site_params[local_idx])
-            end
-        elseif layout.dh4_offset < para_idx <= layout.dh4_offset + 10 * layout.n_dh4
-            local_idx = para_idx - layout.dh4_offset
-            if 1 <= local_idx <= length(data.doublon_holon_4site_params)
-                return ComplexF64(data.doublon_holon_4site_params[local_idx])
-            end
-        end
-        return ComplexF64(0)
-    elseif para_idx <= n_proj + n_rbm
-        rbm_idx = para_idx - n_proj - 1
-        section_offset = 0
-        for terms in _rbm_parameter_sections(data)
-            n_section = _parameter_section_width(terms)
-            if rbm_idx < section_offset + n_section
-                local_idx = rbm_idx - section_offset
-                for term in terms
-                    if term.idx == local_idx
-                        return ComplexF64(term.value)
-                    end
-                end
-                return ComplexF64(0)
-            end
-            section_offset += n_section
-        end
-        return ComplexF64(0)
-    else
-        slater_start = n_proj + n_rbm + 1
-        opt_trans_start = n_proj + n_rbm + n_orbital_idx + 1
-        if slater_start <= para_idx < opt_trans_start
-            orbital_idx = para_idx - n_proj - n_rbm - 1
-            for term in data.orbital_terms
-                if term.idx == orbital_idx
-                    return ComplexF64(term.value)
-                end
-            end
-        elseif opt_trans_start <= para_idx < opt_trans_start + n_opt_trans
-            opt_idx = para_idx - opt_trans_start + 1
-            return ComplexF64(data.opt_trans[opt_idx])
-        end
-        return ComplexF64(0)
-    end
+@enum _ParameterKind begin
+    _PARAM_GUTZWILLER
+    _PARAM_JASTROW
+    _PARAM_DH2
+    _PARAM_DH4
+    _PARAM_RBM
+    _PARAM_ORBITAL
+    _PARAM_OPTTRANS
 end
 
-function _set_parameter_value_direct!(data::ExpertModeData, para_idx::Int, value::ComplexF64)
-    counts = _parameter_count_breakdown(data)
-    layout = counts.layout
-    n_proj = counts.n_proj
-    n_rbm = counts.n_rbm
-    n_orbital_idx = counts.n_orbital_idx
-    n_opt_trans = counts.n_opt_trans
+struct _ParameterLocation
+    kind::_ParameterKind
+    section_idx::Int
+    item_idx::Int
+end
 
-    if para_idx <= n_proj
+function _foreach_parameter_location(f, data::ExpertModeData, counts)
+    layout = counts.layout
+    n_para = counts.n_para
+
+    for i = 1:min(layout.n_gutzwiller, length(data.gutzwiller_terms))
+        para_idx = layout.gutzwiller_offset + i
+        1 <= para_idx <= n_para &&
+            f(para_idx, _ParameterLocation(_PARAM_GUTZWILLER, 0, i))
+    end
+    for i = 1:min(layout.n_jastrow, length(data.jastrow_terms))
+        para_idx = layout.jastrow_offset + i
+        1 <= para_idx <= n_para &&
+            f(para_idx, _ParameterLocation(_PARAM_JASTROW, 0, i))
+    end
+    for i = 1:min(6 * layout.n_dh2, length(data.doublon_holon_2site_params))
+        para_idx = layout.dh2_offset + i
+        1 <= para_idx <= n_para &&
+            f(para_idx, _ParameterLocation(_PARAM_DH2, 0, i))
+    end
+    for i = 1:min(10 * layout.n_dh4, length(data.doublon_holon_4site_params))
+        para_idx = layout.dh4_offset + i
+        1 <= para_idx <= n_para &&
+            f(para_idx, _ParameterLocation(_PARAM_DH4, 0, i))
+    end
+
+    rbm_offset = counts.n_proj
+    for (section_idx, terms) in enumerate(_rbm_parameter_sections(data))
+        n_section = _parameter_section_width(terms)
+        for term_idx in eachindex(terms)
+            para_idx = rbm_offset + terms[term_idx].idx + 1
+            1 <= para_idx <= n_para &&
+                f(para_idx, _ParameterLocation(_PARAM_RBM, section_idx, term_idx))
+        end
+        rbm_offset += n_section
+    end
+
+    slater_start = counts.n_proj + counts.n_rbm + 1
+    for term_idx in eachindex(data.orbital_terms)
+        para_idx = slater_start + data.orbital_terms[term_idx].idx
+        slater_start <= para_idx < slater_start + counts.n_orbital_idx &&
+            f(para_idx, _ParameterLocation(_PARAM_ORBITAL, 0, term_idx))
+    end
+
+    opt_trans_start = counts.n_proj + counts.n_rbm + counts.n_orbital_idx + 1
+    for i = 1:min(counts.n_opt_trans, length(data.opt_trans))
+        para_idx = opt_trans_start + i - 1
+        1 <= para_idx <= n_para &&
+            f(para_idx, _ParameterLocation(_PARAM_OPTTRANS, 0, i))
+    end
+    return nothing
+end
+
+function _foreach_parameter_location_at(f, data::ExpertModeData, counts, para_idx::Int)
+    1 <= para_idx <= counts.n_para || return nothing
+
+    layout = counts.layout
+    if para_idx <= counts.n_proj
         if para_idx <= layout.gutzwiller_offset + layout.n_gutzwiller
             local_idx = para_idx - layout.gutzwiller_offset
-            if 1 <= local_idx <= length(data.gutzwiller_terms)
-                data.gutzwiller_terms[local_idx].value = value
-            end
+            1 <= local_idx <= length(data.gutzwiller_terms) &&
+                f(_ParameterLocation(_PARAM_GUTZWILLER, 0, local_idx))
         elseif para_idx <= layout.jastrow_offset + layout.n_jastrow
             local_idx = para_idx - layout.jastrow_offset
-            if 1 <= local_idx <= length(data.jastrow_terms)
-                data.jastrow_terms[local_idx].value = value
-            end
+            1 <= local_idx <= length(data.jastrow_terms) &&
+                f(_ParameterLocation(_PARAM_JASTROW, 0, local_idx))
         elseif layout.dh2_offset < para_idx <= layout.dh2_offset + 6 * layout.n_dh2
             local_idx = para_idx - layout.dh2_offset
-            if 1 <= local_idx <= length(data.doublon_holon_2site_params)
-                data.doublon_holon_2site_params[local_idx] = value
-            end
+            1 <= local_idx <= length(data.doublon_holon_2site_params) &&
+                f(_ParameterLocation(_PARAM_DH2, 0, local_idx))
         elseif layout.dh4_offset < para_idx <= layout.dh4_offset + 10 * layout.n_dh4
             local_idx = para_idx - layout.dh4_offset
-            if 1 <= local_idx <= length(data.doublon_holon_4site_params)
-                data.doublon_holon_4site_params[local_idx] = value
-            end
+            1 <= local_idx <= length(data.doublon_holon_4site_params) &&
+                f(_ParameterLocation(_PARAM_DH4, 0, local_idx))
         end
-    elseif para_idx <= n_proj + n_rbm
-        rbm_idx = para_idx - n_proj - 1
+        return nothing
+    elseif para_idx <= counts.n_proj + counts.n_rbm
+        rbm_idx = para_idx - counts.n_proj - 1
         section_offset = 0
-        for terms in _rbm_parameter_sections(data)
+        for (section_idx, terms) in enumerate(_rbm_parameter_sections(data))
             n_section = _parameter_section_width(terms)
             if rbm_idx < section_offset + n_section
                 local_idx = rbm_idx - section_offset
-                for term in terms
-                    if term.idx == local_idx
-                        term.value = value
-                    end
+                for term_idx in eachindex(terms)
+                    terms[term_idx].idx == local_idx &&
+                        f(_ParameterLocation(_PARAM_RBM, section_idx, term_idx))
                 end
                 return nothing
             end
             section_offset += n_section
         end
-    else
-        slater_start = n_proj + n_rbm + 1
-        opt_trans_start = n_proj + n_rbm + n_orbital_idx + 1
+        return nothing
+    end
 
-        if slater_start <= para_idx < opt_trans_start
-            orbital_idx = para_idx - n_proj - n_rbm - 1
-            for term in data.orbital_terms
-                if term.idx == orbital_idx
-                    term.value = value
-                end
-            end
-        elseif opt_trans_start <= para_idx < opt_trans_start + n_opt_trans
-            opt_idx = para_idx - opt_trans_start + 1
-            data.opt_trans[opt_idx] = value
-            if data.qp_weights !== nothing
-                MVMCExpertModeParsers.update_qp_weight!(data.qp_weights, data.opt_trans)
-            end
+    slater_start = counts.n_proj + counts.n_rbm + 1
+    opt_trans_start = counts.n_proj + counts.n_rbm + counts.n_orbital_idx + 1
+    if slater_start <= para_idx < opt_trans_start
+        orbital_idx = para_idx - slater_start
+        for term_idx in eachindex(data.orbital_terms)
+            data.orbital_terms[term_idx].idx == orbital_idx &&
+                f(_ParameterLocation(_PARAM_ORBITAL, 0, term_idx))
         end
+    elseif opt_trans_start <= para_idx < opt_trans_start + counts.n_opt_trans
+        opt_idx = para_idx - opt_trans_start + 1
+        1 <= opt_idx <= length(data.opt_trans) &&
+            f(_ParameterLocation(_PARAM_OPTTRANS, 0, opt_idx))
+    end
+    return nothing
+end
+
+function _parameter_location_value(data::ExpertModeData, loc::_ParameterLocation)::ComplexF64
+    if loc.kind == _PARAM_GUTZWILLER
+        return ComplexF64(data.gutzwiller_terms[loc.item_idx].value)
+    elseif loc.kind == _PARAM_JASTROW
+        return ComplexF64(data.jastrow_terms[loc.item_idx].value)
+    elseif loc.kind == _PARAM_DH2
+        return ComplexF64(data.doublon_holon_2site_params[loc.item_idx])
+    elseif loc.kind == _PARAM_DH4
+        return ComplexF64(data.doublon_holon_4site_params[loc.item_idx])
+    elseif loc.kind == _PARAM_RBM
+        return ComplexF64(_rbm_parameter_sections(data)[loc.section_idx][loc.item_idx].value)
+    elseif loc.kind == _PARAM_ORBITAL
+        return ComplexF64(data.orbital_terms[loc.item_idx].value)
+    elseif loc.kind == _PARAM_OPTTRANS
+        return ComplexF64(data.opt_trans[loc.item_idx])
+    end
+end
+
+function _set_parameter_location_value!(
+    data::ExpertModeData,
+    loc::_ParameterLocation,
+    value::ComplexF64,
+)
+    if loc.kind == _PARAM_GUTZWILLER
+        data.gutzwiller_terms[loc.item_idx].value = value
+    elseif loc.kind == _PARAM_JASTROW
+        data.jastrow_terms[loc.item_idx].value = value
+    elseif loc.kind == _PARAM_DH2
+        data.doublon_holon_2site_params[loc.item_idx] = value
+    elseif loc.kind == _PARAM_DH4
+        data.doublon_holon_4site_params[loc.item_idx] = value
+    elseif loc.kind == _PARAM_RBM
+        _rbm_parameter_sections(data)[loc.section_idx][loc.item_idx].value = value
+    elseif loc.kind == _PARAM_ORBITAL
+        data.orbital_terms[loc.item_idx].value = value
+    elseif loc.kind == _PARAM_OPTTRANS
+        data.opt_trans[loc.item_idx] = value
+    end
+    return nothing
+end
+
+"""
+    get_parameter_value(data, para_idx) -> ComplexF64
+
+flat parameter index（1-based、Proj → RBM → Slater → OptTrans）の現在値を返す。
+範囲外や layout の隙間（spin-jastrow 等）は 0 を返す（update 側が no-op になる
+index と対応）。duplicate idx は `pack_parameters` と同じ last-wins 規約で返す。
+書き込み側は `set_parameter_value!` が同じ layout を使う。
+"""
+function get_parameter_value(data::ExpertModeData, para_idx::Int)::ComplexF64
+    counts = _parameter_count_breakdown(data)
+    value = Ref(ComplexF64(0))
+    _foreach_parameter_location_at(data, counts, para_idx) do loc
+        value[] = _parameter_location_value(data, loc)
+    end
+    return value[]
+end
+
+function _set_parameter_value_direct!(data::ExpertModeData, para_idx::Int, value::ComplexF64)
+    counts = _parameter_count_breakdown(data)
+    touched_opt_trans = Ref(false)
+    _foreach_parameter_location_at(data, counts, para_idx) do loc
+        _set_parameter_location_value!(data, loc, value)
+        if loc.kind == _PARAM_OPTTRANS
+            touched_opt_trans[] = true
+        end
+    end
+    if touched_opt_trans[] && data.qp_weights !== nothing
+        MVMCExpertModeParsers.update_qp_weight!(data.qp_weights, data.opt_trans)
     end
     return nothing
 end
 
 function _add_parameter_delta_direct!(data::ExpertModeData, para_idx::Int, delta::ComplexF64)
     counts = _parameter_count_breakdown(data)
-    layout = counts.layout
-    n_proj = counts.n_proj
-    n_rbm = counts.n_rbm
-    n_orbital_idx = counts.n_orbital_idx
-    n_opt_trans = counts.n_opt_trans
-
-    if para_idx <= n_proj
-        if para_idx <= layout.gutzwiller_offset + layout.n_gutzwiller
-            local_idx = para_idx - layout.gutzwiller_offset
-            if 1 <= local_idx <= length(data.gutzwiller_terms)
-                data.gutzwiller_terms[local_idx].value += delta
-            end
-        elseif para_idx <= layout.jastrow_offset + layout.n_jastrow
-            local_idx = para_idx - layout.jastrow_offset
-            if 1 <= local_idx <= length(data.jastrow_terms)
-                data.jastrow_terms[local_idx].value += delta
-            end
-        elseif layout.dh2_offset < para_idx <= layout.dh2_offset + 6 * layout.n_dh2
-            local_idx = para_idx - layout.dh2_offset
-            if 1 <= local_idx <= length(data.doublon_holon_2site_params)
-                data.doublon_holon_2site_params[local_idx] += delta
-            end
-        elseif layout.dh4_offset < para_idx <= layout.dh4_offset + 10 * layout.n_dh4
-            local_idx = para_idx - layout.dh4_offset
-            if 1 <= local_idx <= length(data.doublon_holon_4site_params)
-                data.doublon_holon_4site_params[local_idx] += delta
-            end
+    touched_opt_trans = Ref(false)
+    _foreach_parameter_location_at(data, counts, para_idx) do loc
+        _set_parameter_location_value!(data, loc, _parameter_location_value(data, loc) + delta)
+        if loc.kind == _PARAM_OPTTRANS
+            touched_opt_trans[] = true
         end
-    elseif para_idx <= n_proj + n_rbm
-        rbm_idx = para_idx - n_proj - 1
-        section_offset = 0
-        for terms in _rbm_parameter_sections(data)
-            n_section = _parameter_section_width(terms)
-            if rbm_idx < section_offset + n_section
-                local_idx = rbm_idx - section_offset
-                for term in terms
-                    if term.idx == local_idx
-                        term.value += delta
-                    end
-                end
-                return nothing
-            end
-            section_offset += n_section
-        end
-    else
-        slater_start = n_proj + n_rbm + 1
-        opt_trans_start = n_proj + n_rbm + n_orbital_idx + 1
-
-        if slater_start <= para_idx < opt_trans_start
-            orbital_idx = para_idx - n_proj - n_rbm - 1
-            for term in data.orbital_terms
-                if term.idx == orbital_idx
-                    term.value += delta
-                end
-            end
-        elseif opt_trans_start <= para_idx < opt_trans_start + n_opt_trans
-            opt_idx = para_idx - opt_trans_start + 1
-            data.opt_trans[opt_idx] += delta
-            if data.qp_weights !== nothing
-                MVMCExpertModeParsers.update_qp_weight!(data.qp_weights, data.opt_trans)
-            end
-        end
+    end
+    if touched_opt_trans[] && data.qp_weights !== nothing
+        MVMCExpertModeParsers.update_qp_weight!(data.qp_weights, data.opt_trans)
     end
     return nothing
 end
