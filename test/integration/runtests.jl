@@ -29,7 +29,13 @@ const TOL_LOOSE   = 1e-9             # cols 3, 4 (squared/derived)
 const LOOSE_COLS  = (3, 4)
 const EXPECTED_NCOLS = 6             # zvo_out.dat layout (see comment above)
 const N_STEPS = 10
-const NSRCG_PARAM_TOL = 5e-4         # 1-step SR-CG params, C/J BLAS order
+# 1-step SR-CG parameter updates are deliberately a tolerance gate, not a bit
+# parity gate. On the reference macOS/OpenBLAS setup the observed orbital
+# maxdiff is about 2.84e-4, so this 5e-4 bound has limited headroom. If this
+# trips on a different Julia / CPU / BLAS setup while the first zvo row remains
+# tight, investigate numeric environment and FMA/reduction-order sensitivity
+# before treating it as a semantic regression.
+const NSRCG_PARAM_TOL = 5e-4
 
 const MODELS = [
     ("heisenberg_chain_real", :real),
