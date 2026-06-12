@@ -40,7 +40,7 @@ function test_read_input_parameters_basic()
 
         # Add Orbital terms
         for i = 1:3
-            push!(data.orbital_terms, OrbitalTerm(0, i, 0.0+0.0im, false))
+            push!(data.orbital_terms, OrbitalTerm(0, i, i - 1, 0.0+0.0im, false))
         end
 
         # Create a temporary namelist.def file
@@ -88,7 +88,7 @@ function test_read_input_parameters_orbital()
 
         # Add Orbital terms
         for i = 1:3
-            push!(data.orbital_terms, OrbitalTerm(0, i, 0.0+0.0im, false))
+            push!(data.orbital_terms, OrbitalTerm(0, i, i - 1, 0.0+0.0im, false))
         end
 
         # Create a temporary namelist.def file
@@ -123,6 +123,66 @@ function test_read_input_parameters_orbital()
 
         # Cleanup
         rm(test_dir, recursive = true)
+    end
+end
+
+function test_read_input_parameters_orbital_idx_overlay()
+    @testset "read_input_parameters! Orbital overlays by parameter idx" begin
+        mktempdir() do test_dir
+            namelist_path = joinpath(test_dir, "namelist.def")
+            write(namelist_path, "InOrbital inorbital.def\n")
+
+            data = ExpertModeData()
+            data.modpara.n_orbital_idx = 2
+            data.orbital_terms = [
+                OrbitalTerm(0, 0, 1, 0.0 + 0.0im, true, 1),
+                OrbitalTerm(0, 1, 0, 0.0 + 0.0im, true, 1),
+                OrbitalTerm(1, 0, 1, 0.0 + 0.0im, true, -1),
+            ]
+
+            _write_indexed_input_parameter_file(
+                joinpath(test_dir, "inorbital.def"),
+                "NOrbitalIdx",
+                2,
+                ["1 20.0 -0.2", "0 10.0 -0.1"],
+            )
+
+            read_input_parameters!(data, namelist_path)
+
+            @test data.orbital_terms[1].value == 20.0 - 0.2im
+            @test data.orbital_terms[2].value == 10.0 - 0.1im
+            @test data.orbital_terms[3].value == 20.0 - 0.2im
+        end
+    end
+end
+
+function test_read_input_parameters_orbital_general_idx_overlay()
+    @testset "read_input_parameters! OrbitalGeneral overlays by parameter idx" begin
+        mktempdir() do test_dir
+            namelist_path = joinpath(test_dir, "namelist.def")
+            write(namelist_path, "InOrbitalGeneral inorbitalgeneral.def\n")
+
+            data = ExpertModeData()
+            data.modpara.n_orbital_idx = 2
+            data.orbital_terms = [
+                OrbitalTerm(0, 0, 1, 0.0 + 0.0im, true, 1),
+                OrbitalTerm(0, 1, 0, 0.0 + 0.0im, true, 1),
+                OrbitalTerm(1, 0, 1, 0.0 + 0.0im, true, -1),
+            ]
+
+            _write_indexed_input_parameter_file(
+                joinpath(test_dir, "inorbitalgeneral.def"),
+                "NOrbitalIdx",
+                2,
+                ["1 22.0 -0.4", "0 11.0 -0.3"],
+            )
+
+            read_input_parameters!(data, namelist_path)
+
+            @test data.orbital_terms[1].value == 22.0 - 0.4im
+            @test data.orbital_terms[2].value == 11.0 - 0.3im
+            @test data.orbital_terms[3].value == 22.0 - 0.4im
+        end
     end
 end
 
@@ -709,6 +769,8 @@ end
 @testset "Read Input Parameters Tests" begin
     test_read_input_parameters_basic()
     test_read_input_parameters_orbital()
+    test_read_input_parameters_orbital_idx_overlay()
+    test_read_input_parameters_orbital_general_idx_overlay()
     test_read_input_parameters_complex()
     test_read_input_parameters_missing_file()
     test_read_input_parameters_orbital_parallel_and_opttrans()

@@ -177,6 +177,19 @@ function _set_rbm_terms_from_params!(terms, params::Dict{Int, ComplexF64})
     end
 end
 
+function _set_orbital_terms_from_params!(
+    data::ExpertModeData,
+    params::Dict{Int,ComplexF64},
+)
+    isempty(params) && return
+    for term in data.orbital_terms
+        if haskey(params, term.idx)
+            term.value = params[term.idx]
+        end
+    end
+    return nothing
+end
+
 function _orbital_parallel_offset(data::ExpertModeData)::Int
     # No OrbitalParallel block: InOrbital/InOrbitalAntiParallel cover the whole
     # Slater array, so the overlay window spans all orbital parameters.
@@ -206,9 +219,9 @@ keyword argument.
 |---|---|
 | `InGutzwiller` | `data.gutzwiller_terms[i].value` |
 | `InJastrow` | `data.jastrow_terms[i].value` |
-| `InOrbital` / `InOrbitalAntiParallel` | `data.orbital_terms[i].value` |
-| `InOrbitalParallel` | `data.orbital_terms[i].value` after the anti-parallel offset |
-| `InOrbitalGeneral` | `data.orbital_terms[i].value` (fsz layout) |
+| `InOrbital` / `InOrbitalAntiParallel` | `data.orbital_terms` matching `.idx` |
+| `InOrbitalParallel` | `data.orbital_terms` matching `.idx - offset` |
+| `InOrbitalGeneral` | `data.orbital_terms` matching `.idx` (fsz layout) |
 | `InOptTrans` | `data.opt_trans` |
 | `InDH2` | `data.doublon_holon_2site_params` |
 | `InDH4` | `data.doublon_holon_4site_params` |
@@ -306,14 +319,7 @@ function read_input_parameters!(data::ExpertModeData, namelist_path::String)
             full_path = joinpath(base_dir, file_path)
             if validate_file_exists(full_path)
                 params = parse_input_parameter_file(full_path)
-                # Update Orbital terms (Slater parameters)
-                # C uses 0-based indexing, Julia uses 1-based
-                for (idx_c, value) in params
-                    idx_julia = idx_c + 1  # Convert from 0-based to 1-based
-                    if 1 <= idx_julia <= length(data.orbital_terms)
-                        data.orbital_terms[idx_julia].value = value
-                    end
-                end
+                _set_orbital_terms_from_params!(data, params)
             end
         elseif file_type == "InOrbitalParallel"
             full_path = joinpath(base_dir, file_path)
@@ -340,14 +346,7 @@ function read_input_parameters!(data::ExpertModeData, namelist_path::String)
             full_path = joinpath(base_dir, file_path)
             if validate_file_exists(full_path)
                 params = parse_input_parameter_file(full_path)
-                # Update OrbitalGeneral terms
-                # C uses 0-based indexing, Julia uses 1-based
-                for (idx_c, value) in params
-                    idx_julia = idx_c + 1  # Convert from 0-based to 1-based
-                    if 1 <= idx_julia <= length(data.orbital_terms)
-                        data.orbital_terms[idx_julia].value = value
-                    end
-                end
+                _set_orbital_terms_from_params!(data, params)
             end
         elseif file_type == "InOptTrans"
             full_path = joinpath(base_dir, file_path)
