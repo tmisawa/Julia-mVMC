@@ -49,7 +49,8 @@ function weight_average_we!(ctx::ParallelContext, state::VMCOptimizationState)
     allreduce_sum!(ctx, buf; which = :comm0)
     state.energy.wc = buf[1]
     if abs(state.energy.wc) < 1e-15
-        @warn "Weight Wc is too small after MPI allreduce: $(state.energy.wc), etot=$(buf[2])"
+        is_output_rank(ctx) &&
+            @warn "Weight Wc is too small after MPI allreduce: $(state.energy.wc), etot=$(buf[2])"
         return
     end
     inv_w = 1.0 / state.energy.wc
@@ -91,7 +92,7 @@ comm0 allreduce し、`WeightAverageWE` 後の global `Wc` で全 rank が正規
 function weight_average_sr_opt!(ctx::ParallelContext, state::VMCOptimizationState)
     ctx.is_mpi || return weight_average_sr_opt!(state)
     if abs(state.energy.wc) < 1e-15
-        @warn "Weight Wc is too small: $(state.energy.wc)"
+        is_output_rank(ctx) && @warn "Weight Wc is too small: $(state.energy.wc)"
         return
     end
     allreduce_sum!(ctx, state.sr_opt.sr_opt_oo; which = :comm0)
@@ -132,7 +133,7 @@ Real-valued counterpart of `WeightAverageSROpt_real(comm_parent)`.
 function weight_average_sr_opt_real!(ctx::ParallelContext, state::VMCOptimizationState)
     ctx.is_mpi || return weight_average_sr_opt_real!(state)
     if abs(state.energy.wc) < 1e-15
-        @warn "Weight Wc is too small: $(state.energy.wc)"
+        is_output_rank(ctx) && @warn "Weight Wc is too small: $(state.energy.wc)"
         return
     end
     allreduce_sum!(ctx, state.sr_opt.sr_opt_oo_real; which = :comm0)
@@ -181,7 +182,8 @@ function weight_average_green_func!(ctx::ParallelContext, state::VMCOptimization
     ctx.is_mpi || return weight_average_green_func!(state)
     state.phys_quantities === nothing && return
     if abs(state.energy.wc) < 1e-15
-        @warn "Weight Wc is too small: $(state.energy.wc), cannot normalize Green's functions"
+        is_output_rank(ctx) &&
+            @warn "Weight Wc is too small: $(state.energy.wc), cannot normalize Green's functions"
         return
     end
 
