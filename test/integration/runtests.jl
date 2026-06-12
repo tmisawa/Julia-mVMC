@@ -29,6 +29,7 @@ const TOL_LOOSE   = 1e-9             # cols 3, 4 (squared/derived)
 const LOOSE_COLS  = (3, 4)
 const EXPECTED_NCOLS = 6             # zvo_out.dat layout (see comment above)
 const N_STEPS = 10
+const NSRCG_PARAM_TOL = 5e-4         # 1-step SR-CG params, C/J BLAS order
 
 const MODELS = [
     ("heisenberg_chain_real", :real),
@@ -44,10 +45,28 @@ function parse_zvo_first_n(path, n)
     end
 end
 
-function run_model(name, mode)
+function parse_complex_pairs(path)
+    vals = parse.(Float64, split(read(path, String)))
+    @assert iseven(length(vals)) "expected an even number of floats in $path"
+    return [ComplexF64(vals[2*i-1], vals[2*i]) for i = 1:div(length(vals), 2)]
+end
+
+function parse_orbital_parameter_indices(path)
+    idxs = Int[]
+    for line in eachline(path)
+        parts = split(strip(line))
+        length(parts) == 3 || continue
+        parsed = tryparse.(Int, parts)
+        any(isnothing, parsed) && continue
+        push!(idxs, parsed[3] + 1)  # C idx -> Julia 1-based parameter slot
+    end
+    return idxs
+end
+
+function run_model(name, mode; nsteps = N_STEPS, output_dir = tempname())
     refdir   = joinpath(@__DIR__, "reference", name)
     inputs   = joinpath(refdir, "inputs")
-    refpath  = joinpath(refdir, "zvo_out_first10.dat")
+    refpath  = joinpath(refdir, "zvo_out_first$(nsteps).dat")
     namelist = joinpath(inputs, "namelist.def")
 
     @assert isfile(namelist) "namelist.def missing for $name"
@@ -61,17 +80,18 @@ function run_model(name, mode)
     #   - returns the first N output lines as Vector{String}.
     result = MVMCOptimizers.run_para_opt_from_namelist(
         namelist;
-        nsteps = N_STEPS,
-        nsmp = N_STEPS,
+        nsteps = nsteps,
+        nsmp = nsteps,
         mode   = mode,
+        output_dir = output_dir,
     )
-    return result.zvo_first_n
+    return result
 end
 
 @testset "Julia-mVMC integration vs C reference" begin
     for (name, mode) in MODELS
         @testset "$name ($mode)" begin
-            ours_lines = run_model(name, mode)
+            ours_lines = run_model(name, mode).zvo_first_n
             ref_lines = open(joinpath(@__DIR__, "reference", name, "zvo_out_first10.dat")) do io
                 [strip(readline(io)) for _ in 1:N_STEPS]
             end
@@ -92,6 +112,39 @@ end
             end
         end
     end
+end
+
+@testset "Julia-mVMC NSRCG=1 first-step e2e vs C reference" begin
+    name = "heisenberg_chain_real_nsrcg"
+    refdir = joinpath(@__DIR__, "reference", name)
+    outdir = tempname()
+    result = run_model(name, :real; nsteps = 1, output_dir = outdir)
+
+    ours_vals = parse.(Float64, split(strip(result.zvo_first_n[1])))
+    ref_vals = parse_zvo_first_n(joinpath(refdir, "zvo_out_first1.dat"), 1)[1]
+    @test length(ours_vals) == EXPECTED_NCOLS
+    @test length(ref_vals) == EXPECTED_NCOLS
+    for j in eachindex(ours_vals)
+        tol = j in LOOSE_COLS ? TOL_LOOSE : TOL_DEFAULT
+        @test abs(ours_vals[j] - ref_vals[j]) <= tol
+    end
+
+    # For NSROptItrSmp=1 C writes raw pairs: (Etot, Etot2, Para...).
+    # Julia writes projection parameters followed by orbital terms. Compare the
+    # projection block directly and map each orbital term through orbitalidx.def
+    # to the C unique-parameter slot. The tolerance reflects the documented
+    # SR-CG BLAS/reduction-order sensitivity after one parameter update.
+    c_params = parse_complex_pairs(joinpath(refdir, "zqp_opt_1step.dat"))[3:end]
+    julia_pairs = parse_complex_pairs(joinpath(outdir, "zqp_opt.dat"))
+    orbital_idxs = parse_orbital_parameter_indices(joinpath(refdir, "inputs", "orbitalidx.def"))
+
+    @test length(c_params) == 14
+    @test length(julia_pairs) == 2 + length(orbital_idxs)
+    @test maximum(abs.(julia_pairs[1:2] .- c_params[1:2])) <= TOL_DEFAULT
+    orbital_maxdiff = maximum(
+        abs(julia_pairs[2+k] - c_params[2+orbital_idxs[k]]) for k in eachindex(orbital_idxs)
+    )
+    @test orbital_maxdiff <= NSRCG_PARAM_TOL
 end
 
 # Plan 3a prerequisites (pure Julia, no C binary): the Green-file comparison

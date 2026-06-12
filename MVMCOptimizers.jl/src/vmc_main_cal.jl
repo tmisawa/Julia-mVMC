@@ -2527,6 +2527,41 @@ function calculate_oo_store!(
 end
 
 """
+    calculate_oo_store_real!(sr_opt_ho, sr_opt_o_store, sr_opt_o, w, e, sample, sr_opt_size)
+
+Store real sample O and accumulate HO. Equivalent to the AllComplexFlag==0
+store branch in C `VMCMainCal()`.
+"""
+function calculate_oo_store_real!(
+    sr_opt_ho::Vector{Float64},
+    sr_opt_o_store::Vector{Float64},
+    sr_opt_o::Vector{Float64},
+    w::Float64,
+    e::Float64,
+    sample::Int,
+    sr_opt_size::Int,
+    ;
+    threaded::Bool = false,
+)
+    we = w * e
+    sqrtw = sqrt(w)
+
+    if vmc_inner_threading_enabled(sr_opt_size, threaded)
+        Base.Threads.@threads :static for i = 1:sr_opt_size
+            @inbounds begin
+                sr_opt_o_store[i+sample*sr_opt_size] = sqrtw * sr_opt_o[i]
+                sr_opt_ho[i] += we * sr_opt_o[i]
+            end
+        end
+    else
+        @inbounds @simd for i = 1:sr_opt_size
+            sr_opt_o_store[i+sample*sr_opt_size] = sqrtw * sr_opt_o[i]
+            sr_opt_ho[i] += we * sr_opt_o[i]
+        end
+    end
+end
+
+"""
     finalize_oo_store!(sr_opt_oo::Vector{ComplexF64}, sr_opt_o_store::Vector{ComplexF64},
                        sr_opt_size::Int, sample_size::Int)
 
@@ -2539,9 +2574,41 @@ function finalize_oo_store!(
     sr_opt_size::Int,
     sample_size::Int,
     ;
+    nsrcg::Bool = false,
     threaded::Bool = false,
 )
     size_2 = 2 * sr_opt_size
+
+    if nsrcg
+        if vmc_inner_threading_enabled(size_2, threaded)
+            Base.Threads.@threads :static for i = 1:size_2
+                sum_o = 0.0 + 0.0im
+                sum_abs2 = 0.0
+                @inbounds for s = 0:(sample_size-1)
+                    o = sr_opt_o_store[i+s*size_2]
+                    sum_o += o
+                    sum_abs2 += abs2(o)
+                end
+                @inbounds begin
+                    sr_opt_oo[i] = sum_o
+                    sr_opt_oo[i+size_2] = ComplexF64(sum_abs2, 0.0)
+                end
+            end
+        else
+            @inbounds for i = 1:size_2
+                sum_o = 0.0 + 0.0im
+                sum_abs2 = 0.0
+                for s = 0:(sample_size-1)
+                    o = sr_opt_o_store[i+s*size_2]
+                    sum_o += o
+                    sum_abs2 += abs2(o)
+                end
+                sr_opt_oo[i] = sum_o
+                sr_opt_oo[i+size_2] = ComplexF64(sum_abs2, 0.0)
+            end
+        end
+        return
+    end
 
     # sr_opt_oo = sr_opt_o_store' * sr_opt_o_store
     # Reshape for matrix multiplication
@@ -2566,6 +2633,80 @@ function finalize_oo_store!(
                     sum_val += O_store[i, s] * conj(O_store[j, s])
                 end
                 sr_opt_oo[(i-1)*size_2+j] = sum_val
+            end
+        end
+    end
+end
+
+"""
+    finalize_oo_store_real!(sr_opt_oo, sr_opt_o_store, sr_opt_size, sample_size)
+
+Finalize real <O O> from stored samples. With `nsrcg=true`, mirrors C
+`calculateOO_Store_real()` for SR-CG: only the first row `<O>` and diagonal
+`<O^2>` slices are materialized because CG never uses the full matrix.
+"""
+function finalize_oo_store_real!(
+    sr_opt_oo::Vector{Float64},
+    sr_opt_o_store::Vector{Float64},
+    sr_opt_size::Int,
+    sample_size::Int,
+    ;
+    nsrcg::Bool = false,
+    threaded::Bool = false,
+)
+    if nsrcg
+        if vmc_inner_threading_enabled(sr_opt_size, threaded)
+            Base.Threads.@threads :static for i = 1:sr_opt_size
+                sum_o = 0.0
+                sum_oo = 0.0
+                @inbounds for s = 0:(sample_size-1)
+                    o = sr_opt_o_store[i+s*sr_opt_size]
+                    sum_o += o
+                    sum_oo += o * o
+                end
+                @inbounds begin
+                    sr_opt_oo[i] = sum_o
+                    sr_opt_oo[i+sr_opt_size] = sum_oo
+                end
+            end
+        else
+            @inbounds for i = 1:sr_opt_size
+                sum_o = 0.0
+                sum_oo = 0.0
+                for s = 0:(sample_size-1)
+                    o = sr_opt_o_store[i+s*sr_opt_size]
+                    sum_o += o
+                    sum_oo += o * o
+                end
+                sr_opt_oo[i] = sum_o
+                sr_opt_oo[i+sr_opt_size] = sum_oo
+            end
+        end
+        return
+    end
+
+    if vmc_inner_threading_enabled(sr_opt_size, threaded)
+        Base.Threads.@threads :static for i = 1:sr_opt_size
+            @inbounds for j = 1:sr_opt_size
+                sum_val = 0.0
+                for s = 0:(sample_size-1)
+                    sum_val +=
+                        sr_opt_o_store[i+s*sr_opt_size] *
+                        sr_opt_o_store[j+s*sr_opt_size]
+                end
+                sr_opt_oo[(i-1)+sr_opt_size*(j-1)+1] = sum_val
+            end
+        end
+    else
+        @inbounds for i = 1:sr_opt_size
+            for j = 1:sr_opt_size
+                sum_val = 0.0
+                for s = 0:(sample_size-1)
+                    sum_val +=
+                        sr_opt_o_store[i+s*sr_opt_size] *
+                        sr_opt_o_store[j+s*sr_opt_size]
+                end
+                sr_opt_oo[(i-1)+sr_opt_size*(j-1)+1] = sum_val
             end
         end
     end
@@ -2615,6 +2756,7 @@ function vmc_main_cal!(
     # NVMCCalMode: 0 = optimization, 1 = measurement
     # We only implement optimization mode (0)
     nvmc_cal_mode = data.modpara.vmc_calc_mode
+    use_sr_store = (use_store && data.modpara.nstore_o != 0) || data.modpara.nsrcg != 0
 
     # Clear physical quantities ([24] cal)
     ctimer_start!(c_timer, 24)
@@ -2937,7 +3079,7 @@ function vmc_main_cal!(
                 # Accumulate OO and HO ([43] calculate OO and HO)
                 ctimer_start!(c_timer, 43)
                 if all_complex
-                    if use_store
+                    if use_sr_store
                         calculate_oo_store!(
                             local_acc.sr_opt.sr_opt_oo,
                             local_acc.sr_opt.sr_opt_ho,
@@ -2967,15 +3109,28 @@ function vmc_main_cal!(
                         sr_opt_o_real[i] = real(sr_opt_o[2*(i-1)+1])
                     end
 
-                    calculate_oo_real!(
-                        local_acc.sr_opt.sr_opt_oo_real,
-                        local_acc.sr_opt.sr_opt_ho_real,
-                        sr_opt_o_real,
-                        w,
-                        real(e),
-                        sr_opt_size,
-                        threaded = allow_inner_threads,
-                    )
+                    if use_sr_store
+                        calculate_oo_store_real!(
+                            local_acc.sr_opt.sr_opt_ho_real,
+                            local_acc.sr_opt.sr_opt_o_store_real,
+                            sr_opt_o_real,
+                            w,
+                            real(e),
+                            sample,
+                            sr_opt_size,
+                            threaded = allow_inner_threads,
+                        )
+                    else
+                        calculate_oo_real!(
+                            local_acc.sr_opt.sr_opt_oo_real,
+                            local_acc.sr_opt.sr_opt_ho_real,
+                            sr_opt_o_real,
+                            w,
+                            real(e),
+                            sr_opt_size,
+                            threaded = allow_inner_threads,
+                        )
+                    end
                 end
                 ctimer_stop!(c_timer, 43)
             end
@@ -2994,15 +3149,27 @@ function vmc_main_cal!(
     )
 
     # Finalize OO from stored samples ([45] multiply store OO)
-    if nvmc_cal_mode == 0 && use_store && all_complex
+    if nvmc_cal_mode == 0 && use_sr_store
         ctimer_start!(c_timer, 45)
-        finalize_oo_store!(
-            local_acc.sr_opt.sr_opt_oo,
-            local_acc.sr_opt.sr_opt_o_store,
-            sr_opt_size,
-            n_vmc_sample,
-            threaded = true,
-        )
+        if all_complex
+            finalize_oo_store!(
+                local_acc.sr_opt.sr_opt_oo,
+                local_acc.sr_opt.sr_opt_o_store,
+                sr_opt_size,
+                n_vmc_sample,
+                nsrcg = data.modpara.nsrcg != 0,
+                threaded = true,
+            )
+        else
+            finalize_oo_store_real!(
+                local_acc.sr_opt.sr_opt_oo_real,
+                local_acc.sr_opt.sr_opt_o_store_real,
+                sr_opt_size,
+                n_vmc_sample,
+                nsrcg = data.modpara.nsrcg != 0,
+                threaded = true,
+            )
+        end
         ctimer_stop!(c_timer, 45)
     end
 
