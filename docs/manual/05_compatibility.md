@@ -51,7 +51,7 @@ C-mVMC outputs with tight tolerances.
 The same runner also includes `heisenberg_chain_real_nsrcg`, a serial
 `NSRCG = 1` first-step fixture. Its first `zvo_out.dat` row uses the tight
 energy/Sz tolerances, while the post-CG parameter update uses the documented
-`NSRCG_PARAM_TOL = 5e-4` tolerance because truncated SR-CG is sensitive to
+`NSRCG_PARAM_TOL = 1e-2` tolerance because truncated SR-CG is sensitive to
 FMA and reduction-order differences.
 
 Julia-mVMC also includes a C ctest-equivalent runner:

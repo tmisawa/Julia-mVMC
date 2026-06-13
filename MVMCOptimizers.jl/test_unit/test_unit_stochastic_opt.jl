@@ -19,6 +19,19 @@ using MVMCExpertModeParsers:
     SpinRBMPhysHiddenTerm,
     GeneralRBMPhysHiddenTerm
 
+@testset "unit/stochastic_opt: xdot uses C-source sequential accumulation" begin
+    p = vcat(1.0e16, ones(100), -1.0e16)
+    q = ones(length(p))
+
+    z = 0.0
+    @inbounds for i in eachindex(p, q)
+        z += p[i] * q[i]
+    end
+
+    @test z == 0.0
+    @test MVMCOptimizers.xdot(p, q) == z
+end
+
 function make_mock_data_for_stochastic_opt_tests()
     data = ExpertModeData()
 

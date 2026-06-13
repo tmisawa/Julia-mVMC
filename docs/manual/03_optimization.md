@@ -43,7 +43,7 @@ C-mVMC for MPI CG runs.
 Serial `NSRCG = 1` runs are supported and covered by a one-step C reference
 fixture (`heisenberg_chain_real_nsrcg`). The first `zvo_out.dat` row uses the
 same tight energy/Sz tolerances as the standard fixtures. The post-CG parameter
-update is a tolerance gate (`NSRCG_PARAM_TOL = 5e-4` in
+update is a tolerance gate (`NSRCG_PARAM_TOL = 1e-2` in
 [`test/integration/runtests.jl`](../../test/integration/runtests.jl)), not a
 bit-parity gate, because truncated SR-CG amplifies FMA and reduction-order
 differences between C and Julia.

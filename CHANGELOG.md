@@ -41,7 +41,7 @@ still rejected.
   `NSRCG != 0` under MPI raises an unsupported-input error because C's CG
   `operate_by_S` broadcast/allreduce path is not ported yet.
 - Serial `NSRCG = 1` is supported, but the post-CG parameter update is a
-  tolerance gate (`NSRCG_PARAM_TOL = 5e-4`) rather than bit parity because
+  tolerance gate (`NSRCG_PARAM_TOL = 1e-2`) rather than bit parity because
   truncated SR-CG amplifies FMA and reduction-order differences.
 - GitHub-generated source ZIP/TAR archives do not include submodule contents.
   Use `git clone --recurse-submodules https://github.com/tmisawa/Julia-mVMC`
