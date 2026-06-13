@@ -149,8 +149,8 @@ mutable struct ModParaParameters
         dsr_opt_red_cut::Float64 = 1e-6,
         dsr_opt_sta_del::Float64 = 0.0,
         dsr_opt_step_dt::Float64 = 0.01,
-        dsr_opt_cg_tol::Float64 = 1e-6,
-        nsr_opt_cg_max_iter::Int = 1000,
+        dsr_opt_cg_tol::Float64 = 1e-10,
+        nsr_opt_cg_max_iter::Int = 0,
         nsrcg::Int = 0,
         nstore_o::Int = 1,
         rnd_seed::Int = 11272,  # C parity: RndSeed 行欠落時の default (readdef.c:1967)

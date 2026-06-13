@@ -579,7 +579,11 @@ Compute dot product of two vectors.
 Equivalent to C's `xdot()`.
 """
 function xdot(p::Vector{Float64}, q::Vector{Float64})::Float64
-    return dot(p, q)
+    z = 0.0
+    @inbounds for i in eachindex(p, q)
+        z += p[i] * q[i]
+    end
+    return z
 end
 
 """
@@ -638,10 +642,10 @@ Equivalent to C's `StochasticOptCG_Init()`.
 function stochastic_opt_cg_init!(
     ws::CGWorkspace,
     smat_to_para_idx::Vector{Int},
-    sr_opt_o::Vector{ComplexF64},
-    sr_opt_oo_diag::Vector{ComplexF64},
-    sr_opt_o_store::Vector{ComplexF64},
-    sr_opt_ho::Vector{ComplexF64},
+    sr_opt_o::AbstractVector,
+    sr_opt_oo_diag::AbstractVector,
+    sr_opt_o_store::AbstractVector,
+    sr_opt_ho::AbstractVector,
     sr_opt_size::Int,
     n_vmc_sample::Int,
     dsr_opt_step_dt::Float64,
@@ -679,9 +683,7 @@ function stochastic_opt_cg_init!(
         # C: g[si] = -dt*(CREAL(srOptHO[pi+OFFSET]) - srOptHO_0 * CREAL(srOptO[pi+OFFSET]))
         # C: sdiag[si] = CREAL(srOptOOdiag[pi+OFFSET]) - CREAL(srOptO[pi+OFFSET])^2
         # C: srOptO = SROptOO (or SROptOO_real), so srOptO[pi+OFFSET] = SROptOO[pi+OFFSET]
-        # Julia: sr_opt_o is extracted from sr_opt_oo[1:...], so sr_opt_o[pi+OFFSET] corresponds to sr_opt_oo[pi+OFFSET+1]
-        # But since sr_opt_o starts at index 1, we use pi+offset_factor (not +1)
-        o_idx = pi + offset_factor  # C: pi+OFFSET -> Julia: pi+offset_factor (sr_opt_o is 1-based but extracted from sr_opt_oo[1:...])
+        o_idx = pi + offset_factor + 1  # C: pi+OFFSET -> Julia: pi+OFFSET+1
 
         if o_idx <= length(sr_opt_o)
             o_val = real(sr_opt_o[o_idx])
@@ -692,8 +694,8 @@ function stochastic_opt_cg_init!(
             ho_val = ho_idx <= length(sr_opt_ho) ? real(sr_opt_ho[ho_idx]) : 0.0
             ws.g[si] = -dt * (ho_val - sr_opt_ho_0 * o_val)
 
-            # C: srOptOOdiag[pi+OFFSET] -> Julia: sr_opt_oo_diag[pi+offset_factor] (since sr_opt_oo_diag is extracted from sr_opt_oo[offset+1:...])
-            oo_diag_idx = pi + offset_factor  # C: pi+OFFSET -> Julia: pi+offset_factor (sr_opt_oo_diag is 1-based but extracted)
+            # C: srOptOOdiag[pi+OFFSET] -> Julia: pi+OFFSET+1 within the extracted diagonal slice.
+            oo_diag_idx = pi + offset_factor + 1
             oo_diag_val =
                 oo_diag_idx <= length(sr_opt_oo_diag) ? real(sr_opt_oo_diag[oo_diag_idx]) :
                 0.0
@@ -900,10 +902,14 @@ function stochastic_opt_cg!(data::ExpertModeData, state::VMCOptimizationState, c
         data.optimization_flags = fill(true, 2 * n_para)
     end
 
-    # Get SR arrays
-    sr_opt_oo = state.sr_opt.sr_opt_oo
-    sr_opt_ho = state.sr_opt.sr_opt_ho
-    sr_opt_o_store = state.sr_opt.sr_opt_o_store
+    # Get SR arrays. C's SR-CG has separate real/complex instantiations; the
+    # real path must read SROptOO_real/SROptHO_real/SROptO_Store_real.
+    sr_opt_oo =
+        all_complex ? state.sr_opt.sr_opt_oo : state.sr_opt.sr_opt_oo_real
+    sr_opt_ho =
+        all_complex ? state.sr_opt.sr_opt_ho : state.sr_opt.sr_opt_ho_real
+    sr_opt_o_store =
+        all_complex ? state.sr_opt.sr_opt_o_store : state.sr_opt.sr_opt_o_store_real
 
     # For CG, we need sr_opt_o (first row of sr_opt_oo) and sr_opt_oo_diag
     # C: srOptO = SROptOO (or SROptOO_real)
@@ -917,7 +923,7 @@ function stochastic_opt_cg!(data::ExpertModeData, state::VMCOptimizationState, c
     sr_opt_oo_diag = if diag_offset + offset_factor * sr_opt_size <= length(sr_opt_oo)
         sr_opt_oo[(diag_offset+1):(diag_offset+offset_factor*sr_opt_size)]
     else
-        zeros(ComplexF64, offset_factor * sr_opt_size)
+        zeros(eltype(sr_opt_oo), offset_factor * sr_opt_size)
     end
 
     # Phase 1: Calculate diagonal elements and apply redundant direction cut
@@ -925,8 +931,7 @@ function stochastic_opt_cg!(data::ExpertModeData, state::VMCOptimizationState, c
     # C: srOptO = SROptOO, srOptOOdiag = SROptOO + 2*SROptSize (or + SROptSize for real)
     s_diag_elm = zeros(Float64, n_para_full)
     for pi = 0:(n_para_full-1)
-        # C: pi+OFFSET (0-based) -> Julia: pi+offset_factor (since arrays are extracted from sr_opt_oo[offset+1:...])
-        idx = pi + offset_factor  # C: pi+OFFSET -> Julia: pi+offset_factor
+        idx = pi + offset_factor + 1  # C: pi+OFFSET -> Julia: pi+OFFSET+1
         if idx <= length(sr_opt_oo_diag) && idx <= length(sr_opt_o)
             s_diag_elm[pi+1] = real(sr_opt_oo_diag[idx]) - real(sr_opt_o[idx])^2
         end
@@ -986,8 +991,9 @@ function stochastic_opt_cg!(data::ExpertModeData, state::VMCOptimizationState, c
     )
 
     # Phase 3: Run CG iteration
-    # inv_w = 1/Wc where Wc is the total weight (for unweighted samples, inv_w = 1/n_vmc_sample)
-    inv_w = 1.0 / Float64(n_vmc_sample)
+    # C stcopt_cg_impl.c:487 uses invW = 1.0 / Wc. `weight_average_we!`
+    # leaves state.energy.wc as the unnormalized global Wc, matching C.
+    inv_w = 1.0 / real(state.energy.wc)
 
     max_iter =
         data.modpara.nsr_opt_cg_max_iter > 0 ? data.modpara.nsr_opt_cg_max_iter : n_smat

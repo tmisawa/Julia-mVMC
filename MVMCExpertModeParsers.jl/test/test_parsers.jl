@@ -15,6 +15,10 @@ using MVMCExpertModeParsers: parse_jastrow_content, parse_orbital_content
     @test params.nelec == 2
     @test params.nlocspin == 0
 
+    defaults = ModParaParameters()
+    @test defaults.dsr_opt_cg_tol == 1e-10
+    @test defaults.nsr_opt_cg_max_iter == 0
+
     # Test parsing from content
     content = """
     NSite = 4
@@ -29,6 +33,8 @@ using MVMCExpertModeParsers: parse_jastrow_content, parse_orbital_content
     @test result.data.nsite == 4
     @test result.data.nelec == 2
     @test result.data.nlocspin == 0
+    @test result.data.dsr_opt_cg_tol == 1e-10
+    @test result.data.nsr_opt_cg_max_iter == 0
 end
 
 @testset "Transfer Parser" begin

@@ -285,6 +285,55 @@ end
     @test MVMCOptimizers.get_opt_flag_for_parameter(data, 3) == 0
 end
 
+@testset "unit/stochastic_opt: real SR-CG reads real store and normalizes by Wc" begin
+    data = ExpertModeData()
+    data.modpara = ModParaParameters(
+        nsite = 1,
+        nelec = 1,
+        nvmc_sample = 2,
+        n_orbital_idx = 1,
+        nsrcg = 1,
+        dsr_opt_red_cut = 0.0,
+        dsr_opt_sta_del = 0.0,
+        dsr_opt_step_dt = 0.5,
+    )
+    data.orbital_terms = [
+        OrbitalTerm(0, 0, 0, 10.0 + 0.0im, false, 1),
+    ]
+
+    state = MVMCOptimizers.VMCOptimizationState(
+        data.modpara.nsite,
+        data.modpara.nelec,
+        0,
+        1,
+        1,
+        data.modpara.nvmc_sample,
+        false,
+        false,
+    )
+    state.energy.wc = 4.0 + 0.0im
+
+    sr_opt_size = state.sr_opt.sr_opt_size
+    @test sr_opt_size == 2
+
+    # C real SR-CG layout:
+    #   srOptO = SROptOO_real
+    #   srOptOOdiag = SROptOO_real + SROptSize
+    #   OFFSET = 1, so parameter pi=0 is read at Julia index 2.
+    state.sr_opt.sr_opt_oo_real[2] = 0.0        # <O>
+    state.sr_opt.sr_opt_oo_real[sr_opt_size+2] = 2.0  # <O^2>, already divided by Wc
+    state.sr_opt.sr_opt_ho_real[1] = 0.0        # <H>
+    state.sr_opt.sr_opt_ho_real[2] = 1.0        # <H O>
+
+    # Raw SROptO_Store_real is not divided by Wc. Two samples with O_store=2
+    # give sum(O_store^2)=8, so operate_by_S must use invW=1/4 and S=2.
+    state.sr_opt.sr_opt_o_store_real[2] = 2.0
+    state.sr_opt.sr_opt_o_store_real[sr_opt_size+2] = 2.0
+
+    @test MVMCOptimizers.stochastic_opt_cg!(data, state) == 0
+    @test data.orbital_terms[1].value ≈ 9.5 + 0.0im atol = 1e-14
+end
+
 @testset "unit/stochastic_opt: update_parameter_value Proj/RBM/Slater mapping" begin
     data = make_mock_data_for_stochastic_opt_tests()
     delta = 0.25 - 0.5im

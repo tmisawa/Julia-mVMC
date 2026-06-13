@@ -36,6 +36,7 @@ input fixtures used by Julia-mVMC integration tests.
 | Subdirectory | Mode | C runner argument | Strict first-10 | C ctest-equivalent |
 |--------------|------|-------------------|-----------------|-------------------|
 | `heisenberg_chain_real` | real | `HeisenbergChain` | yes | yes |
+| `heisenberg_chain_real_nsrcg` | real, NSRCG=1 | hand-authored from `HeisenbergChain` | 1-step only | no |
 | `hubbard_chain_real` | real | `HubbardChain` | yes | yes |
 | `hubbard_tetragonal_real` | real | `HubbardTetragonal` | no | yes |
 | `hubbard_tetragonal_momentum_projection_real` | real | `HubbardTetragonal_MomentumProjection` | no | yes |
@@ -52,6 +53,10 @@ Each subdirectory contains:
 
 - `zvo_out_first10.dat` — first 10 SR steps of the C reference run, for the
   strict first-10 fixtures only.
+- `zvo_out_first1.dat` — first optimisation row for the `NSRCG=1` first-step
+  fixture.
+- `zqp_opt_1step.dat` — C's raw `NSROptItrSmp=1` one-step output for the
+  `NSRCG=1` fixture, used to gate the post-CG parameter update.
 - `ctest_ref/ref_mean.dat` and `ctest_ref/ref_std.dat` — reference vectors
   used by the C ctest-equivalent runner.
 - `inputs/*.def` — the full set of expert-mode input files used to drive the run.
@@ -105,6 +110,32 @@ To regenerate this reference data from a fresh clone of the C mVMC tree:
      `<model>/inputs/`.
    - Take the first 10 lines of `work/<Model>/output/zvo_out_001.dat` and
      save them as `<model>/zvo_out_first10.dat`.
+
+### NSRCG=1 first-step fixture
+
+`heisenberg_chain_real_nsrcg` is a hand-authored first-step fixture derived
+from `heisenberg_chain_real` with:
+
+- `NSROptItrStep = 1`
+- `NSROptItrSmp = 1`
+- `NSRCG = 1`
+- `DSROptCGTol = 1.0e-10`
+- `NSROptCGMaxIter = 0`
+- `NSplitSize = 1`
+
+The committed `zvo_out_first1.dat` and `zqp_opt_1step.dat` were generated with
+C-mVMC `mVMC/build-openblas-debug/src/mVMC/vmc.out`, linked against Homebrew
+OpenBLAS (`/opt/homebrew/opt/openblas/lib/libopenblas.dylib`), using:
+
+```bash
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 vmc.out -e namelist.def
+```
+
+This fixture deliberately uses a C OpenBLAS reference rather than the older
+Accelerate-backed mac reference. Truncated SR-CG is sensitive to BLAS and
+reduction order; C(Accelerate) and C(OpenBLAS) differ by `~3e-3` over 10 steps
+for this input. See
+`docs/reports/2026-06-12-julia-mvmc-nsrcg1-serial-cg-residual-rootcause.md`.
 
 ## PhysCal e2e fixtures (`<model>/physcal_ref/`)
 
