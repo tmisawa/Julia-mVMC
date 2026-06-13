@@ -32,11 +32,21 @@ result = run_para_opt_from_namelist(
 
 ## MPI limitations
 
-v0.4 R1 supports `VMCParaOpt` sample-parallel MPI only with the direct SR solver
+v0.4 supports `VMCParaOpt` sample-parallel MPI only with the direct SR solver
 (`NSRCG = 0`). Inputs with `NSRCG != 0` select the CG SR solver; that path is
 still serial-only because Julia has not yet ported C's CG `operate_by_S`
 broadcast/allreduce. Run those inputs without MPI, set `NSRCG = 0`, or use
 C-mVMC for MPI CG runs.
+
+## Serial NSRCG=1 coverage
+
+Serial `NSRCG = 1` runs are supported and covered by a one-step C reference
+fixture (`heisenberg_chain_real_nsrcg`). The first `zvo_out.dat` row uses the
+same tight energy/Sz tolerances as the standard fixtures. The post-CG parameter
+update is a tolerance gate (`NSRCG_PARAM_TOL = 5e-4` in
+[`test/integration/runtests.jl`](../../test/integration/runtests.jl)), not a
+bit-parity gate, because truncated SR-CG amplifies FMA and reduction-order
+differences between C and Julia.
 
 Returns a `NamedTuple` with `status`, `output_dir`, `zvo_first_n` (first
 `nsteps` raw lines of `zvo_out.dat`), `ctest_values` (the first two

@@ -23,7 +23,7 @@ C implementation: vmcmain.c:VMCPhysCal()
   When `nothing`, a fresh `SFMT19937RNG()` is constructed and seeded
   with the C-parity `resolve_rnd_seed` rule (`0` → `0`, `< 0` → rank0
   time seed + bcast, positive → that value, plus MPI `group1` offset),
-  matching `run_phys_cal_from_namelist` as of v0.4 R1.
+  matching `run_phys_cal_from_namelist` as of v0.4.
   When a non-`nothing` RNG is passed in, it is used **as-is**; the
   caller is responsible for seeding it.
 
