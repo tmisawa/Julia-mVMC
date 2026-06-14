@@ -1,5 +1,54 @@
 # Changelog
 
+## v0.4.0 - 2026-06-14
+
+This release adds experimental MPI sample-parallel execution, hardens the
+parameter-layout and input-overlay paths, and brings the serial `NSRCG = 1`
+SR-CG solver onto a documented C-reference gate. The default serial path
+remains C-parity oriented; grouped MPI/QP splitting and MPI CG solver runs are
+still rejected.
+
+### Added
+
+- Added MPI.jl-based sample-parallel infrastructure for `VMCParaOpt` and
+  `VMCPhysCal` with `NSplitSize = 1`, including rank0 output/readback guards,
+  comm0 reductions, seed offset handling, and MPI smoke gates for
+  `mpiexec -n 2/-n 4`.
+- Added fail-fast MPI detection policy for common launcher environments,
+  including explicit `JULIA_MVMC_MPI` handling.
+- Added serial `NSRCG = 1` SR-CG parity fixes and a first-step C-reference
+  integration fixture (`heisenberg_chain_real_nsrcg`).
+- Added MPI-aware parameter synchronization helpers and shared flat-layout
+  walkers for variational parameter blocks.
+
+### Changed
+
+- Updated the public version metadata for the in-repo packages
+  `MVMCOptimizers` and `MVMCExpertModeParsers` to `0.4.0`.
+- Applied `InOrbital` overlays by variational-parameter index instead of array
+  position, matching duplicate-index semantics.
+- Tightened rank0-only logging/warning behavior under MPI so multi-rank runs do
+  not duplicate user-visible output.
+- Documented the `NSRCG = 1` serial tolerance gate and the remaining MPI
+  limitations in the README and manual.
+
+### Notes
+
+- MPI support is experimental and currently limited to `NSplitSize = 1`.
+  C's grouped MPI/QP split (`NSplitSize > 1`) still raises an unsupported-input
+  error.
+- `VMCParaOpt` under MPI supports the direct SR solver only (`NSRCG = 0`).
+  `NSRCG != 0` under MPI raises an unsupported-input error because C's CG
+  `operate_by_S` broadcast/allreduce path is not ported yet.
+- Serial `NSRCG = 1` is supported, but the post-CG parameter update is a
+  tolerance gate (`NSRCG_PARAM_TOL = 1e-2`) rather than bit parity because
+  truncated SR-CG amplifies FMA and reduction-order differences.
+- GitHub-generated source ZIP/TAR archives do not include submodule contents.
+  Use `git clone --recurse-submodules https://github.com/tmisawa/Julia-mVMC`
+  for a functional checkout.
+- `PfaPack.jl` and `SFMT.jl` are submodules and remain at their own package
+  version `0.1.0` in this release.
+
 ## v0.3.0 - 2026-06-10
 
 This release expands the C-reference coverage for physical-quantity

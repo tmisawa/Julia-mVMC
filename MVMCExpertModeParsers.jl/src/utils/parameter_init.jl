@@ -310,7 +310,7 @@ using SFMT  # provides SFMT19937RNG
 data = parse_expert_mode_files("namelist.def")
 
 rng = SFMT19937RNG()
-# C-parity seed rule (MVMCOptimizers.resolve_rnd_seed, v0.4 R0): RndSeed >= 0
+# C-parity seed rule (MVMCOptimizers.resolve_rnd_seed, v0.4): RndSeed >= 0
 # is used as-is (a missing RndSeed line parses to the default 11272);
 # RndSeed < 0 means a time-based seed (C readdef.c:2161-2163).
 seed = data.modpara.rnd_seed

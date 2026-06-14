@@ -82,7 +82,7 @@ function validate_supported_para_opt_parallel_modpara(
 )
     if ctx.is_mpi && modpara.nsrcg != 0
         error(
-            "NSRCG != 0 is not supported under MPI in Julia-mVMC v0.4 R1: " *
+            "NSRCG != 0 is not supported under MPI in Julia-mVMC v0.4: " *
             "the CG SR solver does not yet implement C-compatible " *
             "operate_by_S broadcast/allreduce. Set NSRCG = 0 for MPI " *
             "runs, run this input without MPI, or fall back to the C " *

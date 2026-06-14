@@ -35,7 +35,7 @@ integration tests in `test/integration/runtests.jl`.
   `zvo_out.dat`, `zqp_opt.dat`, etc. Created if absent.
 - `seed::Union{Integer,Nothing} = nothing`: SFMT19937 seed. `nothing` means
   resolve `modpara.def`'s `RndSeed` with the C-parity rule (`resolve_rnd_seed`,
-  v0.4 R0): missing → `11272` (parser default, C `readdef.c:1967`), `< 0` →
+  v0.4): missing → `11272` (parser default, C `readdef.c:1967`), `< 0` →
   rank0 time seed broadcast over comm0, `== 0` → `0`, `> 0` → the value; the
   per-group `+ group1` offset is added under MPI (C `vmcmain.c:257`). An
   explicit integer overrides the table (still `+ group1` under MPI).
@@ -111,7 +111,7 @@ function run_para_opt_from_namelist(namelist_path::AbstractString;
     data = MVMCExpertModeParsers.parse_expert_mode_files(namelist_str)
     ctimer_stop!(c_timer, 11)
 
-    # v0.4 R0: unsupported input の検証は MPI context 構築より前（plan review F4）。
+    # v0.4: unsupported input の検証は MPI context 構築より前（plan review F4）。
     # 現行は vmc_para_opt!（vmc_para_opt.jl:83）内でのみ呼ばれるが、R0 で
     # build_parallel_context を parse 直後へ移すため、invalid な NSplitSize
     #（< 1、または R0 では > 1 も未 support）で MPI context を作らないよう
@@ -119,7 +119,7 @@ function run_para_opt_from_namelist(namelist_path::AbstractString;
     # としてそのまま残す（重複呼び出しは無害）。
     validate_supported_modpara(data.modpara)
 
-    # v0.4 R0: MPI context は seed / init_parameter! より前に作る（spec §4.2, F3）。
+    # v0.4: MPI context は seed / init_parameter! より前に作る（spec §4.2, F3）。
     ctx = build_parallel_context(data.modpara.nsplit_size)
     validate_supported_para_opt_parallel_modpara(ctx, data.modpara)
 

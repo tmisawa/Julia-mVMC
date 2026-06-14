@@ -48,6 +48,12 @@ This runner replays the committed fixtures for `heisenberg_chain_real`,
 It compares the first 10 SR steps of `zvo_out.dat` against the committed
 C-mVMC outputs with tight tolerances.
 
+The same runner also includes `heisenberg_chain_real_nsrcg`, a serial
+`NSRCG = 1` first-step fixture. Its first `zvo_out.dat` row uses the tight
+energy/Sz tolerances, while the post-CG parameter update uses the documented
+`NSRCG_PARAM_TOL = 1e-2` tolerance because truncated SR-CG is sensitive to
+FMA and reduction-order differences.
+
 Julia-mVMC also includes a C ctest-equivalent runner:
 
 ```bash
@@ -89,6 +95,10 @@ for provenance and regeneration instructions.
   ~1e-10 via cancellation. The integration test uses 1e-10 for
   measured columns and 1e-9 for `<H²>` and variance; see
   `test/integration/runtests.jl`.
+- Serial `NSRCG = 1` is gated at one optimisation step. The energy row remains
+  tight, but the post-CG parameter update uses a tolerance gate rather than
+  bit parity because FMA contraction and reduction-order differences are
+  amplified by the truncated CG solve.
 
 ## Threading compatibility
 

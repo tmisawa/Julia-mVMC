@@ -6,12 +6,12 @@ Julia port of the [mVMC](https://github.com/issp-center-dev/mVMC) (many-variable
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| VMCParaOpt (parameter optimization) | ✅ Verified | Strict first-10-step C-reference checks plus C ctest-equivalent gates for supported standard fixtures; see `test/integration/`. |
+| VMCParaOpt (parameter optimization) | ✅ Verified | Strict first-10-step C-reference checks, C ctest-equivalent gates for supported standard fixtures, and a serial `NSRCG = 1` first-step tolerance gate; see `test/integration/`. |
 | VMCPhysCal (physical quantities) | 🚧 Experimental | C-referenced one-body, direct two-body, and factored/product two-body Green-function output for supported fixtures. |
 | Shared-memory threading | 🚧 Experimental | Conservative inner-loop opt-ins only; sample-level `VMCMainCal` threading is intentionally disabled for C-parity. |
 | Lanczos | ⚠️ Step-0 only | Single-step comparison verified; full Lanczos not yet ported. |
 | BackFlow | ❌ Not supported | Planned for a future release. |
-| MPI parallelization | 🚧 Experimental (v0.4 R1) | `VMCParaOpt` (`NSRCG = 0` direct SR solver only) and `VMCPhysCal` run under MPI.jl-compatible launchers with `NSplitSize = 1`; rank0 output/readback and comm0 reductions are smoke-tested for `mpiexec -n 2/-n 4`. C's grouped MPI/QP split (`NSplitSize > 1`) and MPI CG solver (`NSRCG != 0`) are still rejected. |
+| MPI parallelization | 🚧 Experimental | `VMCParaOpt` (`NSRCG = 0` direct SR solver only) and `VMCPhysCal` run under MPI.jl-compatible launchers with `NSplitSize = 1`; rank0 output/readback and comm0 reductions are smoke-tested for `mpiexec -n 2/-n 4`. C's grouped MPI/QP split (`NSplitSize > 1`) and MPI CG solver (`NSRCG != 0`) are still rejected. |
 
 ## Installation
 
@@ -75,7 +75,7 @@ GPL-3.0-or-later. See [LICENSE](LICENSE) and [THIRD_PARTY_LICENSES.md](THIRD_PAR
 
 See [CITATION.cff](CITATION.cff). Plain-text:
 
-> Misawa, T. (2026). Julia-mVMC v0.3.0. https://github.com/tmisawa/Julia-mVMC
+> Misawa, T. (2026). Julia-mVMC v0.4.0. https://github.com/tmisawa/Julia-mVMC
 
 ## Acknowledgments
 
