@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.4.0 - 2026-06-13
+## v0.4.0 - 2026-06-14
 
 This release adds experimental MPI sample-parallel execution, hardens the
 parameter-layout and input-overlay paths, and brings the serial `NSRCG = 1`

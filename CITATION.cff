@@ -7,7 +7,7 @@ authors:
     given-names: Takahiro
     email: tmisawa@issp.u-tokyo.ac.jp
 version: 0.4.0
-date-released: "2026-06-13"
+date-released: "2026-06-14"
 license: GPL-3.0-or-later
 repository-code: "https://github.com/tmisawa/Julia-mVMC"
 keywords:
