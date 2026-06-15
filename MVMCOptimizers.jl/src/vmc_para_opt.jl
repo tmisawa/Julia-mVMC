@@ -278,7 +278,7 @@ function vmc_para_opt!(
 
         ctimer_start!(timer, 25)
         if !all_complex
-            weight_average_sr_opt_real!(ctx, state)
+            weight_average_sr_opt_real!(ctx, state; nsrcg = data.modpara.nsrcg != 0)
         else
             weight_average_sr_opt!(ctx, state)
         end

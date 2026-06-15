@@ -112,7 +112,11 @@ Equivalent to C's `WeightAverageSROpt_real()`.
 Normalizes SROptOO_real and SROptHO_real by Wc.
 Note: C implementation explicitly excludes SROptO_real from normalization.
 """
-function weight_average_sr_opt_real!(state::VMCOptimizationState)
+@inline function active_sr_opt_oo_real_length(sr::SROptData; nsrcg::Bool = false)
+    return nsrcg ? 2 * sr.sr_opt_size : sr.sr_opt_size * sr.sr_opt_size
+end
+
+function weight_average_sr_opt_real!(state::VMCOptimizationState; nsrcg::Bool = false)
     if abs(state.energy.wc) < 1e-15
         @warn "Weight Wc is too small: $(state.energy.wc)"
         return
@@ -121,7 +125,9 @@ function weight_average_sr_opt_real!(state::VMCOptimizationState)
     inv_w = 1.0 / state.energy.wc
 
     # Normalize SROptOO_real and SROptHO_real (not SROptO_real - per C implementation)
-    state.sr_opt.sr_opt_oo_real .*= inv_w
+    oo_len = min(active_sr_opt_oo_real_length(state.sr_opt; nsrcg = nsrcg),
+                 length(state.sr_opt.sr_opt_oo_real))
+    @views state.sr_opt.sr_opt_oo_real[1:oo_len] .*= inv_w
     state.sr_opt.sr_opt_ho_real .*= inv_w
 end
 
@@ -130,16 +136,24 @@ end
 
 Real-valued counterpart of `WeightAverageSROpt_real(comm_parent)`.
 """
-function weight_average_sr_opt_real!(ctx::ParallelContext, state::VMCOptimizationState)
-    ctx.is_mpi || return weight_average_sr_opt_real!(state)
+function weight_average_sr_opt_real!(
+    ctx::ParallelContext,
+    state::VMCOptimizationState;
+    nsrcg::Bool = false,
+)
+    ctx.is_mpi || return weight_average_sr_opt_real!(state; nsrcg = nsrcg)
     if abs(state.energy.wc) < 1e-15
         is_output_rank(ctx) && @warn "Weight Wc is too small: $(state.energy.wc)"
         return
     end
-    allreduce_sum!(ctx, state.sr_opt.sr_opt_oo_real; which = :comm0)
+    ctx.size0 <= 1 && return weight_average_sr_opt_real!(state; nsrcg = nsrcg)
+
+    oo_len = min(active_sr_opt_oo_real_length(state.sr_opt; nsrcg = nsrcg),
+                 length(state.sr_opt.sr_opt_oo_real))
+    allreduce_sum!(ctx, @view(state.sr_opt.sr_opt_oo_real[1:oo_len]); which = :comm0)
     allreduce_sum!(ctx, state.sr_opt.sr_opt_ho_real; which = :comm0)
     inv_w = 1.0 / real(state.energy.wc)
-    state.sr_opt.sr_opt_oo_real .*= inv_w
+    @views state.sr_opt.sr_opt_oo_real[1:oo_len] .*= inv_w
     state.sr_opt.sr_opt_ho_real .*= inv_w
     return
 end

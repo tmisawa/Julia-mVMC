@@ -239,6 +239,10 @@ end
     @test length(local_acc.sr_opt.sr_opt_o) == length(state.sr_opt.sr_opt_o)
     @test length(local_acc.phys.local_cis_ajs) == 1
     @test length(local_acc.phys.phys_cis_ajs) == 1
+    @test length(local_acc.main_cal_scratch.proj_cnt_new) ==
+          length(state.electron_config.tmp_ele_proj_cnt)
+    @test length(local_acc.main_cal_scratch.pf_m_new_real) ==
+          length(state.slater_matrix.pf_m_real)
 
     MO.accumulate_energy!(local_acc.energy, 1.0, 3.0 + 0.0im)
     MO.record_counter!(local_acc.counter, 1, 5)

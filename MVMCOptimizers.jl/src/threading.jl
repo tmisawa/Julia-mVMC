@@ -321,6 +321,18 @@ function merge_counter_accumulators!(dst::Vector{Int}, locals)
     return dst
 end
 
+mutable struct VMCMainCalScratch
+    proj_cnt_new::Vector{Int}
+    pf_m_new_real::Vector{Float64}
+end
+
+function VMCMainCalScratch(state::VMCOptimizationState)
+    return VMCMainCalScratch(
+        zeros(Int, length(state.electron_config.tmp_ele_proj_cnt)),
+        zeros(Float64, length(state.slater_matrix.pf_m_real)),
+    )
+end
+
 @inline function _check_ctimer_id(id::Integer)
     0 <= id < CTIMER_N || error("timer id $id out of range [0, $(CTIMER_N - 1)]")
     return Int(id)
@@ -356,6 +368,7 @@ mutable struct VMCThreadAccumulator
     sr_opt::VMCSROptAccumulator
     phys::VMCPhysAccumulator
     counter::VMCCounterAccumulator
+    main_cal_scratch::VMCMainCalScratch
     timer::CTimer
 end
 
@@ -365,6 +378,7 @@ function VMCThreadAccumulator(state::VMCOptimizationState, parent_timer::CTimer 
         VMCSROptAccumulator(state.sr_opt),
         VMCPhysAccumulator(state.phys_quantities),
         VMCCounterAccumulator(length(state.electron_config.counter)),
+        VMCMainCalScratch(state),
         CTimer(ctimer_enabled(parent_timer)),
     )
 end

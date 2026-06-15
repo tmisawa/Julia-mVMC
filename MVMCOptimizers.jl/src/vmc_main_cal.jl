@@ -53,6 +53,55 @@ function proj_ratio(
     return exp(log_proj_ratio(proj_cnt_new, proj_cnt_old, data))
 end
 
+function log_proj_ratio_noalloc(
+    proj_cnt_new::Vector{Int},
+    proj_cnt_old::Vector{Int},
+    data::ExpertModeData,
+)::Float64
+    z = 0.0
+    layout = MVMCExpertModeParsers.projection_layout(data)
+
+    for i = 1:min(layout.n_gutzwiller, length(data.gutzwiller_terms))
+        idx = layout.gutzwiller_offset + i
+        if idx <= length(proj_cnt_new) && idx <= length(proj_cnt_old)
+            z += real(data.gutzwiller_terms[i].value) * (proj_cnt_new[idx] - proj_cnt_old[idx])
+        end
+    end
+
+    for i = 1:min(layout.n_jastrow, length(data.jastrow_terms))
+        idx = layout.jastrow_offset + i
+        if idx <= length(proj_cnt_new) && idx <= length(proj_cnt_old)
+            z += real(data.jastrow_terms[i].value) * (proj_cnt_new[idx] - proj_cnt_old[idx])
+        end
+    end
+
+    for i = 1:min(6 * layout.n_dh2, length(data.doublon_holon_2site_params))
+        idx = layout.dh2_offset + i
+        if idx <= length(proj_cnt_new) && idx <= length(proj_cnt_old)
+            z += real(data.doublon_holon_2site_params[i]) *
+                 (proj_cnt_new[idx] - proj_cnt_old[idx])
+        end
+    end
+
+    for i = 1:min(10 * layout.n_dh4, length(data.doublon_holon_4site_params))
+        idx = layout.dh4_offset + i
+        if idx <= length(proj_cnt_new) && idx <= length(proj_cnt_old)
+            z += real(data.doublon_holon_4site_params[i]) *
+                 (proj_cnt_new[idx] - proj_cnt_old[idx])
+        end
+    end
+
+    return z
+end
+
+function proj_ratio_noalloc(
+    proj_cnt_new::Vector{Int},
+    proj_cnt_old::Vector{Int},
+    data::ExpertModeData,
+)::Float64
+    return exp(log_proj_ratio_noalloc(proj_cnt_new, proj_cnt_old, data))
+end
+
 """
     proj_rbm_ratio(... ) -> ComplexF64
 
@@ -170,6 +219,77 @@ function green_func1(
 
 
     return result
+end
+
+"""
+    green_func1_real!(ri, rj, s, ip, ele_idx, ele_cfg, ele_num, ele_proj_cnt,
+                      data, state, scratch)
+
+Allocation-free real-mode 1-body Green function for the main-calculation path.
+This mirrors C's `GreenFunc1_real`: mutate the active electron buffers, compute
+with caller-owned scratch, then revert the move before returning.
+"""
+function green_func1_real!(
+    ri::Int,
+    rj::Int,
+    s::Int,
+    ip::ComplexF64,
+    ele_idx::Vector{Int},
+    ele_cfg::Vector{Int},
+    ele_num::Vector{Int},
+    ele_proj_cnt::Vector{Int},
+    data::ExpertModeData,
+    state::VMCOptimizationState,
+    scratch::VMCMainCalScratch,
+)::ComplexF64
+    n_site = data.modpara.nsite
+    n_elec = data.modpara.nelec
+    n_qp_full = get_n_qp_full(data)
+
+    if ri == rj
+        return ComplexF64(ele_num[ri+1+s*n_site])
+    end
+    if ele_num[ri+1+s*n_site] == 1 || ele_num[rj+1+s*n_site] == 0
+        return 0.0 + 0.0im
+    end
+
+    mj = ele_cfg[rj+1+s*n_site]
+    mj < 0 && return 0.0 + 0.0im
+    msj = mj + s * n_elec
+    rsi = ri + s * n_site
+    rsj = rj + s * n_site
+
+    proj_cnt_new = scratch.proj_cnt_new
+    pf_m_new_real = scratch.pf_m_new_real
+    length(proj_cnt_new) >= length(ele_proj_cnt) ||
+        error("main-calculation projection scratch is too small")
+    length(pf_m_new_real) >= n_qp_full ||
+        error("main-calculation Pfaffian scratch is too small")
+
+    ele_idx[msj+1] = ri
+    ele_num[rsj+1] = 0
+    ele_num[rsi+1] = 1
+
+    try
+        update_proj_cnt!(rj, ri, s, proj_cnt_new, ele_proj_cnt, ele_num, data)
+        z = proj_ratio_noalloc(proj_cnt_new, ele_proj_cnt, data)
+        calculate_new_pf_m2_real!(
+            mj,
+            s,
+            pf_m_new_real,
+            ele_idx,
+            1,
+            n_qp_full + 1,
+            data,
+            state,
+        )
+        ip_new_real = calculate_ip_real(pf_m_new_real, 1, n_qp_full + 1, data)
+        return ComplexF64(z * ip_new_real / real(ip), 0.0)
+    finally
+        ele_idx[msj+1] = rj
+        ele_num[rsj+1] = 1
+        ele_num[rsi+1] = 0
+    end
 end
 
 """
@@ -1161,8 +1281,10 @@ function calculate_hamiltonian(
     state::VMCOptimizationState;
     all_complex::Bool = true,
     c_timer::CTimer = CTIMER_DISABLED,
+    main_cal_scratch::Union{Nothing,VMCMainCalScratch} = nothing,
 )::ComplexF64
     n_site = data.modpara.nsite
+    use_real_green1_scratch = !all_complex && main_cal_scratch !== nothing && !has_rbm_terms(data)
 
     # Get up-spin and down-spin electron numbers (0-based indexing in C)
     n0 = @view ele_num[1:n_site]  # up-spin
@@ -1223,8 +1345,22 @@ function calculate_hamiltonian(
         if 0 <= ri < n_site && 0 <= rj < n_site
             # Determine spin based on term
             if term.spin == :up || term.spin == :both
-                contrib =
-                    -term.value * green_func1(
+                green = if use_real_green1_scratch
+                    green_func1_real!(
+                        ri,
+                        rj,
+                        0,
+                        ip,
+                        ele_idx,
+                        ele_cfg,
+                        ele_num,
+                        ele_proj_cnt,
+                        data,
+                        state,
+                        main_cal_scratch,
+                    )
+                else
+                    green_func1(
                         ri,
                         rj,
                         0,
@@ -1237,12 +1373,28 @@ function calculate_hamiltonian(
                         state;
                         all_complex = all_complex,
                     )
+                end
+                contrib = -term.value * green
                 e_transfer += contrib
                 e += contrib
             end
             if term.spin == :down || term.spin == :both
-                contrib =
-                    -term.value * green_func1(
+                green = if use_real_green1_scratch
+                    green_func1_real!(
+                        ri,
+                        rj,
+                        1,
+                        ip,
+                        ele_idx,
+                        ele_cfg,
+                        ele_num,
+                        ele_proj_cnt,
+                        data,
+                        state,
+                        main_cal_scratch,
+                    )
+                else
+                    green_func1(
                         ri,
                         rj,
                         1,
@@ -1255,6 +1407,8 @@ function calculate_hamiltonian(
                         state;
                         all_complex = all_complex,
                     )
+                end
+                contrib = -term.value * green
                 e_transfer += contrib
                 e += contrib
             end
@@ -2685,31 +2839,17 @@ function finalize_oo_store_real!(
         return
     end
 
-    if vmc_inner_threading_enabled(sr_opt_size, threaded)
-        Base.Threads.@threads :static for i = 1:sr_opt_size
-            @inbounds for j = 1:sr_opt_size
-                sum_val = 0.0
-                for s = 0:(sample_size-1)
-                    sum_val +=
-                        sr_opt_o_store[i+s*sr_opt_size] *
-                        sr_opt_o_store[j+s*sr_opt_size]
-                end
-                sr_opt_oo[(i-1)+sr_opt_size*(j-1)+1] = sum_val
-            end
-        end
-    else
-        @inbounds for i = 1:sr_opt_size
-            for j = 1:sr_opt_size
-                sum_val = 0.0
-                for s = 0:(sample_size-1)
-                    sum_val +=
-                        sr_opt_o_store[i+s*sr_opt_size] *
-                        sr_opt_o_store[j+s*sr_opt_size]
-                end
-                sr_opt_oo[(i-1)+sr_opt_size*(j-1)+1] = sum_val
-            end
-        end
-    end
+    o_store = reshape(
+        @view(sr_opt_o_store[1:(sr_opt_size*sample_size)]),
+        sr_opt_size,
+        sample_size,
+    )
+    oo_active = reshape(
+        @view(sr_opt_oo[1:(sr_opt_size*sr_opt_size)]),
+        sr_opt_size,
+        sr_opt_size,
+    )
+    mul!(oo_active, o_store, transpose(o_store))
 end
 
 # ============================================================================
@@ -2989,6 +3129,7 @@ function vmc_main_cal!(
                     worker_state;
                     all_complex = false,
                     c_timer = c_timer,
+                    main_cal_scratch = local_acc.main_cal_scratch,
                 )
             else
                 e = calculate_hamiltonian(
@@ -3001,6 +3142,7 @@ function vmc_main_cal!(
                     worker_state;
                     all_complex = true,
                     c_timer = c_timer,
+                    main_cal_scratch = local_acc.main_cal_scratch,
                 )
             end
             ctimer_stop!(c_timer, 41)
