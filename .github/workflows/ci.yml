@@ -77,6 +77,11 @@ jobs:
         run: |
           julia --project=@. test/integration/phys_cal_equivalent.jl
 
+      - name: Run MPI smoke tests
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.julia-version == '1.12' }}
+        run: |
+          OMP_NUM_THREADS=1 JULIA_NUM_THREADS=1 julia --project=@. test/mpi/run_mpi_smoke.jl
+
       - name: Run threading default C-parity guard
         if: ${{ matrix.os == 'ubuntu-latest' && matrix.julia-version == '1.12' }}
         shell: bash

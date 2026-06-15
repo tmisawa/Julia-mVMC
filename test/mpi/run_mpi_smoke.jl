@@ -7,6 +7,7 @@ using MPI: mpiexec
 using Test
 
 const worker = joinpath(@__DIR__, "mpi_smoke.jl")
+const hubbard_worker = joinpath(@__DIR__, "mpi_hubbard_smoke.jl")
 const physcal_worker = joinpath(@__DIR__, "mpi_physcal_smoke.jl")
 const weight_average_worker = joinpath(@__DIR__, "mpi_weight_average_smoke.jl")
 const project = abspath(joinpath(@__DIR__, "..", ".."))
@@ -57,6 +58,19 @@ end
                String)
     @test count("weight-average worker: root rank ok", out) == 1
     @test count("weight-average worker: non-root rank ok", out) == 1
+end
+
+@testset "R1 mpiexec -n 2 Hubbard para-opt smoke" begin
+    mpi_dir = mktempdir()
+    out = read(`$(mpiexec()) -n 2 $(Base.julia_cmd()) --project=$project $hubbard_worker $mpi_dir`,
+               String)
+    assert_files_present(mpi_dir, para_opt_files)
+    zvo_lines = readlines(joinpath(mpi_dir, "zvo_out.dat"))
+    @test length(zvo_lines) == 4
+    @test all(line -> length(split(strip(line))) >= 2, zvo_lines)
+    @test count("hubbard worker: root rank ok", out) == 1
+    @test count("hubbard worker: non-root rank ok", out) == 1
+    println("R1 smoke: mpiexec -n 2 Hubbard para-opt completed")
 end
 
 @testset "R2 mpiexec -n 2 WeightAverage warning rank0 gate" begin
