@@ -4,6 +4,8 @@ using MVMCExpertModeParsers
 using MVMCExpertModeParsers:
     ExpertModeData,
     ModParaParameters,
+    GutzwillerTerm,
+    JastrowTerm,
     ChargeRBMPhysLayerTerm,
     ChargeRBMHiddenLayerTerm,
     ChargeRBMPhysHiddenTerm
@@ -111,6 +113,118 @@ end
     @test sr_opt_o[4] == im * expected2
 end
 
+@testset "unit/vmc_main_cal: green_func1_real! scratch path" begin
+    data = ExpertModeData()
+    data.modpara = ModParaParameters(nsite = 2, nelec = 1, complex_flag = 0)
+    data.qp_weights = MVMCExpertModeParsers.QuantumProjectionWeights()
+    data.qp_weights.qp_full_weight = ComplexF64[1.0 + 0.0im]
+
+    state = MVMCOptimizers.VMCOptimizationState(2, 1, 0, 0, 1, 1, false, false)
+    state.slater_matrix.inv_m_real[1:4] .= [0.5, -0.25, 0.125, 0.75]
+    state.slater_matrix.pf_m_real[1] = 2.0
+    state.slater_matrix.slater_elm_real .= [
+        0.2,
+        -0.1,
+        0.4,
+        0.7,
+        0.3,
+        0.9,
+        -0.2,
+        0.5,
+        -0.6,
+        0.8,
+        0.1,
+        -0.4,
+        0.45,
+        -0.35,
+        0.25,
+        0.15,
+    ]
+
+    ele_idx = [1, 0]
+    ele_cfg = [-1, 0, 0, -1]
+    ele_num = [0, 1, 1, 0]
+    ele_proj_cnt = Int[]
+    ip = ComplexF64(MVMCOptimizers.calculate_ip_real(
+        state.slater_matrix.pf_m_real,
+        1,
+        2,
+        data,
+    ), 0.0)
+
+    expected = MVMCOptimizers.green_func1(
+        0,
+        1,
+        0,
+        ip,
+        ele_idx,
+        ele_cfg,
+        ele_num,
+        ele_proj_cnt,
+        data,
+        state;
+        all_complex = false,
+    )
+
+    scratch = MVMCOptimizers.VMCMainCalScratch(state)
+    ele_idx_before = copy(ele_idx)
+    ele_num_before = copy(ele_num)
+    actual = MVMCOptimizers.green_func1_real!(
+        0,
+        1,
+        0,
+        ip,
+        ele_idx,
+        ele_cfg,
+        ele_num,
+        ele_proj_cnt,
+        data,
+        state,
+        scratch,
+    )
+
+    @test actual ≈ expected
+    @test ele_idx == ele_idx_before
+    @test ele_num == ele_num_before
+
+    alloc = @allocated MVMCOptimizers.green_func1_real!(
+        0,
+        1,
+        0,
+        ip,
+        ele_idx,
+        ele_cfg,
+        ele_num,
+        ele_proj_cnt,
+        data,
+        state,
+        scratch,
+    )
+    @test alloc == 0
+    @test ele_idx == ele_idx_before
+    @test ele_num == ele_num_before
+end
+
+@testset "unit/vmc_main_cal: projection ratio noalloc helper" begin
+    data = make_mock_data_for_proj_tests(nsite = 4)
+    data.gutzwiller_terms = [
+        GutzwillerTerm(0, 0.11 + 0.7im, false),
+        GutzwillerTerm(1, -0.03 - 0.4im, false),
+    ]
+    data.jastrow_terms = [
+        JastrowTerm(0, 1, ComplexF64(0.2 + i / 100), false)
+        for i = 1:data.n_jastrow_idx
+    ]
+
+    n_proj = MVMCExpertModeParsers.projection_layout(data).n_proj
+    proj_cnt_old = [mod(i, 3) - 1 for i = 1:n_proj]
+    proj_cnt_new = [proj_cnt_old[i] + (isodd(i) ? 2 : -1) for i = 1:n_proj]
+
+    @test MVMCOptimizers.proj_ratio_noalloc(proj_cnt_new, proj_cnt_old, data) ≈
+          MVMCOptimizers.proj_ratio(proj_cnt_new, proj_cnt_old, data)
+    @test (@allocated MVMCOptimizers.proj_ratio_noalloc(proj_cnt_new, proj_cnt_old, data)) == 0
+end
+
 @testset "unit/vmc_main_cal: calculate_oo!" begin
     sr_opt_size = 3
     size_2 = 2 * sr_opt_size
@@ -172,6 +286,41 @@ end
     expected_ho = fill(-0.2, sr_opt_size)
     expected_ho .+= (w * e) .* sr_opt_o
     @test sr_opt_ho ≈ expected_ho
+end
+
+@testset "unit/vmc_main_cal: finalize_oo_store_real! BLAS path" begin
+    sr_opt_size = 4
+    sample_size = 3
+    sr_opt_o_store = [sin(0.13 * i) + cos(0.07 * i) for i = 1:(sr_opt_size * sample_size)]
+    sentinel = -123.456
+
+    sr_opt_oo = fill(sentinel, sr_opt_size * (sr_opt_size + 2))
+    MVMCOptimizers.finalize_oo_store_real!(
+        sr_opt_oo,
+        sr_opt_o_store,
+        sr_opt_size,
+        sample_size;
+        nsrcg = false,
+        threaded = false,
+    )
+
+    expected = fill(sentinel, length(sr_opt_oo))
+    for i = 1:sr_opt_size
+        for j = 1:sr_opt_size
+            sum_val = 0.0
+            for s = 0:(sample_size - 1)
+                sum_val +=
+                    sr_opt_o_store[i+s*sr_opt_size] *
+                    sr_opt_o_store[j+s*sr_opt_size]
+            end
+            expected[(i-1)+sr_opt_size*(j-1)+1] = sum_val
+        end
+    end
+
+    @test sr_opt_oo[1:(sr_opt_size*sr_opt_size)] ≈
+          expected[1:(sr_opt_size*sr_opt_size)]
+    @test sr_opt_oo[(sr_opt_size*sr_opt_size+1):end] ==
+          expected[(sr_opt_size*sr_opt_size+1):end]
 end
 
 @testset "unit/vmc_main_cal: threaded OO/store inner loops match sequential" begin

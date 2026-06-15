@@ -69,9 +69,17 @@
 - `test_unit/test_unit_vmc_main_cal_sr.jl`
   - `unit/vmc_main_cal: set_projection_diff!` → `set_projection_diff!`
   - `unit/vmc_main_cal: set_rbm_diff!` → `set_rbm_diff!`
+  - `unit/vmc_main_cal: green_func1_real! scratch path` → `green_func1_real!`（real `CalHamiltonian1` 用 scratch path と mutate/revert）
+  - `unit/vmc_main_cal: projection ratio noalloc helper` → `proj_ratio_noalloc`
   - `unit/vmc_main_cal: calculate_oo!` → `calculate_oo!`
   - `unit/vmc_main_cal: calculate_oo_real!` → `calculate_oo_real!`
+  - `unit/vmc_main_cal: finalize_oo_store_real! BLAS path` → `finalize_oo_store_real!`（real `NSRCG=false` の BLAS path と余剰領域非破壊）
   - `unit/vmc_main_cal: threaded OO/store inner loops match sequential` → R3 inner-loop threading（complex/real OO, store, finalize）
+
+### `src/weight_average.jl`
+- `test_unit/test_unit_weight_average.jl`
+  - `unit/weight_average: real SR active range and MPI size1 skip` → `weight_average_sr_opt_real!`（`mpiexec -n 1` 相当で allreduce を呼ばず、real `OO` active range のみ正規化）
+  - `unit/weight_average: real SR-CG active OO length` → `weight_average_sr_opt_real!`（`NSRCG=true` の active `OO` 長）
 
 ### `src/parameter_sync.jl`
 - `test_unit/test_unit_parameter_sync.jl`
