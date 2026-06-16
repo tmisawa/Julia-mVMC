@@ -149,11 +149,12 @@ are treated as C-compatible.
 - **BackFlow** correlation factor (`vmc_bf_*` entry points raise an error
   in this release; inputs that activate Back Flow are not supported).
 - **Grouped MPI/QP splitting** (`NSplitSize > 1` raises an unsupported-feature
-  error; v0.4 MPI sample-parallel execution is supported with
-  `NSplitSize = 1`).
+  error before MPI context construction; v0.4 MPI sample-parallel execution is
+  supported with `NSplitSize = 1`).
 - **MPI CG solver** (`NSRCG != 0` under MPI raises an unsupported-feature
   error; the CG SR solver is currently serial-only because C's
-  `operate_by_S` broadcast/allreduce is not ported yet).
+  `operate_by_S` broadcast/allreduce is not ported yet). The `mpiexec -n 2`
+  smoke gate checks this fail-fast path.
 - **Full Lanczos** (`NLanczosMode > 0`) — only the step-0 comparison
   matches C. The post-Lanczos eigenvector / overlap pipeline is not
   ported.

@@ -11,7 +11,7 @@ Julia port of the [mVMC](https://github.com/issp-center-dev/mVMC) (many-variable
 | Shared-memory threading | 🚧 Experimental | Conservative inner-loop opt-ins only; sample-level `VMCMainCal` threading is intentionally disabled for C-parity. |
 | Lanczos | ⚠️ Step-0 only | Single-step comparison verified; full Lanczos not yet ported. |
 | BackFlow | ❌ Not supported | Planned for a future release. |
-| MPI parallelization | 🚧 Experimental | `VMCParaOpt` (`NSRCG = 0` direct SR solver only) and `VMCPhysCal` run under MPI.jl-compatible launchers with `NSplitSize = 1`; rank0 output/readback and comm0 reductions are smoke-tested for `mpiexec -n 2/-n 4`. C's grouped MPI/QP split (`NSplitSize > 1`) and MPI CG solver (`NSRCG != 0`) are still rejected. |
+| MPI parallelization | 🚧 Experimental | `VMCParaOpt` (`NSRCG = 0` direct SR solver only) and `VMCPhysCal` run under MPI.jl-compatible launchers with `NSplitSize = 1`; rank0 output/readback, comm0 reductions, and unsupported-input failure modes are smoke-tested for `mpiexec -n 2/-n 4`. C's grouped MPI/QP split (`NSplitSize > 1`) and MPI CG solver (`NSRCG != 0`) are still rejected. |
 
 ## Installation
 
