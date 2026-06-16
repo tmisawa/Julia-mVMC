@@ -34,7 +34,9 @@
   <https://github.com/issp-center-dev/mVMC>.
 - **MPI parallelisation** — v0.4 supports multi-rank sample-parallel execution
   with `NSplitSize = 1` through MPI.jl-compatible launchers. C's grouped
-  MPI/QP split (`NSplitSize > 1`) is still rejected.
+  MPI/QP split (`NSplitSize > 1`) is rejected before MPI context construction.
+  The CI MPI smoke gate covers rank0 Green output and reduce-to-root paths, but
+  it is not a site performance benchmark.
 - **`InterAllTerm` spin metadata** — when the input does not provide
   spin information, `vmc_main_cal.jl` substitutes default values (see
   the TODO at `src/vmc_main_cal.jl` near the InterAll loop).

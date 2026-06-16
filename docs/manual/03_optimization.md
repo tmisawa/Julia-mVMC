@@ -32,11 +32,17 @@ result = run_para_opt_from_namelist(
 
 ## MPI limitations
 
-v0.4 supports `VMCParaOpt` sample-parallel MPI only with the direct SR solver
-(`NSRCG = 0`). Inputs with `NSRCG != 0` select the CG SR solver; that path is
-still serial-only because Julia has not yet ported C's CG `operate_by_S`
-broadcast/allreduce. Run those inputs without MPI, set `NSRCG = 0`, or use
-C-mVMC for MPI CG runs.
+v0.4 supports `VMCParaOpt` sample-parallel MPI only for `NSplitSize = 1` and
+the direct SR solver (`NSRCG = 0`). Inputs with `NSRCG != 0` select the CG SR
+solver; that path is still serial-only because Julia has not yet ported C's CG
+`operate_by_S` broadcast/allreduce. Run those inputs without MPI, set
+`NSRCG = 0`, or use C-mVMC for MPI CG runs.
+
+The CI MPI smoke gate runs under `mpiexec` and checks rank0-only output,
+comm0 reductions, `VMCPhysCal` Green reductions, and failure-mode regressions:
+`NSRCG != 0` under MPI is rejected before the CG path runs, and
+`NSplitSize > 1` is rejected before MPI context construction. This is a
+correctness smoke gate, not a performance or site-compatibility benchmark.
 
 ## Serial NSRCG=1 coverage
 

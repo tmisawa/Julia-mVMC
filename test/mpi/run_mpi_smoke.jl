@@ -10,6 +10,7 @@ const worker = joinpath(@__DIR__, "mpi_smoke.jl")
 const hubbard_worker = joinpath(@__DIR__, "mpi_hubbard_smoke.jl")
 const physcal_worker = joinpath(@__DIR__, "mpi_physcal_smoke.jl")
 const weight_average_worker = joinpath(@__DIR__, "mpi_weight_average_smoke.jl")
+const failure_worker = joinpath(@__DIR__, "mpi_failure_modes.jl")
 const project = abspath(joinpath(@__DIR__, "..", ".."))
 const para_opt_files = (
     "zqp_gutzwiller_opt.dat",
@@ -83,6 +84,22 @@ end
     @test count("Weight Wc is too small after MPI allreduce", out) == 1
     @test count("weight-average worker: root rank ok", out) == 1
     @test count("weight-average worker: non-root rank ok", out) == 1
+end
+
+@testset "v0.4.1 failure mode: NSRCG != 0 is rejected under MPI" begin
+    outdir = mktempdir()
+    out = read(`$(mpiexec()) -n 2 $(Base.julia_cmd()) --project=$project $failure_worker nsrcg $outdir`,
+               String)
+    @test count("failure-mode worker: nsrcg expected rejection ok", out) == 2
+    @test isempty(readdir(outdir))
+end
+
+@testset "v0.4.1 failure mode: NSplitSize > 1 rejects before MPI.Init" begin
+    outdir = mktempdir()
+    out = read(`$(mpiexec()) -n 2 $(Base.julia_cmd()) --project=$project $failure_worker nsplit $outdir`,
+               String)
+    @test count("failure-mode worker: nsplit expected rejection ok", out) == 2
+    @test isempty(readdir(outdir))
 end
 
 @testset "R1 mpiexec -n 4 para-opt smoke" begin
