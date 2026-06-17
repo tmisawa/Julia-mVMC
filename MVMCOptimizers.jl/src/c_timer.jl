@@ -87,6 +87,23 @@ ctimer_enabled(::CTimer{Val{false}}) = false
 @inline ctimer_seconds(timer::CTimer, id::Integer) =
     @inbounds timer.elapsed_ns[id + 1] / 1.0e9
 
+@inline ctimer_env_enabled(name::AbstractString) = get(ENV, name, "0") != "0"
+
+function ctimer_diag_envs()
+    return (
+        calham1 = ctimer_env_enabled("MVMC_CALHAM1_DIAG"),
+        slater = ctimer_env_enabled("MVMC_SLATER_DIAG"),
+        maincal = ctimer_env_enabled("MVMC_MAINCAL_DIAG"),
+        weightavg = ctimer_env_enabled("MVMC_WEIGHTAVG_DIAG"),
+    )
+end
+
+@inline ctimer_any_diag_enabled(flags) =
+    flags.calham1 || flags.slater || flags.maincal || flags.weightavg
+
+@inline ctimer_if_env(parent::CTimer, name::AbstractString) =
+    ctimer_env_enabled(name) ? parent : CTIMER_DISABLED
+
 # --- output ------------------------------------------------------------------
 # Fixed label/id prefixes copied verbatim from C's OutputTimerParaOpt
 # (mVMC/src/mVMC/vmcclock.c). Each prefix ends with a trailing space so that
@@ -158,6 +175,54 @@ function write_ctimer_para_opt(timer::CTimer, output_dir::AbstractString; prefix
     path = joinpath(output_dir, string(prefix, "_CalcTimer.dat"))
     open(path, "w") do fp
         for (label, id) in CTIMER_PARA_OPT_LINES
+            print(fp, label, @sprintf("%12.5f\n", ctimer_seconds(timer, id)))
+        end
+    end
+    return path
+end
+
+const CTIMER_DIAG_LINES = Tuple{String,Int}[
+    ("CalH1 GreenFunc1Real       [920] ", 920),
+    ("  UpdateProjCnt            [921] ", 921),
+    ("  ProjRatio                [922] ", 922),
+    ("  CalculateNewPfM2_real    [923] ", 923),
+    ("  CalculateIP_real         [924] ", 924),
+    ("  CalH1 fast prep          [925] ", 925),
+    ("  CalH1 fast term loop     [926] ", 926),
+    ("  GreenFunc1 setup/check   [927] ", 927),
+    ("  GreenFunc1 restore       [928] ", 928),
+    ("  CalH1 threaded combine   [929] ", 929),
+    ("SlaterElmDiff_fcmp         [930] ", 930),
+    ("  Slater scratch reset     [931] ", 931),
+    ("  Slater transOrb build    [932] ", 932),
+    ("  Slater buffer accumulate [933] ", 933),
+    ("  Slater srOptO store      [934] ", 934),
+    ("  CalH1 direct proj ratio  [935] ", 935),
+    ("  CalH1 PfM2/IP fused      [936] ", 936),
+    ("VMCMainCal unmeasured      [940] ", 940),
+    ("  accumulator init/reset   [941] ", 941),
+    ("  sample copy/check        [942] ", 942),
+    ("  post CalculateMAll       [943] ", 943),
+    ("  CalculateIP              [944] ", 944),
+    ("  weight/check             [945] ", 945),
+    ("  energy accumulate/check  [946] ", 946),
+    ("  Green measurement        [947] ", 947),
+    ("  SR setup/proj/RBM        [948] ", 948),
+    ("  optTrans diff            [949] ", 949),
+    ("  clear/merge/final check  [950] ", 950),
+    ("WeightAverage diagnostic   [960] ", 960),
+    ("  WE allreduce             [961] ", 961),
+    ("  WE normalize             [962] ", 962),
+    ("  SR OO allreduce          [963] ", 963),
+    ("  SR HO allreduce          [964] ", 964),
+    ("  SR normalize             [965] ", 965),
+    ("  ReduceCounter            [966] ", 966),
+]
+
+function write_ctimer_diag(timer::CTimer, output_dir::AbstractString; prefix::AbstractString = "zvo")
+    path = joinpath(output_dir, string(prefix, "_CalcTimerDiag.dat"))
+    open(path, "w") do fp
+        for (label, id) in CTIMER_DIAG_LINES
             print(fp, label, @sprintf("%12.5f\n", ctimer_seconds(timer, id)))
         end
     end

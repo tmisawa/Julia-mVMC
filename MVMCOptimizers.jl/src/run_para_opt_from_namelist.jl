@@ -81,12 +81,13 @@ function run_para_opt_from_namelist(namelist_path::AbstractString;
     # deprecated alias during migration off the old TimerOutputs path). This is
     # the single place that reads the env var and constructs the concrete
     # CTimer; it then flows into vmc_para_opt! through a function barrier.
-    c_timer_env = get(ENV, "MVMC_C_TIMER", "0") != "0"
-    legacy_timer_env = get(ENV, "MVMC_TIMER", "0") != "0"
+    c_timer_env = ctimer_env_enabled("MVMC_C_TIMER")
+    legacy_timer_env = ctimer_env_enabled("MVMC_TIMER")
+    diag_envs = ctimer_diag_envs()
     if legacy_timer_env && !c_timer_env
         @warn "MVMC_TIMER is deprecated; use MVMC_C_TIMER=1 for the C-compatible zvo_CalcTimer.dat timer."
     end
-    timer_enabled = c_timer_env || legacy_timer_env
+    timer_enabled = c_timer_env || legacy_timer_env || ctimer_any_diag_enabled(diag_envs)
     c_timer = CTimer(timer_enabled)
     ctimer_reset!(c_timer)   # fresh per run, in case a timer is reused across repeats
 
@@ -218,6 +219,14 @@ function run_para_opt_from_namelist(namelist_path::AbstractString;
     ctimer_stop!(c_timer, 0)   # end [0] All (post-run zvo readback below is bookkeeping, not timed)
     if timer_enabled && is_output_rank(ctx)
         write_ctimer_para_opt(c_timer, String(output_dir))
+        if ctimer_any_diag_enabled(diag_envs)
+            write_ctimer_diag(c_timer, String(output_dir))
+        end
+    end
+    if diag_envs.weightavg && ctx.is_mpi
+        rank_prefix = @sprintf("zvo_rank%04d", ctx.rank0)
+        write_ctimer_para_opt(c_timer, String(output_dir); prefix = rank_prefix)
+        write_ctimer_diag(c_timer, String(output_dir); prefix = rank_prefix)
     end
 
     # rank0 の write 完了を待ってから読み返す（spec §5-9、F11）。
