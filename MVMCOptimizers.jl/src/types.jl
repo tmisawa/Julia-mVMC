@@ -241,6 +241,10 @@ mutable struct SamplingWorkspace
     # Use ThreadedPfaPackWorkspace for parallel execution (one workspace per thread)
     pfapack_workspace::ThreadedPfaPackWorkspace
 
+    # Cached VMCMainCal local accumulator. Kept as Any because VMCThreadAccumulator
+    # is defined later in threading.jl.
+    main_cal_accumulator::Any
+
     function SamplingWorkspace(n_size::Int, n_qp_full::Int, n_proj::Int, n_site::Int)
         new(
             zeros(Float64, n_size, n_size, n_qp_full),
@@ -252,6 +256,7 @@ mutable struct SamplingWorkspace
             zeros(ComplexF64, n_qp_full),
             zeros(Int, n_site),  # loc_spn will be initialized later
             ThreadedPfaPackWorkspace(n_size),  # Thread-local workspaces for parallel Pfaffian calculations
+            nothing,
         )
     end
 end

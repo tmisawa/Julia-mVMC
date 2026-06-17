@@ -37,7 +37,11 @@ C `WeightAverageWE(comm_parent)`: rank-local `Wc`, `Etot`, `Etot2`, `Sztot`,
 `Sztot2` を comm0 で allreduce してから、全 rank が global `Wc` で正規化する。
 serial context では既存の `weight_average_we!(state)` と同一経路。
 """
-function weight_average_we!(ctx::ParallelContext, state::VMCOptimizationState)
+function weight_average_we!(
+    ctx::ParallelContext,
+    state::VMCOptimizationState,
+    diag_timer::CTimer = CTIMER_DISABLED,
+)
     ctx.is_mpi || return weight_average_we!(state)
     buf = ComplexF64[
         state.energy.wc,
@@ -46,11 +50,15 @@ function weight_average_we!(ctx::ParallelContext, state::VMCOptimizationState)
         state.energy.sztot,
         state.energy.sztot2,
     ]
+    ctimer_start!(diag_timer, 961)
     allreduce_sum!(ctx, buf; which = :comm0)
+    ctimer_stop!(diag_timer, 961)
+    ctimer_start!(diag_timer, 962)
     state.energy.wc = buf[1]
     if abs(state.energy.wc) < 1e-15
         is_output_rank(ctx) &&
             @warn "Weight Wc is too small after MPI allreduce: $(state.energy.wc), etot=$(buf[2])"
+        ctimer_stop!(diag_timer, 962)
         return
     end
     inv_w = 1.0 / state.energy.wc
@@ -58,6 +66,7 @@ function weight_average_we!(ctx::ParallelContext, state::VMCOptimizationState)
     state.energy.etot2 = buf[3] * inv_w
     state.energy.sztot = buf[4] * inv_w
     state.energy.sztot2 = buf[5] * inv_w
+    ctimer_stop!(diag_timer, 962)
     return
 end
 
@@ -89,17 +98,27 @@ end
 C `WeightAverageSROpt(comm_parent)`: `SROptOO` / `SROptHO` の rank-local sum を
 comm0 allreduce し、`WeightAverageWE` 後の global `Wc` で全 rank が正規化する。
 """
-function weight_average_sr_opt!(ctx::ParallelContext, state::VMCOptimizationState)
+function weight_average_sr_opt!(
+    ctx::ParallelContext,
+    state::VMCOptimizationState,
+    diag_timer::CTimer = CTIMER_DISABLED,
+)
     ctx.is_mpi || return weight_average_sr_opt!(state)
     if abs(state.energy.wc) < 1e-15
         is_output_rank(ctx) && @warn "Weight Wc is too small: $(state.energy.wc)"
         return
     end
+    ctimer_start!(diag_timer, 963)
     allreduce_sum!(ctx, state.sr_opt.sr_opt_oo; which = :comm0)
+    ctimer_stop!(diag_timer, 963)
+    ctimer_start!(diag_timer, 964)
     allreduce_sum!(ctx, state.sr_opt.sr_opt_ho; which = :comm0)
+    ctimer_stop!(diag_timer, 964)
+    ctimer_start!(diag_timer, 965)
     inv_w = 1.0 / state.energy.wc
     state.sr_opt.sr_opt_oo .*= inv_w
     state.sr_opt.sr_opt_ho .*= inv_w
+    ctimer_stop!(diag_timer, 965)
     return
 end
 
@@ -141,6 +160,15 @@ function weight_average_sr_opt_real!(
     state::VMCOptimizationState;
     nsrcg::Bool = false,
 )
+    return weight_average_sr_opt_real!(ctx, state, CTIMER_DISABLED; nsrcg = nsrcg)
+end
+
+function weight_average_sr_opt_real!(
+    ctx::ParallelContext,
+    state::VMCOptimizationState,
+    diag_timer::CTimer;
+    nsrcg::Bool = false,
+)
     ctx.is_mpi || return weight_average_sr_opt_real!(state; nsrcg = nsrcg)
     if abs(state.energy.wc) < 1e-15
         is_output_rank(ctx) && @warn "Weight Wc is too small: $(state.energy.wc)"
@@ -150,11 +178,17 @@ function weight_average_sr_opt_real!(
 
     oo_len = min(active_sr_opt_oo_real_length(state.sr_opt; nsrcg = nsrcg),
                  length(state.sr_opt.sr_opt_oo_real))
+    ctimer_start!(diag_timer, 963)
     allreduce_sum!(ctx, @view(state.sr_opt.sr_opt_oo_real[1:oo_len]); which = :comm0)
+    ctimer_stop!(diag_timer, 963)
+    ctimer_start!(diag_timer, 964)
     allreduce_sum!(ctx, state.sr_opt.sr_opt_ho_real; which = :comm0)
+    ctimer_stop!(diag_timer, 964)
+    ctimer_start!(diag_timer, 965)
     inv_w = 1.0 / real(state.energy.wc)
     @views state.sr_opt.sr_opt_oo_real[1:oo_len] .*= inv_w
     state.sr_opt.sr_opt_ho_real .*= inv_w
+    ctimer_stop!(diag_timer, 965)
     return
 end
 

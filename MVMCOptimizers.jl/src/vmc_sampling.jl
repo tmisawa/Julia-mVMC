@@ -319,6 +319,10 @@ end
 Update projection counts when electron with spin s hops from ri to rj.
 Equivalent to C's `UpdateProjCnt()`.
 """
+@inline function _symmetric_site_pair_idx(idx_matrix, ra::Int, rb::Int)::Int
+    @inbounds return ra < rb ? idx_matrix[ra+1, rb+1] : idx_matrix[rb+1, ra+1]
+end
+
 function update_proj_cnt!(
     ri::Int,
     rj::Int,
@@ -343,10 +347,6 @@ function update_proj_cnt!(
         return
     end
 
-    # Get up-spin and down-spin electron numbers
-    n0 = @view ele_num[1:n_site]  # up-spin
-    n1 = @view ele_num[(n_site+1):(2*n_site)]  # down-spin
-
     # Gutzwiller factor
     # C implementation:
     #   idx = GutzwillerIdx[ri]; projCntNew[idx] -= n0[ri]+n1[ri];
@@ -359,15 +359,17 @@ function update_proj_cnt!(
             idx_ri = gutzwiller_idx[ri+1]  # 0-based idx value
             idx_rj = gutzwiller_idx[rj+1]
             if idx_ri + 1 <= n_proj
-                proj_cnt_new[idx_ri+1] -= n0[ri+1] + n1[ri+1]
+                @inbounds proj_cnt_new[idx_ri+1] -= ele_num[ri+1] + ele_num[n_site+ri+1]
             end
             if idx_rj + 1 <= n_proj
-                proj_cnt_new[idx_rj+1] += n0[rj+1] * n1[rj+1]
+                @inbounds proj_cnt_new[idx_rj+1] += ele_num[rj+1] * ele_num[n_site+rj+1]
             end
         else
             # Fallback: assume all sites map to index 0
-            proj_cnt_new[1] -= n0[ri+1] + n1[ri+1]
-            proj_cnt_new[1] += n0[rj+1] * n1[rj+1]
+            @inbounds begin
+                proj_cnt_new[1] -= ele_num[ri+1] + ele_num[n_site+ri+1]
+                proj_cnt_new[1] += ele_num[rj+1] * ele_num[n_site+rj+1]
+            end
         end
     end
 
@@ -378,21 +380,14 @@ function update_proj_cnt!(
     # Jastrow factor
     # C implementation uses JastrowIdx[ri][rj] to get the Jastrow parameter index.
     if data.n_jastrow_idx > 0 && !isempty(jastrow_idx_matrix)
-        # Helper function to get Jastrow index (symmetric: ri < rj)
-        function get_jastrow_idx(ra::Int, rb::Int)
-            if ra < rb
-                return jastrow_idx_matrix[ra+1, rb+1]
-            else
-                return jastrow_idx_matrix[rb+1, ra+1]
-            end
-        end
-
         # Update [ri][rj] term
         # C: projCntNew[idx] += n0[ri]+n1[ri]-n0[rj]-n1[rj]+1;
-        idx = get_jastrow_idx(ri, rj)
+        idx = _symmetric_site_pair_idx(jastrow_idx_matrix, ri, rj)
         proj_idx = offset + idx + 1
         if proj_idx <= n_proj
-            proj_cnt_new[proj_idx] += (n0[ri+1] + n1[ri+1]) - (n0[rj+1] + n1[rj+1]) + 1
+            @inbounds proj_cnt_new[proj_idx] +=
+                (ele_num[ri+1] + ele_num[n_site+ri+1]) -
+                (ele_num[rj+1] + ele_num[n_site+rj+1]) + 1
         end
 
         # Update [ri][rk] terms (rk != ri, rj)
@@ -401,10 +396,11 @@ function update_proj_cnt!(
             if rk == rj || rk == ri
                 continue
             end
-            idx = get_jastrow_idx(ri, rk)
+            idx = _symmetric_site_pair_idx(jastrow_idx_matrix, ri, rk)
             proj_idx = offset + idx + 1
             if proj_idx <= n_proj
-                proj_cnt_new[proj_idx] -= (n0[rk+1] + n1[rk+1] - 1)
+                @inbounds proj_cnt_new[proj_idx] -=
+                    ele_num[rk+1] + ele_num[n_site+rk+1] - 1
             end
         end
 
@@ -414,28 +410,33 @@ function update_proj_cnt!(
             if rk == ri || rk == rj
                 continue
             end
-            idx = get_jastrow_idx(rj, rk)
+            idx = _symmetric_site_pair_idx(jastrow_idx_matrix, rj, rk)
             proj_idx = offset + idx + 1
             if proj_idx <= n_proj
-                proj_cnt_new[proj_idx] += (n0[rk+1] + n1[rk+1] - 1)
+                @inbounds proj_cnt_new[proj_idx] +=
+                    ele_num[rk+1] + ele_num[n_site+rk+1] - 1
             end
         end
     elseif length(data.jastrow_terms) > 0
         # Fallback: single Jastrow parameter (backward compatibility)
         jastrow_idx = offset + 1
         if jastrow_idx <= n_proj
-            proj_cnt_new[jastrow_idx] += (n0[ri+1] + n1[ri+1]) - (n0[rj+1] + n1[rj+1]) + 1
+            @inbounds proj_cnt_new[jastrow_idx] +=
+                (ele_num[ri+1] + ele_num[n_site+ri+1]) -
+                (ele_num[rj+1] + ele_num[n_site+rj+1]) + 1
             for rk = 0:(n_site-1)
                 if rk == rj || rk == ri
                     continue
                 end
-                proj_cnt_new[jastrow_idx] -= (n0[rk+1] + n1[rk+1] - 1)
+                @inbounds proj_cnt_new[jastrow_idx] -=
+                    ele_num[rk+1] + ele_num[n_site+rk+1] - 1
             end
             for rk = 0:(n_site-1)
                 if rk == ri || rk == rj
                     continue
                 end
-                proj_cnt_new[jastrow_idx] += (n0[rk+1] + n1[rk+1] - 1)
+                @inbounds proj_cnt_new[jastrow_idx] +=
+                    ele_num[rk+1] + ele_num[n_site+rk+1] - 1
             end
         end
     end
@@ -5021,7 +5022,7 @@ end
 Calculate new Pfaffian using real arithmetic.
 Equivalent to C's `CalculateNewPfM2_real()`.
 """
-function calculate_new_pf_m2_real!(
+@inline function calculate_new_pf_m2_real!(
     ma::Int,
     s::Int,
     pf_m_new_real::Vector{Float64},
@@ -5042,42 +5043,104 @@ function calculate_new_pf_m2_real!(
     slater_elm_real = state.slater_matrix.slater_elm_real
     inv_m_real = state.slater_matrix.inv_m_real
     pf_m_real = state.slater_matrix.pf_m_real
+    qp_count = qp_end - qp_start
+    if qp_count == 0
+        return nothing
+    end
+    @boundscheck begin
+        if qp_start < 1 || qp_count < 0 || qp_end > length(pf_m_real) + 1
+            throw(BoundsError(pf_m_real, qp_start:(qp_end-1)))
+        end
+        max_qp = qp_end - 1
+        required_inv_len = (max_qp - 1) * n_size * n_size + (msa + 1) * n_size
+        required_slt_len = (max_qp - 1) * n_site2 * n_site2 + (rsa + 1) * n_site2
+        if length(ele_idx) < n_size ||
+           length(pf_m_new_real) < max_qp ||
+           length(inv_m_real) < required_inv_len ||
+           length(slater_elm_real) < required_slt_len
+            throw(BoundsError())
+        end
+    end
 
     for qpidx = qp_start:(qp_end-1)
-        if qpidx < 1 || qpidx > length(pf_m_real)
-            continue
-        end
-
-        # Calculate ratio = sum_j invM_real[msa][msj] * sltE_real[rsa][rsj]
-        # C: invM_a = InvM_real + qpidx*Nsize*Nsize + msa*Nsize
-        #    invM_a[msj] = InvM_real[(qpidx+qpStart)*Nsize*Nsize + msa*Nsize + msj]
-        # Julia: inv_m_real is stored as [qp * n_size * n_size + msi * n_size + msj] (1-based)
-        #        So inv_m_real[(qpidx-1)*n_size*n_size + msa*n_size + msj + 1]
-        #        But msa is 0-based, so we need: inv_m_real[(qpidx-1)*n_size*n_size + (msa+1-1)*n_size + msj + 1]
-        #        = inv_m_real[(qpidx-1)*n_size*n_size + msa*n_size + msj + 1]
         ratio = 0.0
         inv_base = (qpidx - 1) * n_size * n_size + msa * n_size
         slt_base = (qpidx - 1) * n_site2 * n_site2 + rsa * n_site2
-        @inbounds for msj = 0:(n_size-1)
-            rsj = if msj < n_elec
-                ele_idx[msj+1]
-            else
-                ele_idx[msj+1] + n_site
-            end
-
-            # Linear index for inv_m_real: inv_base + msj + 1 (msj is 0-based, +1 for 1-based indexing)
-            inv_idx = inv_base + msj + 1
-            # Linear index for slater_elm_real: slt_base + rsj + 1 (rsj is 0-based, +1 for 1-based indexing)
-            slt_idx = slt_base + rsj + 1
-
-            if inv_idx <= length(inv_m_real) && slt_idx <= length(slater_elm_real)
-                ratio += inv_m_real[inv_idx] * slater_elm_real[slt_idx]
-            end
+        slt_row = slt_base + 1
+        @inbounds for msj = 1:n_elec
+            ratio += inv_m_real[inv_base+msj] * slater_elm_real[slt_row+ele_idx[msj]]
+        end
+        @inbounds for msj = (n_elec+1):n_size
+            ratio += inv_m_real[inv_base+msj] *
+                     slater_elm_real[slt_row+ele_idx[msj]+n_site]
         end
 
         # pfMNew_real[qpidx] = -ratio * PfM_real[qpidx]
         pf_m_new_real[qpidx] = -ratio * pf_m_real[qpidx]
     end
+end
+
+function calculate_new_pf_m2_ip_real(
+    ma::Int,
+    s::Int,
+    ele_idx::Vector{Int},
+    qp_start::Int,
+    qp_end::Int,
+    data::ExpertModeData,
+    state::VMCOptimizationState,
+)::Float64
+    if data.qp_weights === nothing
+        @error "Quantum projection weights not initialized. Call init_qp_weight!(data) first."
+        return 0.0
+    end
+
+    n_site = data.modpara.nsite
+    n_elec = data.modpara.nelec
+    n_size = 2 * n_elec
+    n_site2 = 2 * n_site
+    msa = ma + s * n_elec
+    rsa = ele_idx[msa+1] + s * n_site
+
+    slater_elm_real = state.slater_matrix.slater_elm_real
+    inv_m_real = state.slater_matrix.inv_m_real
+    pf_m_real = state.slater_matrix.pf_m_real
+    qp_full_weight::Vector{ComplexF64} = data.qp_weights.qp_full_weight
+    qp_count = qp_end - qp_start
+    if qp_count == 0
+        return 0.0
+    end
+    @boundscheck begin
+        if qp_start < 1 || qp_count < 0 || qp_end > length(pf_m_real) + 1 ||
+           qp_end > length(qp_full_weight) + 1
+            throw(BoundsError(pf_m_real, qp_start:(qp_end-1)))
+        end
+        max_qp = qp_end - 1
+        required_inv_len = (max_qp - 1) * n_size * n_size + (msa + 1) * n_size
+        required_slt_len = (max_qp - 1) * n_site2 * n_site2 + (rsa + 1) * n_site2
+        if length(ele_idx) < n_size ||
+           length(inv_m_real) < required_inv_len ||
+           length(slater_elm_real) < required_slt_len
+            throw(BoundsError())
+        end
+    end
+
+    ip = 0.0
+    for qpidx = qp_start:(qp_end-1)
+        ratio = 0.0
+        inv_base = (qpidx - 1) * n_size * n_size + msa * n_size
+        slt_base = (qpidx - 1) * n_site2 * n_site2 + rsa * n_site2
+        slt_row = slt_base + 1
+        @inbounds for msj = 1:n_elec
+            ratio += inv_m_real[inv_base+msj] * slater_elm_real[slt_row+ele_idx[msj]]
+        end
+        @inbounds for msj = (n_elec+1):n_size
+            ratio += inv_m_real[inv_base+msj] *
+                     slater_elm_real[slt_row+ele_idx[msj]+n_site]
+        end
+        @inbounds ip += real(qp_full_weight[qpidx]) * (-ratio * pf_m_real[qpidx])
+    end
+
+    return ip
 end
 
 """

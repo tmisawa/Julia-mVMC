@@ -109,6 +109,7 @@ function vmc_para_opt!(
     # Use NSRCG flag from modpara.def (C implementation uses NSRCG global variable)
     n_sr_cg = data.modpara.nsrcg  # 0 = direct solver (LAPACK), !=0 = CG solver
     all_complex = get_all_complex_flag(data)
+    weightavg_diag_timer = ctimer_if_env(timer, "MVMC_WEIGHTAVG_DIAG")
     # i_flg_orbital_general: 0 = sz conserved, non-zero = general (fsz)
     i_flg_orbital_general = data.i_flg_orbital_general
     n_proj_bf = 0  # BackFlow only; DH is a normal projection family in NProj.
@@ -273,19 +274,28 @@ function vmc_para_opt!(
         # [21] WeightAverage: WeightAverageWE + [25 SR] + ReduceCounter, with
         # [25] nested inside [21] exactly as in C (vmcmain.c:419-436).
         ctimer_start!(timer, 21)
+        ctimer_start!(weightavg_diag_timer, 960)
         # 5. Weighted averages
-        weight_average_we!(ctx, state)
+        weight_average_we!(ctx, state, weightavg_diag_timer)
 
         ctimer_start!(timer, 25)
         if !all_complex
-            weight_average_sr_opt_real!(ctx, state; nsrcg = data.modpara.nsrcg != 0)
+            weight_average_sr_opt_real!(
+                ctx,
+                state,
+                weightavg_diag_timer;
+                nsrcg = data.modpara.nsrcg != 0,
+            )
         else
-            weight_average_sr_opt!(ctx, state)
+            weight_average_sr_opt!(ctx, state, weightavg_diag_timer)
         end
         ctimer_stop!(timer, 25)
 
         # 6. Reduce counters (C ReduceCounter(comm_child2); serial is no-op)
+        ctimer_start!(weightavg_diag_timer, 966)
         reduce_counter!(ctx, state)
+        ctimer_stop!(weightavg_diag_timer, 966)
+        ctimer_stop!(weightavg_diag_timer, 960)
         ctimer_stop!(timer, 21)
 
         # [22] outputData (C vmcmain.c:437-440)
