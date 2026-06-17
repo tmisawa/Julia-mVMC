@@ -324,12 +324,60 @@ end
 mutable struct VMCMainCalScratch
     proj_cnt_new::Vector{Int}
     pf_m_new_real::Vector{Float64}
+    sample_ele_idx::Vector{Int}
+    sample_ele_cfg::Vector{Int}
+    sample_ele_num::Vector{Int}
+    sample_ele_proj_cnt::Vector{Int}
+    sample_ele_spn::Vector{Int}
+    slater_buffer::Vector{ComplexF64}
+    slater_trans_orb_idx::Vector{Int}
+    slater_trans_orb_sgn::Vector{Int}
+    calh1_transfer_ri::Vector{Int}
+    calh1_transfer_rj::Vector{Int}
+    calh1_transfer_spin::Vector{Int}
+    calh1_transfer_value::Vector{Float64}
+    calh1_transfer_source_len::Int
+    calh1_transfer_n_site::Int
+    calh1_gutz_site_value::Vector{Float64}
+    calh1_jastrow_pair_value::Vector{Float64}
+    calh1_projection_n_site::Int
+    calh1_projection_n_gutzwiller::Int
+    calh1_projection_n_jastrow::Int
+    calh1_thread_ele_idx::Vector{Vector{Int}}
+    calh1_thread_ele_num::Vector{Vector{Int}}
+    calh1_thread_proj_cnt_new::Vector{Vector{Int}}
+    calh1_thread_pf_m_new_real::Vector{Vector{Float64}}
+    calh1_thread_acc::Vector{Float64}
 end
 
 function VMCMainCalScratch(state::VMCOptimizationState)
     return VMCMainCalScratch(
         zeros(Int, length(state.electron_config.tmp_ele_proj_cnt)),
         zeros(Float64, length(state.slater_matrix.pf_m_real)),
+        zeros(Int, length(state.electron_config.tmp_ele_idx)),
+        zeros(Int, length(state.electron_config.tmp_ele_cfg)),
+        zeros(Int, length(state.electron_config.tmp_ele_num)),
+        zeros(Int, length(state.electron_config.tmp_ele_proj_cnt)),
+        zeros(Int, length(state.electron_config.tmp_ele_spn)),
+        ComplexF64[],
+        Int[],
+        Int[],
+        Int[],
+        Int[],
+        Int[],
+        Float64[],
+        -1,
+        -1,
+        Float64[],
+        Float64[],
+        -1,
+        -1,
+        -1,
+        Vector{Int}[],
+        Vector{Int}[],
+        Vector{Int}[],
+        Vector{Float64}[],
+        Float64[],
     )
 end
 
@@ -370,9 +418,18 @@ mutable struct VMCThreadAccumulator
     counter::VMCCounterAccumulator
     main_cal_scratch::VMCMainCalScratch
     timer::CTimer
+    all_complex::Bool
+    use_sr_store::Bool
+    nsrcg::Bool
 end
 
-function VMCThreadAccumulator(state::VMCOptimizationState, parent_timer::CTimer = CTIMER_DISABLED)
+function VMCThreadAccumulator(
+    state::VMCOptimizationState,
+    parent_timer::CTimer = CTIMER_DISABLED;
+    all_complex::Bool = isempty(state.sr_opt.sr_opt_oo_real),
+    use_sr_store::Bool = false,
+    nsrcg::Bool = false,
+)
     return VMCThreadAccumulator(
         VMCEnergyAccumulator(),
         VMCSROptAccumulator(state.sr_opt),
@@ -380,7 +437,225 @@ function VMCThreadAccumulator(state::VMCOptimizationState, parent_timer::CTimer 
         VMCCounterAccumulator(length(state.electron_config.counter)),
         VMCMainCalScratch(state),
         CTimer(ctimer_enabled(parent_timer)),
+        all_complex,
+        use_sr_store,
+        nsrcg,
     )
+end
+
+function _resize_only!(v::Vector, n::Integer)
+    n_int = Int(n)
+    if length(v) == n_int
+        return false
+    end
+    resize!(v, n_int)
+    return true
+end
+
+function _resize_fill!(v::Vector{T}, n::Integer, value::T) where {T}
+    _resize_only!(v, n)
+    fill!(v, value)
+    return v
+end
+
+@inline function _zero_tail!(v::Vector{T}, first_tail::Integer, value::T) where {T}
+    first = Int(first_tail)
+    if first <= length(v)
+        fill!(@view(v[first:end]), value)
+    end
+    return v
+end
+
+@inline function _maincal_active_sr_opt_oo_length(
+    sr::SROptData;
+    all_complex::Bool,
+    nsrcg::Bool,
+)
+    if all_complex
+        size_2 = 2 * sr.sr_opt_size
+        return nsrcg ? 2 * size_2 : size_2 * size_2
+    end
+    return nsrcg ? 2 * sr.sr_opt_size : sr.sr_opt_size * sr.sr_opt_size
+end
+
+function _resize_sropt_accumulator!(acc::VMCSROptAccumulator, sr::SROptData)
+    changed = false
+    changed |= _resize_only!(acc.sr_opt_oo, length(sr.sr_opt_oo))
+    changed |= _resize_only!(acc.sr_opt_ho, length(sr.sr_opt_ho))
+    changed |= _resize_only!(acc.sr_opt_o, length(sr.sr_opt_o))
+    changed |= _resize_only!(acc.sr_opt_o_store, length(sr.sr_opt_o_store))
+    changed |= _resize_only!(acc.sr_opt_oo_real, length(sr.sr_opt_oo_real))
+    changed |= _resize_only!(acc.sr_opt_ho_real, length(sr.sr_opt_ho_real))
+    changed |= _resize_only!(acc.sr_opt_o_real, length(sr.sr_opt_o_real))
+    changed |= _resize_only!(acc.sr_opt_o_store_real, length(sr.sr_opt_o_store_real))
+    return changed
+end
+
+function reset_sropt_accumulator_for_maincal!(
+    acc::VMCSROptAccumulator,
+    sr::SROptData;
+    all_complex::Bool,
+    use_sr_store::Bool,
+    nsrcg::Bool = false,
+    use_sr_opt::Bool = true,
+)
+    if !use_sr_opt
+        return clear_sropt_accumulator!(acc)
+    end
+
+    # Store mode overwrites the active OO range in finalize_oo_store*!.
+    # Keep the store buffer zeroed for skipped samples and keep the inactive
+    # tail zero so real->complex SR conversion never observes stale values.
+    if all_complex
+        if use_sr_store
+            fill!(acc.sr_opt_ho, 0.0 + 0.0im)
+            fill!(acc.sr_opt_o_store, 0.0 + 0.0im)
+            active = min(
+                _maincal_active_sr_opt_oo_length(sr; all_complex = true, nsrcg = nsrcg),
+                length(acc.sr_opt_oo),
+            )
+            _zero_tail!(acc.sr_opt_oo, active + 1, 0.0 + 0.0im)
+        else
+            fill!(acc.sr_opt_oo, 0.0 + 0.0im)
+            fill!(acc.sr_opt_ho, 0.0 + 0.0im)
+        end
+    else
+        if use_sr_store
+            fill!(acc.sr_opt_ho_real, 0.0)
+            fill!(acc.sr_opt_o_store_real, 0.0)
+            active = min(
+                _maincal_active_sr_opt_oo_length(sr; all_complex = false, nsrcg = nsrcg),
+                length(acc.sr_opt_oo_real),
+            )
+            _zero_tail!(acc.sr_opt_oo_real, active + 1, 0.0)
+        else
+            fill!(acc.sr_opt_oo_real, 0.0)
+            fill!(acc.sr_opt_ho_real, 0.0)
+        end
+    end
+    return acc
+end
+
+function reset_phys_accumulator!(acc::VMCPhysAccumulator, ::Nothing)
+    _resize_fill!(acc.local_cis_ajs, 0, 0.0 + 0.0im)
+    _resize_fill!(acc.phys_cis_ajs, 0, 0.0 + 0.0im)
+    _resize_fill!(acc.phys_cis_ajs_ckt_alt, 0, 0.0 + 0.0im)
+    _resize_fill!(acc.local_cis_ajs_ckt_alt_dc, 0, 0.0 + 0.0im)
+    _resize_fill!(acc.phys_cis_ajs_ckt_alt_dc, 0, 0.0 + 0.0im)
+    return acc
+end
+
+function reset_phys_accumulator!(acc::VMCPhysAccumulator, phys::PhysicalQuantities)
+    _resize_fill!(acc.local_cis_ajs, length(phys.local_cis_ajs), 0.0 + 0.0im)
+    _resize_fill!(acc.phys_cis_ajs, length(phys.phys_cis_ajs), 0.0 + 0.0im)
+    _resize_fill!(
+        acc.phys_cis_ajs_ckt_alt,
+        length(phys.phys_cis_ajs_ckt_alt),
+        0.0 + 0.0im,
+    )
+    _resize_fill!(
+        acc.local_cis_ajs_ckt_alt_dc,
+        length(phys.local_cis_ajs_ckt_alt_dc),
+        0.0 + 0.0im,
+    )
+    _resize_fill!(
+        acc.phys_cis_ajs_ckt_alt_dc,
+        length(phys.phys_cis_ajs_ckt_alt_dc),
+        0.0 + 0.0im,
+    )
+    return acc
+end
+
+function reset_counter_accumulator!(acc::VMCCounterAccumulator, n_counter::Integer)
+    _resize_fill!(acc.counter, Int(n_counter), 0)
+    return acc
+end
+
+function reset_main_cal_scratch!(scratch::VMCMainCalScratch, state::VMCOptimizationState)
+    _resize_only!(scratch.proj_cnt_new, length(state.electron_config.tmp_ele_proj_cnt))
+    _resize_only!(scratch.pf_m_new_real, length(state.slater_matrix.pf_m_real))
+    _resize_only!(scratch.sample_ele_idx, length(state.electron_config.tmp_ele_idx))
+    _resize_only!(scratch.sample_ele_cfg, length(state.electron_config.tmp_ele_cfg))
+    _resize_only!(scratch.sample_ele_num, length(state.electron_config.tmp_ele_num))
+    _resize_only!(scratch.sample_ele_proj_cnt, length(state.electron_config.tmp_ele_proj_cnt))
+    _resize_only!(scratch.sample_ele_spn, length(state.electron_config.tmp_ele_spn))
+
+    # Rebuild the transfer cache each MainCal pass. The Hamiltonian is normally
+    # fixed, but invalidating here preserves the pre-reuse semantics if terms are
+    # edited between calls on the same state.
+    scratch.calh1_transfer_source_len = -1
+    scratch.calh1_transfer_n_site = -1
+    return scratch
+end
+
+function reset_thread_accumulator!(
+    acc::VMCThreadAccumulator,
+    state::VMCOptimizationState;
+    all_complex::Bool,
+    use_sr_store::Bool,
+    nsrcg::Bool = false,
+    use_sr_opt::Bool = true,
+)
+    same_mode =
+        acc.all_complex == all_complex &&
+        acc.use_sr_store == use_sr_store &&
+        acc.nsrcg == nsrcg
+    resized = _resize_sropt_accumulator!(acc.sr_opt, state.sr_opt)
+
+    clear_energy_accumulator!(acc.energy)
+    if same_mode && !resized
+        reset_sropt_accumulator_for_maincal!(
+            acc.sr_opt,
+            state.sr_opt;
+            all_complex = all_complex,
+            use_sr_store = use_sr_store,
+            nsrcg = nsrcg,
+            use_sr_opt = use_sr_opt,
+        )
+    else
+        clear_sropt_accumulator!(acc.sr_opt)
+    end
+    reset_phys_accumulator!(acc.phys, state.phys_quantities)
+    reset_counter_accumulator!(acc.counter, length(state.electron_config.counter))
+    reset_main_cal_scratch!(acc.main_cal_scratch, state)
+    ctimer_reset!(acc.timer)
+
+    acc.all_complex = all_complex
+    acc.use_sr_store = use_sr_store
+    acc.nsrcg = nsrcg
+    return acc
+end
+
+function main_cal_accumulator!(
+    state::VMCOptimizationState,
+    parent_timer::CTimer = CTIMER_DISABLED;
+    all_complex::Bool = isempty(state.sr_opt.sr_opt_oo_real),
+    use_sr_store::Bool = false,
+    nsrcg::Bool = false,
+    use_sr_opt::Bool = true,
+)
+    cached = state.workspace.main_cal_accumulator
+    if cached isa VMCThreadAccumulator &&
+       ctimer_enabled(cached.timer) == ctimer_enabled(parent_timer)
+        return reset_thread_accumulator!(
+            cached,
+            state;
+            all_complex = all_complex,
+            use_sr_store = use_sr_store,
+            nsrcg = nsrcg,
+            use_sr_opt = use_sr_opt,
+        )
+    end
+
+    acc = VMCThreadAccumulator(
+        state,
+        parent_timer;
+        all_complex = all_complex,
+        use_sr_store = use_sr_store,
+        nsrcg = nsrcg,
+    )
+    state.workspace.main_cal_accumulator = acc
+    return acc
 end
 
 function merge_thread_accumulator!(

@@ -4,6 +4,7 @@ using MVMCExpertModeParsers
 using MVMCExpertModeParsers:
     ExpertModeData,
     ModParaParameters,
+    TransferTerm,
     GutzwillerTerm,
     JastrowTerm,
     ChargeRBMPhysLayerTerm,
@@ -203,6 +204,249 @@ end
     @test alloc == 0
     @test ele_idx == ele_idx_before
     @test ele_num == ele_num_before
+end
+
+@testset "unit/vmc_main_cal: CalHamiltonian1 real fast path" begin
+    data = ExpertModeData()
+    data.modpara = ModParaParameters(nsite = 2, nelec = 1, complex_flag = 0)
+    data.qp_weights = MVMCExpertModeParsers.QuantumProjectionWeights()
+    data.qp_weights.qp_full_weight = ComplexF64[1.0 + 0.0im]
+    data.transfer_terms = [
+        TransferTerm(0, 1, 0.7 + 0.0im, :up),
+        TransferTerm(1, 0, -0.4 + 0.0im, :down),
+        TransferTerm(0, 1, 0.2 + 0.0im, :both),
+    ]
+
+    state = MVMCOptimizers.VMCOptimizationState(2, 1, 0, 0, 1, 1, false, false)
+    state.slater_matrix.inv_m_real[1:4] .= [0.5, -0.25, 0.125, 0.75]
+    state.slater_matrix.pf_m_real[1] = 2.0
+    state.slater_matrix.slater_elm_real .= [
+        0.2,
+        -0.1,
+        0.4,
+        0.7,
+        0.3,
+        0.9,
+        -0.2,
+        0.5,
+        -0.6,
+        0.8,
+        0.1,
+        -0.4,
+        0.45,
+        -0.35,
+        0.25,
+        0.15,
+    ]
+
+    ele_idx = [1, 0]
+    ele_cfg = [-1, 0, 0, -1]
+    ele_num = [0, 1, 1, 0]
+    ele_proj_cnt = Int[]
+    ip = ComplexF64(MVMCOptimizers.calculate_ip_real(
+        state.slater_matrix.pf_m_real,
+        1,
+        2,
+        data,
+    ), 0.0)
+
+    expected = MVMCOptimizers.calculate_hamiltonian(
+        ip,
+        copy(ele_idx),
+        copy(ele_cfg),
+        copy(ele_num),
+        ele_proj_cnt,
+        data,
+        state;
+        all_complex = false,
+    )
+    scratch = MVMCOptimizers.VMCMainCalScratch(state)
+    actual = MVMCOptimizers.calculate_hamiltonian(
+        ip,
+        copy(ele_idx),
+        copy(ele_cfg),
+        copy(ele_num),
+        ele_proj_cnt,
+        data,
+        state;
+        all_complex = false,
+        main_cal_scratch = scratch,
+    )
+
+    @test actual ≈ expected
+    @test length(scratch.calh1_transfer_value) == 4
+
+    proj_data = deepcopy(data)
+    proj_data.n_gutzwiller_idx = 1
+    proj_data.gutzwiller_idx = [0, 0]
+    proj_data.gutzwiller_terms = [GutzwillerTerm(0, 0.31 + 0.0im, false)]
+    proj_data.n_jastrow_idx = 1
+    proj_data.jastrow_idx = [-1 0; 0 -1]
+    proj_data.jastrow_terms = [JastrowTerm(0, 1, -0.17 + 0.0im, false)]
+    proj_state = MVMCOptimizers.VMCOptimizationState(2, 1, 2, 2, 1, 1, false, false)
+    copyto!(proj_state.slater_matrix.inv_m_real, state.slater_matrix.inv_m_real)
+    copyto!(proj_state.slater_matrix.pf_m_real, state.slater_matrix.pf_m_real)
+    copyto!(proj_state.slater_matrix.slater_elm_real, state.slater_matrix.slater_elm_real)
+    proj_ele_cnt = zeros(Int, 2)
+    MVMCOptimizers.make_proj_cnt!(proj_ele_cnt, ele_num, proj_data)
+
+    expected_proj = MVMCOptimizers.calculate_hamiltonian(
+        ip,
+        copy(ele_idx),
+        copy(ele_cfg),
+        copy(ele_num),
+        proj_ele_cnt,
+        proj_data,
+        proj_state;
+        all_complex = false,
+    )
+    proj_scratch = MVMCOptimizers.VMCMainCalScratch(proj_state)
+    actual_proj = MVMCOptimizers.calculate_hamiltonian(
+        ip,
+        copy(ele_idx),
+        copy(ele_cfg),
+        copy(ele_num),
+        proj_ele_cnt,
+        proj_data,
+        proj_state;
+        all_complex = false,
+        main_cal_scratch = proj_scratch,
+    )
+    @test MVMCOptimizers._calh1_direct_projection_supported(proj_data)
+    @test actual_proj ≈ expected_proj
+
+    threaded_terms = TransferTerm[]
+    for _ = 1:5
+        append!(threaded_terms, data.transfer_terms)
+    end
+    data.transfer_terms = threaded_terms
+    expected_threaded = MVMCOptimizers.calculate_hamiltonian(
+        ip,
+        copy(ele_idx),
+        copy(ele_cfg),
+        copy(ele_num),
+        ele_proj_cnt,
+        data,
+        state;
+        all_complex = false,
+    )
+    threaded_scratch = MVMCOptimizers.VMCMainCalScratch(state)
+    old_inner_threads = get(ENV, "JULIA_MVMC_INNER_THREADS", nothing)
+    ENV["JULIA_MVMC_INNER_THREADS"] = "1"
+    try
+        threaded_actual = MVMCOptimizers.calculate_hamiltonian(
+            ip,
+            copy(ele_idx),
+            copy(ele_cfg),
+            copy(ele_num),
+            ele_proj_cnt,
+            data,
+            state;
+            all_complex = false,
+            main_cal_scratch = threaded_scratch,
+            allow_inner_threads = true,
+        )
+        @test threaded_actual ≈ expected_threaded
+        if Base.Threads.nthreads() > 1
+            @test length(threaded_scratch.calh1_thread_acc) == Base.Threads.maxthreadid()
+        end
+    finally
+        if old_inner_threads === nothing
+            delete!(ENV, "JULIA_MVMC_INNER_THREADS")
+        else
+            ENV["JULIA_MVMC_INNER_THREADS"] = old_inner_threads
+        end
+    end
+end
+
+@testset "unit/vmc_main_cal: slater_elm_diff_fcmp! scratch path" begin
+    data = ExpertModeData()
+    data.modpara = ModParaParameters(
+        nsite = 2,
+        nelec = 1,
+        nmp_trans = 1,
+        nsp_gauss_leg = 1,
+        n_orbital_idx = 4,
+        complex_flag = 1,
+    )
+    data.qp_weights = MVMCExpertModeParsers.QuantumProjectionWeights()
+    data.qp_weights.qp_full_weight = ComplexF64[1.0 + 0.0im]
+    data.qp_weights.spgl_cos_sin = ComplexF64[1.0 + 0.0im]
+    data.qp_weights.spgl_cos_cos = ComplexF64[1.0 + 0.0im]
+    data.qp_weights.spgl_sin_sin = ComplexF64[1.0 + 0.0im]
+    data.qp_trans = [[0, 1]]
+    data.qp_trans_sgn = [[1, 1]]
+    data.orbital_idx_matrix = [0 1; 2 3]
+    data.orbital_sgn = ones(Int, 2, 2)
+
+    state = MVMCOptimizers.VMCOptimizationState(2, 1, 0, 4, 1, 1, true, false)
+    state.slater_matrix.inv_m[1:4] .= ComplexF64[
+        0.5 + 0.1im,
+        -0.25 + 0.2im,
+        0.125 - 0.3im,
+        0.75 + 0.4im,
+    ]
+    state.slater_matrix.pf_m[1] = 2.0 - 0.5im
+
+    ele_idx = [0, 1]
+    ip = 1.5 + 0.25im
+    expected = zeros(ComplexF64, 8)
+    actual = zeros(ComplexF64, 8)
+
+    MVMCOptimizers.slater_elm_diff_fcmp!(expected, ip, ele_idx, data, state)
+    scratch = MVMCOptimizers.VMCMainCalScratch(state)
+    MVMCOptimizers.slater_elm_diff_fcmp!(actual, ip, ele_idx, data, state, scratch)
+
+    @test actual ≈ expected
+    @test length(scratch.slater_buffer) == 4
+    @test length(scratch.slater_trans_orb_idx) == 4
+    @test length(scratch.slater_trans_orb_sgn) == 4
+
+    baseline_alloc = @allocated MVMCOptimizers.slater_elm_diff_fcmp!(
+        expected,
+        ip,
+        ele_idx,
+        data,
+        state,
+    )
+    scratch_alloc = @allocated MVMCOptimizers.slater_elm_diff_fcmp!(
+        actual,
+        ip,
+        ele_idx,
+        data,
+        state,
+        scratch,
+    )
+    @test scratch_alloc < baseline_alloc
+    @test scratch_alloc <= 128
+
+    fast_data = deepcopy(data)
+    fast_data.n_qp_opt_trans = 1
+    fast_data.qp_opt_trans = [[0, 1]]
+    fast_data.qp_opt_trans_sgn = [[1, 1]]
+    fallback_data = deepcopy(fast_data)
+    fallback_data.qp_opt_trans = Vector{Vector{Int}}()
+    fallback_data.qp_opt_trans_sgn = Vector{Vector{Int}}()
+
+    fast_expected = zeros(ComplexF64, 8)
+    fast_actual = zeros(ComplexF64, 8)
+    MVMCOptimizers.slater_elm_diff_fcmp!(
+        fast_expected,
+        ip,
+        ele_idx,
+        fallback_data,
+        state,
+        scratch,
+    )
+    MVMCOptimizers.slater_elm_diff_fcmp!(
+        fast_actual,
+        ip,
+        ele_idx,
+        fast_data,
+        state,
+        scratch,
+    )
+    @test fast_actual ≈ fast_expected
 end
 
 @testset "unit/vmc_main_cal: projection ratio noalloc helper" begin

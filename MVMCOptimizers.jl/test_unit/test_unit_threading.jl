@@ -255,4 +255,71 @@ end
     @test state.electron_config.counter[1] == 5
     @test state.phys_quantities.phys_cis_ajs[1] == 6.0 + 0.0im
     @test parent_timer.elapsed_ns[5] == UInt64(13)
+
+    cached = MO.main_cal_accumulator!(
+        state,
+        parent_timer;
+        all_complex = true,
+        use_sr_store = false,
+        nsrcg = false,
+        use_sr_opt = true,
+    )
+    @test cached === state.workspace.main_cal_accumulator
+    MO.accumulate_energy!(cached.energy, 2.0, 7.0 + 0.0im)
+    MO.record_counter!(cached.counter, 1, 9)
+    cached.sr_opt.sr_opt_oo[1] = 11.0 + 0.0im
+    cached.sr_opt.sr_opt_ho[1] = 12.0 + 0.0im
+    MO.ctimer_add_elapsed!(cached.timer, 4, UInt64(99))
+
+    reused = MO.main_cal_accumulator!(
+        state,
+        parent_timer;
+        all_complex = true,
+        use_sr_store = false,
+        nsrcg = false,
+        use_sr_opt = true,
+    )
+    @test reused === cached
+    @test reused.energy.wc == 0.0 + 0.0im
+    @test all(iszero, reused.counter.counter)
+    @test iszero(reused.sr_opt.sr_opt_oo[1])
+    @test iszero(reused.sr_opt.sr_opt_ho[1])
+    @test reused.timer.elapsed_ns[5] == UInt64(0)
+
+    real_state = MO.VMCOptimizationState(2, 1, 1, 2, 1, 2, false, false)
+    real_acc = MO.main_cal_accumulator!(
+        real_state,
+        parent_timer;
+        all_complex = true,
+        use_sr_store = false,
+        nsrcg = false,
+        use_sr_opt = true,
+    )
+    real_acc.sr_opt.sr_opt_oo[1] = 21.0 + 0.0im
+    real_acc = MO.main_cal_accumulator!(
+        real_state,
+        parent_timer;
+        all_complex = false,
+        use_sr_store = true,
+        nsrcg = false,
+        use_sr_opt = true,
+    )
+    @test iszero(real_acc.sr_opt.sr_opt_oo[1])
+
+    sr_opt_size = real_state.sr_opt.sr_opt_size
+    active_real = sr_opt_size * sr_opt_size
+    real_acc.sr_opt.sr_opt_oo_real[end] = 31.0
+    real_acc.sr_opt.sr_opt_ho_real[1] = 32.0
+    real_acc.sr_opt.sr_opt_o_store_real[1] = 33.0
+    real_acc = MO.main_cal_accumulator!(
+        real_state,
+        parent_timer;
+        all_complex = false,
+        use_sr_store = true,
+        nsrcg = false,
+        use_sr_opt = true,
+    )
+    @test iszero(real_acc.sr_opt.sr_opt_ho_real[1])
+    @test iszero(real_acc.sr_opt.sr_opt_o_store_real[1])
+    @test all(iszero, @view(real_acc.sr_opt.sr_opt_oo_real[(active_real+1):end]))
 end
