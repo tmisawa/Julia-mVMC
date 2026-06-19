@@ -1,5 +1,47 @@
 # Changelog
 
+## v0.4.1 - 2026-06-19
+
+This patch release hardens the experimental MPI sample-parallel path introduced
+in v0.4.0 and improves the real Hubbard optimization kernels. The supported MPI
+scope is unchanged: `VMCParaOpt` with `NSplitSize = 1`, `NSRCG = 0`, direct SR,
+and one software thread per MPI rank.
+
+### Added
+
+- Added CI/site smoke coverage for the Hubbard MPI path alongside the existing
+  Heisenberg and `VMCPhysCal` MPI checks.
+- Added focused MPI failure-mode checks for unsupported `NSRCG != 0` and
+  `NSplitSize > 1` inputs before long computation or rank-divergent collectives.
+- Added gated C-style diagnostic timers for Julia `VMCParaOpt` runs to support
+  kernel-level performance triage without changing the default execution path.
+
+### Changed
+
+- Updated the public version metadata for the in-repo packages
+  `MVMCOptimizers` and `MVMCExpertModeParsers` to `0.4.1`.
+- Reused main-calculation workspaces and optimized real Hubbard kernels,
+  including Slater/Green-function update paths, `CalHamiltonian1`, and
+  WeightAverage active-range handling.
+- Tightened the release benchmark scaffold for Genkai/ohtaka MPI timing,
+  correctness, and launcher checks.
+- Documented the current MPI performance status in
+  <https://github.com/tmisawa/Julia-mVMC/issues/37>.
+
+### Notes
+
+- MPI support remains experimental and limited to `NSplitSize = 1`.
+  C's grouped MPI/QP split (`NSplitSize > 1`) still raises an unsupported-input
+  error.
+- `VMCParaOpt` under MPI still supports the direct SR solver only
+  (`NSRCG = 0`). `NSRCG != 0` under MPI remains rejected pending a separate
+  MPI SR-CG design and C-parity gate.
+- GitHub-generated source ZIP/TAR archives do not include submodule contents.
+  Use `git clone --recurse-submodules https://github.com/tmisawa/Julia-mVMC`
+  for a functional checkout.
+- `PfaPack.jl` and `SFMT.jl` are submodules and remain at their own package
+  version `0.1.0` in this release.
+
 ## v0.4.0 - 2026-06-14
 
 This release adds experimental MPI sample-parallel execution, hardens the

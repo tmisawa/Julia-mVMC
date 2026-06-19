@@ -2,7 +2,7 @@
 
 Julia port of the [mVMC](https://github.com/issp-center-dev/mVMC) (many-variable Variational Monte Carlo) solver for quantum lattice models.
 
-## Status (v0.4)
+## Status (v0.4.1)
 
 | Component | Status | Notes |
 |-----------|--------|-------|
@@ -75,7 +75,7 @@ GPL-3.0-or-later. See [LICENSE](LICENSE) and [THIRD_PARTY_LICENSES.md](THIRD_PAR
 
 See [CITATION.cff](CITATION.cff). Plain-text:
 
-> Misawa, T. (2026). Julia-mVMC v0.4.0. https://github.com/tmisawa/Julia-mVMC
+> Misawa, T. (2026). Julia-mVMC v0.4.1. https://github.com/tmisawa/Julia-mVMC
 
 ## Acknowledgments
 
