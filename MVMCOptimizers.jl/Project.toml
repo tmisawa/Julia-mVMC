@@ -1,6 +1,6 @@
 name = "MVMCOptimizers"
 uuid = "3516085a-728f-4003-a487-32232985ade4"
-version = "0.4.0"
+version = "0.4.1"
 authors = ["Takahiro Misawa <tmisawa@issp.u-tokyo.ac.jp>"]
 
 [deps]
