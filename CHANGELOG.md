@@ -23,7 +23,7 @@ and one software thread per MPI rank.
 - Reused main-calculation workspaces and optimized real Hubbard kernels,
   including Slater/Green-function update paths, `CalHamiltonian1`, and
   WeightAverage active-range handling.
-- Tightened the release benchmark scaffold for Genkai/ohtaka MPI timing,
+- Tightened the release benchmark scaffold for Genkai/Ohtaka MPI timing,
   correctness, and launcher checks.
 - Documented the current MPI performance status in
   <https://github.com/tmisawa/Julia-mVMC/issues/37>.
