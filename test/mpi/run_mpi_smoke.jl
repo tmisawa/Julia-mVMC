@@ -10,6 +10,8 @@ const worker = joinpath(@__DIR__, "mpi_smoke.jl")
 const hubbard_worker = joinpath(@__DIR__, "mpi_hubbard_smoke.jl")
 const physcal_worker = joinpath(@__DIR__, "mpi_physcal_smoke.jl")
 const weight_average_worker = joinpath(@__DIR__, "mpi_weight_average_smoke.jl")
+const srcg_operate_worker = joinpath(@__DIR__, "mpi_srcg_operate_smoke.jl")
+const srcg_e2e_worker = joinpath(@__DIR__, "mpi_srcg_e2e_smoke.jl")
 const failure_worker = joinpath(@__DIR__, "mpi_failure_modes.jl")
 const project = abspath(joinpath(@__DIR__, "..", ".."))
 const para_opt_files = (
@@ -86,15 +88,32 @@ end
     @test count("weight-average worker: non-root rank ok", out) == 1
 end
 
-@testset "v0.4.1 failure mode: NSRCG != 0 is rejected under MPI" begin
-    outdir = mktempdir()
-    out = read(`$(mpiexec()) -n 2 $(Base.julia_cmd()) --project=$project $failure_worker nsrcg $outdir`,
+@testset "v0.5 mpiexec -n 2 SR-CG operate_by_s collective smoke" begin
+    out = read(`$(mpiexec()) -n 2 $(Base.julia_cmd()) --project=$project $srcg_operate_worker`,
                String)
-    @test count("failure-mode worker: nsrcg expected rejection ok", out) == 2
+    @test count("srcg-operate worker: root rank ok", out) == 1
+    @test count("srcg-operate worker: non-root rank ok", out) == 1
+end
+
+@testset "v0.5 mpiexec -n 2 SR-CG e2e C-reference smoke" begin
+    mpi_dir = mktempdir()
+    out = read(`$(mpiexec()) -n 2 $(Base.julia_cmd()) --project=$project $srcg_e2e_worker $mpi_dir`,
+               String)
+    assert_files_present(mpi_dir, para_opt_files)
+    @test isfile(joinpath(mpi_dir, "zvo_SRinfo.dat"))
+    @test count("srcg-e2e worker: root rank ok", out) == 1
+    @test count("srcg-e2e worker: non-root rank ok", out) == 1
+end
+
+@testset "v0.5 failure mode: NSRCG >= 2 rejects before MPI.Init" begin
+    outdir = mktempdir()
+    out = read(`$(mpiexec()) -n 2 $(Base.julia_cmd()) --project=$project $failure_worker nsrcg2 $outdir`,
+               String)
+    @test count("failure-mode worker: nsrcg2 expected rejection ok", out) == 2
     @test isempty(readdir(outdir))
 end
 
-@testset "v0.4.1 failure mode: NSplitSize > 1 rejects before MPI.Init" begin
+@testset "v0.5 failure mode: NSplitSize > 1 rejects before MPI.Init" begin
     outdir = mktempdir()
     out = read(`$(mpiexec()) -n 2 $(Base.julia_cmd()) --project=$project $failure_worker nsplit $outdir`,
                String)

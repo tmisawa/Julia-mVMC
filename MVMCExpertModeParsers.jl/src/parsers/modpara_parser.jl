@@ -160,6 +160,12 @@ function parse_modpara_parameter!(
     elseif name == "NSRCG"
         # NSRCG: 0 = direct solver (LAPACK), !=0 = CG solver
         params.nsrcg = safe_parse_int(value, 0)  # Default is 0 (from C SetDefaultValuesModPara)
+    elseif name == "useDiagScale"
+        # C CG option: diagonal scaling / preconditioned CG
+        params.use_diag_scale = safe_parse_int(value, 0)
+    elseif name == "RescaleSmat"
+        # C CG option: S-matrix rescaling
+        params.rescale_smat = safe_parse_int(value, 0)
 
     # Complex flag
     elseif name == "ComplexType"

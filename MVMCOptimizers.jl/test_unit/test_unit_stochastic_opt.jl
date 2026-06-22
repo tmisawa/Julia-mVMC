@@ -32,6 +32,30 @@ using MVMCExpertModeParsers:
     @test MVMCOptimizers.xdot(p, q) == z
 end
 
+@testset "unit/stochastic_opt: operate_by_s applies sampled product before global correction" begin
+    ws = MVMCOptimizers.CGWorkspace(2, 2, false)
+    ws.stcOs_real .= [1.0 2.0; 3.0 4.0]
+    ws.stcO .= [0.25, -0.5]
+    ws.sdiag .= [2.0, 3.0]
+
+    x = [0.5, -1.0]
+    z = zeros(2)
+
+    MVMCOptimizers.operate_by_s!(
+        z,
+        x,
+        ws,
+        2,
+        2,
+        0.25,
+        0.1,
+        false,
+    )
+
+    @test x == [0.5, -1.0]
+    @test z ≈ [-2.18125, -4.8625] atol = 1e-14
+end
+
 function make_mock_data_for_stochastic_opt_tests()
     data = ExpertModeData()
 

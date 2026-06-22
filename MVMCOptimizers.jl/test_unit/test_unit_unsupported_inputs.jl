@@ -67,6 +67,49 @@ end
     end
 end
 
+@testset "unit/unsupported_inputs: SR-CG option contract" begin
+    @testset "standard direct and CG solvers are accepted" begin
+        @test MVMCOptimizers.validate_supported_modpara(
+            ModParaParameters(nsrcg = 0),
+        ) === nothing
+        @test MVMCOptimizers.validate_supported_modpara(
+            ModParaParameters(nsrcg = 1),
+        ) === nothing
+    end
+
+    @testset "NSRCG >= 2 is rejected with a clear message" begin
+        modpara = ModParaParameters(nsrcg = 2)
+        threw, msg = capture_error_message(
+            () -> MVMCOptimizers.validate_supported_modpara(modpara),
+        )
+        @test threw
+        @test occursin("NSRCG >= 2", msg)
+        @test occursin("standard SR-CG solver", msg)
+    end
+
+    @testset "unported CG submodes are rejected with clear messages" begin
+        for (modpara, label) in (
+            (ModParaParameters(use_diag_scale = 1), "useDiagScale != 0"),
+            (ModParaParameters(rescale_smat = 1), "RescaleSmat != 0"),
+        )
+            threw, msg = capture_error_message(
+                () -> MVMCOptimizers.validate_supported_modpara(modpara),
+            )
+            @test threw
+            @test occursin(label, msg)
+            @test occursin("not supported", msg)
+        end
+    end
+
+    @testset "entry points enforce the CG option contract" begin
+        data = ExpertModeData()
+        data.modpara.nsrcg = 2
+        threw, msg = capture_error_message(() -> vmc_para_opt!(data))
+        @test threw
+        @test occursin("NSRCG >= 2", msg)
+    end
+end
+
 @testset "unit/unsupported_inputs: DoublonHolon complex flag participates in all-complex" begin
     data = ExpertModeData()
     data.doublon_holon_2site_complex = true

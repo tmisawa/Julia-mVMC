@@ -32,27 +32,33 @@ result = run_para_opt_from_namelist(
 
 ## MPI limitations
 
-v0.4 supports `VMCParaOpt` sample-parallel MPI only for `NSplitSize = 1` and
-the direct SR solver (`NSRCG = 0`). Inputs with `NSRCG != 0` select the CG SR
-solver; that path is still serial-only because Julia has not yet ported C's CG
-`operate_by_S` broadcast/allreduce. Run those inputs without MPI, set
-`NSRCG = 0`, or use C-mVMC for MPI CG runs.
+v0.5 development supports `VMCParaOpt` sample-parallel MPI for `NSplitSize = 1`
+with the direct SR solver (`NSRCG = 0`) and the standard SR-CG solver
+(`NSRCG = 1`). The SR-CG path broadcasts the rank0 search vector and allreduces
+the sampled matrix-vector product inside `operate_by_s`, matching C's collective
+structure for `NSplitSize = 1`.
+
+Additional C CG modes are not ported yet: `NSRCG >= 2`, `useDiagScale != 0`,
+and `RescaleSmat != 0` are rejected with clear errors. `NSplitSize > 1` remains
+unsupported because grouped MPI/QP splitting is not implemented.
 
 The CI MPI smoke gate runs under `mpiexec` and checks rank0-only output,
 comm0 reductions, `VMCPhysCal` Green reductions, and failure-mode regressions:
-`NSRCG != 0` under MPI is rejected before the CG path runs, and
-`NSplitSize > 1` is rejected before MPI context construction. This is a
+SR-CG `operate_by_s` collectives and a one-step `NSRCG = 1` C-reference
+comparison are exercised under `mpiexec -n 2`, while `NSRCG >= 2` and
+`NSplitSize > 1` are rejected before MPI context construction. This is a
 correctness smoke gate, not a performance or site-compatibility benchmark.
 
-## Serial NSRCG=1 coverage
+## NSRCG=1 coverage
 
-Serial `NSRCG = 1` runs are supported and covered by a one-step C reference
-fixture (`heisenberg_chain_real_nsrcg`). The first `zvo_out.dat` row uses the
-same tight energy/Sz tolerances as the standard fixtures. The post-CG parameter
-update is a tolerance gate (`NSRCG_PARAM_TOL = 1e-2` in
-[`test/integration/runtests.jl`](../../test/integration/runtests.jl)), not a
-bit-parity gate, because truncated SR-CG amplifies FMA and reduction-order
-differences between C and Julia.
+`NSRCG = 1` runs are supported and covered by one-step C reference fixtures
+(`heisenberg_chain_real_nsrcg`) for serial execution and `mpiexec -n 2`. The
+first `zvo_out.dat` row uses the same tight energy/Sz tolerances as the
+standard fixtures. The post-CG parameter update is a tolerance gate
+(`NSRCG_PARAM_TOL = 1e-2` in
+[`test/integration/runtests.jl`](../../test/integration/runtests.jl) and the
+matching MPI smoke), not a bit-parity gate, because truncated SR-CG amplifies
+FMA and reduction-order differences between C and Julia.
 
 Returns a `NamedTuple` with `status`, `output_dir`, `zvo_first_n` (first
 `nsteps` raw lines of `zvo_out.dat`), `ctest_values` (the first two

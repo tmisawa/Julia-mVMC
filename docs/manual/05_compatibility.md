@@ -49,10 +49,11 @@ It compares the first 10 SR steps of `zvo_out.dat` against the committed
 C-mVMC outputs with tight tolerances.
 
 The same runner also includes `heisenberg_chain_real_nsrcg`, a serial
-`NSRCG = 1` first-step fixture. Its first `zvo_out.dat` row uses the tight
-energy/Sz tolerances, while the post-CG parameter update uses the documented
-`NSRCG_PARAM_TOL = 1e-2` tolerance because truncated SR-CG is sensitive to
-FMA and reduction-order differences.
+`NSRCG = 1` first-step fixture. The MPI smoke gate runs the same fixture under
+`mpiexec -n 2` against a committed C rank2 reference. The first `zvo_out.dat`
+row uses the tight energy/Sz tolerances, while the post-CG parameter update
+uses the documented `NSRCG_PARAM_TOL = 1e-2` tolerance because truncated SR-CG
+is sensitive to FMA and reduction-order differences.
 
 Julia-mVMC also includes a C ctest-equivalent runner:
 
@@ -149,12 +150,11 @@ are treated as C-compatible.
 - **BackFlow** correlation factor (`vmc_bf_*` entry points raise an error
   in this release; inputs that activate Back Flow are not supported).
 - **Grouped MPI/QP splitting** (`NSplitSize > 1` raises an unsupported-feature
-  error before MPI context construction; v0.4 MPI sample-parallel execution is
+  error before MPI context construction; MPI sample-parallel execution is
   supported with `NSplitSize = 1`).
-- **MPI CG solver** (`NSRCG != 0` under MPI raises an unsupported-feature
-  error; the CG SR solver is currently serial-only because C's
-  `operate_by_S` broadcast/allreduce is not ported yet). The `mpiexec -n 2`
-  smoke gate checks this fail-fast path.
+- **Additional CG modes** (`NSRCG >= 2`, `useDiagScale != 0`, and
+  `RescaleSmat != 0` raise unsupported-feature errors). Standard SR-CG
+  (`NSRCG = 1`) is supported for serial and MPI `NSplitSize = 1` runs.
 - **Full Lanczos** (`NLanczosMode > 0`) — only the step-0 comparison
   matches C. The post-Lanczos eigenvector / overlap pipeline is not
   ported.
