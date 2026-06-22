@@ -152,38 +152,30 @@ using MVMCOptimizers: count_total_parameters, get_parameter_value,
                       set_parameter_value!, pack_parameters, unpack_parameters!
 using MVMCExpertModeParsers
 
-@testset "MPI para-opt rejects NSRCG CG solver before collectives (R1-F1)" begin
+@testset "MPI para-opt accepts standard SR-CG after collective implementation" begin
     fake_mpi_ctx = ParallelContext(true, nothing, nothing, nothing,
                                    0, 2, 0, 1, 0, 2, 0)
     modpara = MVMCExpertModeParsers.ModParaParameters()
     modpara.nsrcg = 1
 
-    err = try
-        MVMCOptimizers.validate_supported_para_opt_parallel_modpara(fake_mpi_ctx, modpara)
-        nothing
-    catch e
-        e
-    end
-    @test err isa ErrorException
-    @test occursin("NSRCG != 0", sprint(showerror, err))
-    @test occursin("operate_by_S broadcast/allreduce", sprint(showerror, err))
+    @test MVMCOptimizers.validate_supported_modpara(modpara) === nothing
+    @test MVMCOptimizers.validate_supported_para_opt_parallel_modpara(
+        fake_mpi_ctx, modpara) === nothing
 
     serial_modpara = MVMCExpertModeParsers.ModParaParameters()
     serial_modpara.nsrcg = 1
     @test MVMCOptimizers.validate_supported_para_opt_parallel_modpara(
         serial_context(), serial_modpara) === nothing
 
-    # Direct API also fails before RNG seeding / MPI collectives / data-shape work.
-    data = MVMCExpertModeParsers.ExpertModeData()
-    data.modpara.nsrcg = 1
+    modpara.nsrcg = 2
     err = try
-        MVMCOptimizers.vmc_para_opt!(data; ctx = fake_mpi_ctx)
+        MVMCOptimizers.validate_supported_modpara(modpara)
         nothing
     catch e
         e
     end
     @test err isa ErrorException
-    @test occursin("NSRCG != 0", sprint(showerror, err))
+    @test occursin("NSRCG >= 2", sprint(showerror, err))
 end
 
 @testset "ModPara rnd_seed default matches C readdef.c:1967 (review F2)" begin

@@ -319,7 +319,7 @@ function vmc_para_opt!(
         ctimer_start!(timer, 5)
         # 8. Stochastic optimization
         if n_sr_cg != 0
-            info = stochastic_opt_cg!(data, state, timer)
+            info = stochastic_opt_cg!(data, state, timer, ctx, output_dir)
         else
             info = stochastic_opt!(data, state, timer)
         end
