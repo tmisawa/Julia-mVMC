@@ -22,10 +22,6 @@ Currently rejected:
 - `NSplitSize < 1` (i.e. `0` or negative): invalid value. NSplitSize is a
   process-split count and must be at least 1. Thrown as `ArgumentError`,
   matching the codebase convention for invalid parameter *values*.
-- `NSplitSize > 1`: C's grouped MPI/QP split by `NSplitSize` is not yet
-  implemented in Julia-mVMC. Multi-rank MPI sample parallel runs are supported
-  only with `NSplitSize = 1`. Thrown as `error(...)` / `ErrorException`,
-  matching the codebase's unsupported-*feature* convention (the BackFlow stubs).
 - `NLanczosMode > 0`: full Lanczos is not supported (only the step-0
   comparison matches C; the post-Lanczos eigenvector / overlap pipeline is
   not ported — see `docs/manual/05_compatibility.md`). Rejected early because
@@ -37,9 +33,9 @@ Currently rejected:
 - `useDiagScale != 0`: C's preconditioned CG mode is not ported yet.
 - `RescaleSmat != 0`: C's S-matrix rescaling mode is not ported yet.
 
-`NSplitSize = 1`, `NLanczosMode = 0`, and `NSRCG <= 1` are the supported
-settings. The fields are parsed for input-format fidelity; `NSplitSize = 1`
-supports both serial execution and MPI sample-parallel execution.
+`NSplitSize >= 1`, `NLanczosMode = 0`, and `NSRCG <= 1` are the globally
+valid settings. Entry-point-specific validators below reject combinations that
+are still unsupported for parameter optimization or physical measurement.
 """
 function validate_supported_modpara(modpara::ModParaParameters)
     if modpara.nsplit_size < 1
@@ -47,15 +43,6 @@ function validate_supported_modpara(modpara::ModParaParameters)
             ArgumentError(
                 "NSplitSize must be >= 1; got NSplitSize = $(modpara.nsplit_size).",
             ),
-        )
-    elseif modpara.nsplit_size > 1
-        error(
-            "NSplitSize > 1 is not supported: grouped MPI/QP splitting by " *
-            "NSplitSize is not implemented in Julia-mVMC " *
-            "(got NSplitSize = $(modpara.nsplit_size)). " *
-            "Set NSplitSize = 1 for serial or supported multi-rank MPI " *
-            "sample-parallel runs, or fall back to the C reference at " *
-            "https://github.com/issp-center-dev/mVMC.",
         )
     end
     if modpara.lanczos_mode > 0
@@ -98,6 +85,67 @@ function validate_supported_modpara(modpara::ModParaParameters)
 end
 
 """
+    validate_supported_para_opt_modpara(modpara)
+
+Validate parameter-optimization-only ModPara combinations.
+
+`NSplitSize > 1` is supported for the direct SR solver (`NSRCG = 0`) by
+splitting VMC samples inside each comm1 group. SR-CG remains restricted to
+`NSplitSize = 1` until its sampled matrix-vector product is made comm1-aware.
+"""
+function validate_supported_para_opt_modpara(modpara::ModParaParameters)
+    if modpara.nsplit_size > 1 && modpara.nsrcg != 0
+        error(
+            "NSplitSize > 1 with SR-CG is not supported: sample splitting by " *
+            "NSplitSize is currently implemented only for the direct SR solver " *
+            "(NSRCG = 0), got NSplitSize = $(modpara.nsplit_size), " *
+            "NSRCG = $(modpara.nsrcg). Set NSRCG = 0 or NSplitSize = 1.",
+        )
+    end
+    return nothing
+end
+
+"""
+    validate_supported_para_opt_data(data)
+
+Validate parameter-optimization settings that require parsed data, not just
+ModPara. The initial `NSplitSize > 1` implementation supports a single full
+QP sector per sample; grouped QP-split sampling is intentionally left out.
+"""
+function validate_supported_para_opt_data(data::ExpertModeData)
+    n_qp_full = get_n_qp_full(data)
+    if data.modpara.nsplit_size > 1 && n_qp_full > 1
+        error(
+            "NSplitSize > 1 with NQPFull > 1 is not supported: grouped " *
+            "QP-split sampling is not implemented in Julia-mVMC " *
+            "(got NSplitSize = $(data.modpara.nsplit_size), " *
+            "NQPFull = $n_qp_full). Use NSplitSize = 1, or use an input with " *
+            "NQPFull = 1 for the direct SR sample-split path.",
+        )
+    end
+    return nothing
+end
+
+"""
+    validate_supported_phys_cal_modpara(modpara)
+
+Validate physical-measurement-only ModPara combinations.
+
+`NSplitSize > 1` is implemented for parameter optimization first. Physical
+measurement still runs through the existing `NSplitSize = 1` path.
+"""
+function validate_supported_phys_cal_modpara(modpara::ModParaParameters)
+    if modpara.nsplit_size > 1
+        error(
+            "NSplitSize > 1 is not supported for PhysCal in Julia-mVMC " *
+            "(got NSplitSize = $(modpara.nsplit_size)). Set NSplitSize = 1 " *
+            "for physical measurement.",
+        )
+    end
+    return nothing
+end
+
+"""
     validate_supported_para_opt_parallel_modpara(ctx, modpara)
 
 Validate parameter-optimization settings whose MPI path has extra constraints.
@@ -111,5 +159,6 @@ function validate_supported_para_opt_parallel_modpara(
     ctx::ParallelContext,
     modpara::ModParaParameters,
 )
+    validate_supported_para_opt_modpara(modpara)
     return nothing
 end

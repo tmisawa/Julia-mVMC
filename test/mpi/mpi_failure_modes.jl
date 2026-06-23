@@ -4,12 +4,12 @@
 #
 # Modes:
 #   nsrcg2 - NSRCG >= 2 must be rejected before MPI.Init().
-#   nsplit - NSplitSize > 1 must be rejected before MPI.Init().
+#   nsplit_srcg - NSplitSize > 1 with SR-CG must be rejected before MPI.Init().
 using MVMCOptimizers
 using MVMCExpertModeParsers
 using MPI
 
-length(ARGS) == 2 || error("usage: mpi_failure_modes.jl <nsrcg2|nsplit> <output_dir>")
+length(ARGS) == 2 || error("usage: mpi_failure_modes.jl <nsrcg2|nsplit_srcg> <output_dir>")
 
 const mode = ARGS[1]
 const outdir = ARGS[2]
@@ -41,25 +41,26 @@ function run_nsrcg2_rejection()
     println("failure-mode worker: nsrcg2 expected rejection ok")
 end
 
-function run_nsplit_rejection()
+function run_nsplit_srcg_rejection()
     data = MVMCExpertModeParsers.parse_expert_mode_files(fixture)
     data.modpara.nsplit_size = 2
+    data.modpara.nsrcg = 1
 
     expect_error_contains(
-        () -> MVMCOptimizers.validate_supported_modpara(data.modpara),
-        ("NSplitSize > 1", "grouped MPI/QP splitting by NSplitSize is not implemented"),
+        () -> MVMCOptimizers.validate_supported_para_opt_modpara(data.modpara),
+        ("NSplitSize > 1 with SR-CG", "NSRCG = 1"),
     )
-    MPI.Initialized() && error("NSplitSize > 1 rejection should happen before MPI.Init()")
-    println("failure-mode worker: nsplit expected rejection ok")
+    MPI.Initialized() && error("NSplitSize > 1 with SR-CG rejection should happen before MPI.Init()")
+    println("failure-mode worker: nsplit_srcg expected rejection ok")
 end
 
 try
     if mode == "nsrcg2"
         run_nsrcg2_rejection()
-    elseif mode == "nsplit"
-        run_nsplit_rejection()
+    elseif mode == "nsplit_srcg"
+        run_nsplit_srcg_rejection()
     else
-        error("unknown mode '$mode'; expected nsrcg2 or nsplit")
+        error("unknown mode '$mode'; expected nsrcg2 or nsplit_srcg")
     end
 catch err
     @error "mpi_failure_modes worker failed" exception = (err, catch_backtrace())

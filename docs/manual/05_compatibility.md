@@ -149,12 +149,13 @@ are treated as C-compatible.
 
 - **BackFlow** correlation factor (`vmc_bf_*` entry points raise an error
   in this release; inputs that activate Back Flow are not supported).
-- **Grouped MPI/QP splitting** (`NSplitSize > 1` raises an unsupported-feature
-  error before MPI context construction; MPI sample-parallel execution is
-  supported with `NSplitSize = 1`).
+- **Grouped QP splitting** (`NSplitSize > 1` with `NQPFull > 1` raises an
+  unsupported-feature error). Direct-SR `VMCParaOpt` sample splitting is
+  supported for `NSplitSize >= 1` only when `NQPFull = 1`.
 - **Additional CG modes** (`NSRCG >= 2`, `useDiagScale != 0`, and
   `RescaleSmat != 0` raise unsupported-feature errors). Standard SR-CG
-  (`NSRCG = 1`) is supported for serial and MPI `NSplitSize = 1` runs.
+  (`NSRCG = 1`) is supported for serial and MPI `NSplitSize = 1` runs, but
+  remains unsupported with `NSplitSize > 1`.
 - **Full Lanczos** (`NLanczosMode > 0`) — only the step-0 comparison
   matches C. The post-Lanczos eigenvector / overlap pipeline is not
   ported.

@@ -16,23 +16,55 @@ function capture_error_message(f)
 end
 
 @testset "unit/unsupported_inputs: NSplitSize contract" begin
-    # NSplitSize = 1 remains accepted for both serial and v0.4 MPI
-    # sample-parallel runs: the validator is a no-op returning `nothing`.
+    # NSplitSize = 1 remains accepted for both serial and MPI sample-parallel
+    # runs: the global validator is a no-op returning `nothing`.
     @testset "NSplitSize = 1 is accepted" begin
         modpara = ModParaParameters(nsplit_size = 1)
         @test MVMCOptimizers.validate_supported_modpara(modpara) === nothing
     end
 
-    # NSplitSize > 1 is rejected. The message must name both the offending
-    # input and the missing capability so users know why and what to do.
-    @testset "NSplitSize > 1 is rejected with a clear message" begin
-        modpara = ModParaParameters(nsplit_size = 2)
+    @testset "NSplitSize > 1 is accepted for direct para-opt" begin
+        modpara = ModParaParameters(nsplit_size = 2, nsrcg = 0)
+        @test MVMCOptimizers.validate_supported_modpara(modpara) === nothing
+        @test MVMCOptimizers.validate_supported_para_opt_modpara(modpara) === nothing
+        @test MVMCOptimizers.validate_supported_para_opt_parallel_modpara(
+            serial_context(),
+            modpara,
+        ) === nothing
+    end
+
+    @testset "NSplitSize > 1 with SR-CG is rejected for para-opt" begin
+        modpara = ModParaParameters(nsplit_size = 2, nsrcg = 1)
+        @test MVMCOptimizers.validate_supported_modpara(modpara) === nothing
         threw, msg = capture_error_message(
-            () -> MVMCOptimizers.validate_supported_modpara(modpara),
+            () -> MVMCOptimizers.validate_supported_para_opt_modpara(modpara),
+        )
+        @test threw
+        @test occursin("NSplitSize > 1 with SR-CG", msg)
+        @test occursin("NSRCG = 1", msg)
+    end
+
+    @testset "NSplitSize > 1 is rejected for PhysCal" begin
+        modpara = ModParaParameters(nsplit_size = 2)
+        @test MVMCOptimizers.validate_supported_modpara(modpara) === nothing
+        threw, msg = capture_error_message(
+            () -> MVMCOptimizers.validate_supported_phys_cal_modpara(modpara),
         )
         @test threw
         @test occursin("NSplitSize > 1", msg)
-        @test occursin("grouped MPI/QP splitting by NSplitSize is not implemented", msg)
+        @test occursin("PhysCal", msg)
+    end
+
+    @testset "NSplitSize > 1 with NQPFull > 1 is rejected for para-opt" begin
+        data = ExpertModeData()
+        data.modpara.nsplit_size = 2
+        data.modpara.nmp_trans = 2
+        threw, msg = capture_error_message(
+            () -> MVMCOptimizers.validate_supported_para_opt_data(data),
+        )
+        @test threw
+        @test occursin("NSplitSize > 1 with NQPFull > 1", msg)
+        @test occursin("NQPFull = 2", msg)
     end
 
     # NSplitSize < 1 (0 or negative) is an invalid value: a process-split
@@ -46,24 +78,29 @@ end
             )
             @test threw
             @test occursin(">= 1", msg)
-            # It must not be mislabeled as the unsupported grouped-MPI case.
-            @test !occursin("grouped MPI/QP splitting by NSplitSize is not implemented", msg)
+            # It must not be mislabeled as an unsupported feature combination.
+            @test !occursin("NSplitSize > 1 with", msg)
         end
     end
 
-    # The contract is enforced at the independent runtime entry points, before
-    # any optimization or physical calculation proceeds. A default
-    # ExpertModeData is enough because the guard is the first statement in each
-    # entry point, so it fails fast regardless of the rest of the input.
+    # Unsupported combinations are enforced at the independent runtime entry
+    # points before any optimization or physical calculation proceeds. A default
+    # ExpertModeData is enough because the guards run before input-dependent
+    # state construction.
     @testset "entry points enforce the contract" begin
-        for entry in (vmc_para_opt!, vmc_phys_cal!)
-            data = ExpertModeData()
-            data.modpara.nsplit_size = 3
-            threw, msg = capture_error_message(() -> entry(data))
-            @test threw
-            @test occursin("NSplitSize > 1", msg)
-            @test occursin("grouped MPI/QP splitting by NSplitSize is not implemented", msg)
-        end
+        para_data = ExpertModeData()
+        para_data.modpara.nsplit_size = 3
+        para_data.modpara.nsrcg = 1
+        threw, msg = capture_error_message(() -> vmc_para_opt!(para_data))
+        @test threw
+        @test occursin("NSplitSize > 1 with SR-CG", msg)
+
+        phys_data = ExpertModeData()
+        phys_data.modpara.nsplit_size = 3
+        threw, msg = capture_error_message(() -> vmc_phys_cal!(phys_data))
+        @test threw
+        @test occursin("NSplitSize > 1", msg)
+        @test occursin("PhysCal", msg)
     end
 end
 
@@ -133,8 +170,8 @@ end
             )
             @test threw
             @test occursin("NLanczosMode > 0", msg)
-            # Must not be mislabeled as the unsupported grouped-MPI case.
-            @test !occursin("grouped MPI/QP splitting by NSplitSize is not implemented", msg)
+            # Must not be mislabeled as an NSplitSize-specific combination.
+            @test !occursin("NSplitSize > 1 with", msg)
         end
     end
 

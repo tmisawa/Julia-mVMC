@@ -112,13 +112,11 @@ function run_para_opt_from_namelist(namelist_path::AbstractString;
     data = MVMCExpertModeParsers.parse_expert_mode_files(namelist_str)
     ctimer_stop!(c_timer, 11)
 
-    # v0.4: unsupported input の検証は MPI context 構築より前（plan review F4）。
-    # 現行は vmc_para_opt!（vmc_para_opt.jl:83）内でのみ呼ばれるが、R0 で
-    # build_parallel_context を parse 直後へ移すため、invalid な NSplitSize
-    #（< 1、または R0 では > 1 も未 support）で MPI context を作らないよう
-    # ここで先に検証する。vmc_para_opt! 側の既存呼び出しは defense-in-depth
-    # としてそのまま残す（重複呼び出しは無害）。
+    # Validate combinations that can be rejected before MPI context creation.
+    # vmc_para_opt! repeats these checks as defense-in-depth.
     validate_supported_modpara(data.modpara)
+    validate_supported_para_opt_modpara(data.modpara)
+    validate_supported_para_opt_data(data)
 
     # v0.4: MPI context は seed / init_parameter! より前に作る（spec §4.2, F3）。
     ctx = build_parallel_context(data.modpara.nsplit_size)

@@ -45,8 +45,9 @@ function vmc_phys_cal!(
     output_dir::Union{String,Nothing} = nothing,
     ctx::ParallelContext = serial_context(),
 )::Int
-    # Reject unsupported ModPara inputs (e.g. NSplitSize > 1) before any work.
+    # Reject unsupported global / PhysCal combinations before any work.
     validate_supported_modpara(data.modpara)
+    validate_supported_phys_cal_modpara(data.modpara)
     # Reject TwoBodyGEx in FSZ / general-orbital mode before any sampling or RNG
     # side effects (its Green measurement path is not yet wired).
     validate_factored_green_supported(data)
@@ -234,9 +235,9 @@ function vmc_phys_cal!(
         # Main calculation (energy + Green's functions)
         if n_proj_bf == 0
             if i_flg_orbital_general == 0
-                vmc_main_cal!(data, state)  # Will calculate Green's functions if mode=1
+                vmc_main_cal!(data, state, CTIMER_DISABLED, ctx)  # Will calculate Green's functions if mode=1
             else
-                vmc_main_cal_fsz!(data, state)
+                vmc_main_cal_fsz!(data, state, CTIMER_DISABLED, ctx)
             end
         else
             vmc_bf_main_cal!(data, state)

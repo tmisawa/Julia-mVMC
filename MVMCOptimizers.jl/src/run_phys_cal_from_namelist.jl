@@ -70,6 +70,7 @@ function run_phys_cal_from_namelist(
     # 1. Parse expert-mode .def files (relative paths resolved from namelist_path).
     data = MVMCExpertModeParsers.parse_expert_mode_files(namelist_str)
     validate_supported_modpara(data.modpara)
+    validate_supported_phys_cal_modpara(data.modpara)
     ctx = build_parallel_context(data.modpara.nsplit_size)
 
     # 2. Seed the SFMT19937 RNG (C-compatible convention) and pass it to

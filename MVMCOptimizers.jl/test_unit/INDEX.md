@@ -112,8 +112,9 @@
 - `test_unit/test_unit_unsupported_inputs.jl`
   - `unit/unsupported_inputs: NSplitSize contract` → `validate_supported_modpara`
     - `NSplitSize = 1` は許容（serial / MPI sample parallel、`vmc_para_opt!` / `vmc_phys_cal!`）
-    - `NSplitSize > 1` は `error()` で reject（C の grouped MPI/QP split 未サポート）
-    - エラーメッセージに `NSplitSize > 1` と `grouped MPI/QP splitting by NSplitSize is not implemented` を含む
+    - `NSplitSize > 1` は direct `VMCParaOpt` (`NSRCG = 0`) で許容
+    - `NSplitSize > 1` + SR-CG、PhysCal、`NQPFull > 1` は `error()` で reject
+    - エラーメッセージに該当する非対応組み合わせ（SR-CG / PhysCal / NQPFull）を含む
     - 検証は型ではなくメッセージ部分文字列で行う（design review A2）
   - `unit/unsupported_inputs: SR-CG option contract` → `validate_supported_modpara`
     - `NSRCG = 0/1` は許容、`NSRCG >= 2` は reject
