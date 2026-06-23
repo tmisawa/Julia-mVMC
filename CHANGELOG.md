@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.4.2 - 2026-06-23
+
+This patch release adds the next MPI compatibility slice after v0.4.1. It adds
+MPI-compatible standard SR-CG (`NSRCG = 1`) for `NSplitSize = 1` and direct-SR
+grouped sample splitting for `NSplitSize > 1` with `NStore = 0/1` when
+`NQPFull = 1`.
+
+### Added
+
+- Added MPI-compatible standard SR-CG support for `VMCParaOpt` with
+  `NSRCG = 1` and `NSplitSize = 1`, including the C-compatible
+  broadcast/allreduce ordering in `operate_by_s`, rank0 parameter update, and
+  parameter synchronization across ranks.
+- Added direct-SR `NSplitSize > 1` support for `VMCParaOpt` with
+  `NStore = 0/1`, non-FSZ and FSZ paths, and the `NQPFull = 1` scope.
+- Added MPI smoke coverage for serial-vs-MPI `NSRCG = 1` first-step
+  C-reference checks and four-way direct-SR `NSplitSize`/`NStore`
+  self-consistency gates under `mpiexec -n 2/-n 4`.
+
+### Changed
+
+- Updated the public version metadata for the in-repo packages
+  `MVMCOptimizers` and `MVMCExpertModeParsers` to `0.4.2`.
+- Tightened unsupported-input validation for SR-CG split runs, additional CG
+  modes, grouped QP splitting, and `VMCPhysCal` `NSplitSize > 1` before
+  MPI context construction or long-running computation.
+- Updated README and manual compatibility notes for the v0.4.2 MPI scope.
+
+### Notes
+
+- `NSplitSize > 1` support is currently the R1 direct-SR scope:
+  `VMCParaOpt`, `NSRCG = 0`, `NStore = 0/1`, non-FSZ/FSZ, and `NQPFull = 1`.
+  Grouped QP splitting (`NSplitSize > 1` with `NQPFull > 1`) is not ported.
+- Standard SR-CG (`NSRCG = 1`) remains limited to `NSplitSize = 1`.
+  `NSplitSize > 1` with SR-CG, `NSRCG >= 2`, `useDiagScale != 0`, and
+  `RescaleSmat != 0` remain rejected.
+- `VMCPhysCal` still supports only `NSplitSize = 1`.
+- GitHub-generated source ZIP/TAR archives do not include submodule contents.
+  Use `git clone --recurse-submodules https://github.com/tmisawa/Julia-mVMC`
+  for a functional checkout.
+- `PfaPack.jl` and `SFMT.jl` are submodules and remain at their own package
+  version `0.1.0` in this release.
+
 ## v0.4.1 - 2026-06-19
 
 This patch release hardens the experimental MPI sample-parallel path introduced

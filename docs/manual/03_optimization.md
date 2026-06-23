@@ -32,7 +32,7 @@ result = run_para_opt_from_namelist(
 
 ## MPI limitations
 
-v0.5 development supports `VMCParaOpt` sample-parallel MPI with the direct SR
+v0.4.2 supports `VMCParaOpt` sample-parallel MPI with the direct SR
 solver (`NSRCG = 0`) for `NSplitSize >= 1` when each sample uses a single full
 QP sector (`NQPFull = 1`). Non-FSZ and FSZ paths are gated by a four-way
 self-consistency comparison: `(NSplitSize=1, NStore=0/1)` under `mpiexec -n 2`

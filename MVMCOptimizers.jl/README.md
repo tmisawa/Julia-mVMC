@@ -4,7 +4,7 @@
 
 The main VMC optimization package: Stochastic-Reconfiguration parameter optimization (equivalent to C mVMC's `VMCParaOpt()`) and physical-quantity calculation (equivalent to `VMCPhysCal()`). Works against `ExpertModeData` produced by [`MVMCExpertModeParsers.jl`](../MVMCExpertModeParsers.jl), with Pfaffian / inverse routines from [`PfaPack.jl`](../PfaPack.jl) and the C-compatible RNG from [`SFMT.jl`](../SFMT.jl).
 
-## Scope (v0.5 development)
+## Scope (v0.4.2)
 
 - **`VMCParaOpt` (parameter optimization)** — verified against the C reference by strict first-10-step integration checks, C ctest-equivalent gates for supported standard fixtures, and `NSRCG = 1` first-step tolerance gates for serial and `mpiexec -n 2`; see the integration tests at `../test/integration/` and MPI smokes at `../test/mpi/`.
 - **`VMCPhysCal` (physical-quantity calculation)** — experimental. One-body (`zvo_cisajs`), direct two-body (`TwoBodyG` → `zvo_cisajscktalt`), and factored/product two-body (`TwoBodyGEx`/`greentwoex.def` → `zvo_cisajscktaltex`) Green functions are supported (factored is non-FSZ), including DH2/DH4-present fixtures, and gated against C references via [`../test/integration/phys_cal_equivalent.jl`](../test/integration/phys_cal_equivalent.jl); run through [`run_phys_cal_from_namelist`](src/run_phys_cal_from_namelist.jl). See [`../docs/manual/04_physics_calc.md`](../docs/manual/04_physics_calc.md).
