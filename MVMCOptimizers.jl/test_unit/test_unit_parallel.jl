@@ -167,6 +167,27 @@ using MVMCExpertModeParsers
     @test MVMCOptimizers.validate_supported_para_opt_parallel_modpara(
         serial_context(), serial_modpara) === nothing
 
+    split_direct_modpara = MVMCExpertModeParsers.ModParaParameters()
+    split_direct_modpara.nsplit_size = 2
+    split_direct_modpara.nsrcg = 0
+    @test MVMCOptimizers.validate_supported_modpara(split_direct_modpara) === nothing
+    @test MVMCOptimizers.validate_supported_para_opt_parallel_modpara(
+        fake_mpi_ctx, split_direct_modpara) === nothing
+
+    split_cg_modpara = MVMCExpertModeParsers.ModParaParameters()
+    split_cg_modpara.nsplit_size = 2
+    split_cg_modpara.nsrcg = 1
+    @test MVMCOptimizers.validate_supported_modpara(split_cg_modpara) === nothing
+    err = try
+        MVMCOptimizers.validate_supported_para_opt_parallel_modpara(
+            fake_mpi_ctx, split_cg_modpara)
+        nothing
+    catch e
+        e
+    end
+    @test err isa ErrorException
+    @test occursin("NSplitSize > 1 with SR-CG", sprint(showerror, err))
+
     modpara.nsrcg = 2
     err = try
         MVMCOptimizers.validate_supported_modpara(modpara)

@@ -3581,6 +3581,7 @@ function finalize_oo_store!(
     ;
     nsrcg::Bool = false,
     threaded::Bool = false,
+    sample_start::Int = 0,
 )
     size_2 = 2 * sr_opt_size
 
@@ -3590,7 +3591,7 @@ function finalize_oo_store!(
                 sum_o = 0.0 + 0.0im
                 sum_abs2 = 0.0
                 @inbounds for s = 0:(sample_size-1)
-                    o = sr_opt_o_store[i+s*size_2]
+                    o = sr_opt_o_store[i+(sample_start+s)*size_2]
                     sum_o += o
                     sum_abs2 += abs2(o)
                 end
@@ -3604,7 +3605,7 @@ function finalize_oo_store!(
                 sum_o = 0.0 + 0.0im
                 sum_abs2 = 0.0
                 for s = 0:(sample_size-1)
-                    o = sr_opt_o_store[i+s*size_2]
+                    o = sr_opt_o_store[i+(sample_start+s)*size_2]
                     sum_o += o
                     sum_abs2 += abs2(o)
                 end
@@ -3615,9 +3616,14 @@ function finalize_oo_store!(
         return
     end
 
-    # sr_opt_oo = sr_opt_o_store' * sr_opt_o_store
-    # Reshape for matrix multiplication
-    O_store = reshape(sr_opt_o_store[1:(size_2*sample_size)], size_2, sample_size)
+    if sample_size == 0
+        fill!(@view(sr_opt_oo[1:(size_2*size_2)]), 0.0 + 0.0im)
+        return
+    end
+
+    store_start = sample_start * size_2 + 1
+    store_stop = store_start + size_2 * sample_size - 1
+    O_store = reshape(@view(sr_opt_o_store[store_start:store_stop]), size_2, sample_size)
 
     # OO = O * O^H (Hermitian)
     if vmc_inner_threading_enabled(size_2, threaded)
@@ -3658,6 +3664,7 @@ function finalize_oo_store_real!(
     ;
     nsrcg::Bool = false,
     threaded::Bool = false,
+    sample_start::Int = 0,
 )
     if nsrcg
         if vmc_inner_threading_enabled(sr_opt_size, threaded)
@@ -3665,7 +3672,7 @@ function finalize_oo_store_real!(
                 sum_o = 0.0
                 sum_oo = 0.0
                 @inbounds for s = 0:(sample_size-1)
-                    o = sr_opt_o_store[i+s*sr_opt_size]
+                    o = sr_opt_o_store[i+(sample_start+s)*sr_opt_size]
                     sum_o += o
                     sum_oo += o * o
                 end
@@ -3679,7 +3686,7 @@ function finalize_oo_store_real!(
                 sum_o = 0.0
                 sum_oo = 0.0
                 for s = 0:(sample_size-1)
-                    o = sr_opt_o_store[i+s*sr_opt_size]
+                    o = sr_opt_o_store[i+(sample_start+s)*sr_opt_size]
                     sum_o += o
                     sum_oo += o * o
                 end
@@ -3690,8 +3697,15 @@ function finalize_oo_store_real!(
         return
     end
 
+    if sample_size == 0
+        fill!(@view(sr_opt_oo[1:(sr_opt_size*sr_opt_size)]), 0.0)
+        return
+    end
+
+    store_start = sample_start * sr_opt_size + 1
+    store_stop = store_start + sr_opt_size * sample_size - 1
     o_store = reshape(
-        @view(sr_opt_o_store[1:(sr_opt_size*sample_size)]),
+        @view(sr_opt_o_store[store_start:store_stop]),
         sr_opt_size,
         sample_size,
     )
@@ -3716,7 +3730,8 @@ Equivalent to C's `VMCMainCal()`.
 function vmc_main_cal!(
     data::ExpertModeData,
     state::VMCOptimizationState,
-    c_timer::CTimer = CTIMER_DISABLED;
+    c_timer::CTimer = CTIMER_DISABLED,
+    ctx::ParallelContext = serial_context();
     use_store::Bool = true,
 )
     n_site = data.modpara.nsite
@@ -4225,8 +4240,10 @@ function vmc_main_cal!(
     )
     ctimer_stop!(maincal_diag_timer, 941)
     ctimer_stop!(maincal_diag_timer, 940)
+    sample_start, sample_end = split_loop(n_vmc_sample, ctx.rank1, ctx.size1)
+    sample_size = sample_end - sample_start
     process_sample_range!(
-        0:(n_vmc_sample-1),
+        sample_start:(sample_end-1),
         state,
         local_acc,
         c_timer,
@@ -4244,18 +4261,20 @@ function vmc_main_cal!(
                 local_acc.sr_opt.sr_opt_oo,
                 local_acc.sr_opt.sr_opt_o_store,
                 sr_opt_size,
-                n_vmc_sample,
+                sample_size,
                 nsrcg = data.modpara.nsrcg != 0,
                 threaded = true,
+                sample_start = sample_start,
             )
         else
             finalize_oo_store_real!(
                 local_acc.sr_opt.sr_opt_oo_real,
                 local_acc.sr_opt.sr_opt_o_store_real,
                 sr_opt_size,
-                n_vmc_sample,
+                sample_size,
                 nsrcg = data.modpara.nsrcg != 0,
                 threaded = true,
+                sample_start = sample_start,
             )
         end
         ctimer_stop!(c_timer, 45)
@@ -4325,6 +4344,7 @@ function vmc_main_cal_fsz!(
     data::ExpertModeData,
     state::VMCOptimizationState,
     c_timer::CTimer = CTIMER_DISABLED,
+    ctx::ParallelContext = serial_context(),
 )
     n_site = data.modpara.nsite
     n_site2 = 2 * n_site
@@ -4336,6 +4356,7 @@ function vmc_main_cal_fsz!(
     n_proj = MVMCExpertModeParsers.projection_layout(data).n_proj
     n_slater = data.modpara.n_orbital_idx
     n_opt_trans = MVMCExpertModeParsers.count_opt_trans_parameters(data)
+    sr_opt_size = state.sr_opt.sr_opt_size
 
     # Determine if using all complex or real mode
     # FSZ typically uses complex mode
@@ -4344,6 +4365,7 @@ function vmc_main_cal_fsz!(
     if data.modpara.complex_flag != 0 || orbital_complex
         all_complex = true
     end
+    use_sr_store = data.modpara.nstore_o != 0 || data.modpara.nsrcg != 0
 
     # Clear all physical quantities (energy and SR optimization data)
     # This is equivalent to C's clearPhysQuantity() call in VMCMainCal_fsz ([24] cal)
@@ -4494,15 +4516,29 @@ function vmc_main_cal_fsz!(
 
             # Accumulate OO and HO ([43] calculate OO and HO)
             ctimer_start!(c_timer, 43)
-            calculate_oo!(
-                local_acc.sr_opt.sr_opt_oo,
-                local_acc.sr_opt.sr_opt_ho,
-                sr_opt_o,
-                w,
-                e,
-                length(sr_opt_o) ÷ 2,
-                threaded = allow_inner_threads,
-            )
+            if use_sr_store
+                calculate_oo_store!(
+                    local_acc.sr_opt.sr_opt_oo,
+                    local_acc.sr_opt.sr_opt_ho,
+                    local_acc.sr_opt.sr_opt_o_store,
+                    sr_opt_o,
+                    w,
+                    e,
+                    sample,
+                    sr_opt_size,
+                    threaded = allow_inner_threads,
+                )
+            else
+                calculate_oo!(
+                    local_acc.sr_opt.sr_opt_oo,
+                    local_acc.sr_opt.sr_opt_ho,
+                    sr_opt_o,
+                    w,
+                    e,
+                    sr_opt_size,
+                    threaded = allow_inner_threads,
+                )
+            end
             ctimer_stop!(c_timer, 43)
         end
     end
@@ -4514,11 +4550,27 @@ function vmc_main_cal_fsz!(
         state,
         c_timer;
         all_complex = all_complex,
-        use_sr_store = false,
+        use_sr_store = use_sr_store,
         nsrcg = data.modpara.nsrcg != 0,
         use_sr_opt = nvmc_cal_mode == 0,
     )
-    process_sample_range_fsz!(0:(n_vmc_sample-1), state, local_acc, c_timer, true)
+    sample_start, sample_end = split_loop(n_vmc_sample, ctx.rank1, ctx.size1)
+    sample_size = sample_end - sample_start
+    process_sample_range_fsz!(sample_start:(sample_end-1), state, local_acc, c_timer, true)
+
+    if nvmc_cal_mode == 0 && use_sr_store
+        ctimer_start!(c_timer, 45)
+        finalize_oo_store!(
+            local_acc.sr_opt.sr_opt_oo,
+            local_acc.sr_opt.sr_opt_o_store,
+            sr_opt_size,
+            sample_size,
+            nsrcg = data.modpara.nsrcg != 0,
+            threaded = true,
+            sample_start = sample_start,
+        )
+        ctimer_stop!(c_timer, 45)
+    end
 
     clear_sropt_store!(state.sr_opt)
     merge_thread_accumulator!(state, c_timer, local_acc)

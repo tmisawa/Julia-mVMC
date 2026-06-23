@@ -8,6 +8,7 @@ using Test
 
 const worker = joinpath(@__DIR__, "mpi_smoke.jl")
 const hubbard_worker = joinpath(@__DIR__, "mpi_hubbard_smoke.jl")
+const nsplit_nstore_worker = joinpath(@__DIR__, "mpi_nsplit_nstore_smoke.jl")
 const physcal_worker = joinpath(@__DIR__, "mpi_physcal_smoke.jl")
 const weight_average_worker = joinpath(@__DIR__, "mpi_weight_average_smoke.jl")
 const srcg_operate_worker = joinpath(@__DIR__, "mpi_srcg_operate_smoke.jl")
@@ -29,11 +30,45 @@ const physcal_files = (
     "zvo_cisajscktalt_001.dat",
     "zvo_cisajscktaltex_001.dat",
 )
+const nsplit_nstore_tol = 1e-8
 
 function assert_files_present(dir::AbstractString, names)
     for name in names
         @test isfile(joinpath(dir, name))
     end
+end
+
+function parse_numeric_file(path::AbstractString)
+    return parse.(Float64, split(read(path, String)))
+end
+
+function assert_close_vector(label::AbstractString, actual, expected; atol::Float64)
+    @test length(actual) == length(expected)
+    if length(actual) == length(expected)
+        maxdiff = isempty(actual) ? 0.0 : maximum(abs.(actual .- expected))
+        @test maxdiff <= atol
+        if maxdiff > atol
+            @info "$label maxdiff exceeded tolerance" maxdiff atol
+        end
+    end
+end
+
+function run_nsplit_nstore_case(fixture::AbstractString, mode::AbstractString,
+                                nsplit::Int, nstore::Int, nranks::Int)
+    mpi_dir = mktempdir()
+    out = read(
+        `$(mpiexec()) -n $nranks $(Base.julia_cmd()) --project=$project $nsplit_nstore_worker $fixture $mode $nsplit $nstore $mpi_dir`,
+        String,
+    )
+    assert_files_present(mpi_dir, para_opt_files)
+    @test length(readlines(joinpath(mpi_dir, "zvo_out.dat"))) == 1
+    label = "nsplit-nstore worker: $fixture nsplit=$nsplit nstore=$nstore"
+    @test count("$label root rank ok", out) == 1
+    @test count("$label non-root rank ok", out) == nranks - 1
+    return (
+        zvo = parse_numeric_file(joinpath(mpi_dir, "zvo_out.dat")),
+        zqp = parse_numeric_file(joinpath(mpi_dir, "zqp_opt.dat")),
+    )
 end
 
 @testset "R1 mpiexec -n 2 smoke (rank0 output + allreduce path)" begin
@@ -113,12 +148,37 @@ end
     @test isempty(readdir(outdir))
 end
 
-@testset "v0.5 failure mode: NSplitSize > 1 rejects before MPI.Init" begin
+@testset "v0.5 failure mode: NSplitSize > 1 with SR-CG rejects before MPI.Init" begin
     outdir = mktempdir()
-    out = read(`$(mpiexec()) -n 2 $(Base.julia_cmd()) --project=$project $failure_worker nsplit $outdir`,
+    out = read(`$(mpiexec()) -n 2 $(Base.julia_cmd()) --project=$project $failure_worker nsplit_srcg $outdir`,
                String)
-    @test count("failure-mode worker: nsplit expected rejection ok", out) == 2
+    @test count("failure-mode worker: nsplit_srcg expected rejection ok", out) == 2
     @test isempty(readdir(outdir))
+end
+
+@testset "v0.5 NSplitSize/NStore direct-SR self-consistency" begin
+    cases = (
+        (fixture = "hubbard_chain_real", mode = "real"),
+        (fixture = "heisenberg_chain_fsz", mode = "fsz"),
+    )
+    for case in cases
+        direct_ref = run_nsplit_nstore_case(case.fixture, case.mode, 1, 0, 2)
+        store_ref = run_nsplit_nstore_case(case.fixture, case.mode, 1, 1, 2)
+        direct_split = run_nsplit_nstore_case(case.fixture, case.mode, 2, 0, 4)
+        store_split = run_nsplit_nstore_case(case.fixture, case.mode, 2, 1, 4)
+
+        for (label, result) in (
+            ("store_ref", store_ref),
+            ("direct_split", direct_split),
+            ("store_split", store_split),
+        )
+            prefix = "$(case.fixture) $label"
+            assert_close_vector("$prefix zvo_out", result.zvo, direct_ref.zvo;
+                                atol = nsplit_nstore_tol)
+            assert_close_vector("$prefix zqp_opt", result.zqp, direct_ref.zqp;
+                                atol = nsplit_nstore_tol)
+        end
+    end
 end
 
 @testset "R1 mpiexec -n 4 para-opt smoke" begin

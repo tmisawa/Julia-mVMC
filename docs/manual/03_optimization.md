@@ -32,22 +32,29 @@ result = run_para_opt_from_namelist(
 
 ## MPI limitations
 
-v0.5 development supports `VMCParaOpt` sample-parallel MPI for `NSplitSize = 1`
-with the direct SR solver (`NSRCG = 0`) and the standard SR-CG solver
-(`NSRCG = 1`). The SR-CG path broadcasts the rank0 search vector and allreduces
-the sampled matrix-vector product inside `operate_by_s`, matching C's collective
-structure for `NSplitSize = 1`.
+v0.5 development supports `VMCParaOpt` sample-parallel MPI with the direct SR
+solver (`NSRCG = 0`) for `NSplitSize >= 1` when each sample uses a single full
+QP sector (`NQPFull = 1`). Non-FSZ and FSZ paths are gated by a four-way
+self-consistency comparison: `(NSplitSize=1, NStore=0/1)` under `mpiexec -n 2`
+and `(NSplitSize=2, NStore=0/1)` under `mpiexec -n 4` must agree for
+`zvo_out.dat` and `zqp_opt.dat`.
+
+The standard SR-CG solver (`NSRCG = 1`) remains limited to `NSplitSize = 1`.
+That path broadcasts the rank0 search vector and allreduces the sampled
+matrix-vector product inside `operate_by_s`, matching C's collective structure
+for `NSplitSize = 1`.
 
 Additional C CG modes are not ported yet: `NSRCG >= 2`, `useDiagScale != 0`,
-and `RescaleSmat != 0` are rejected with clear errors. `NSplitSize > 1` remains
-unsupported because grouped MPI/QP splitting is not implemented.
+and `RescaleSmat != 0` are rejected with clear errors. `NSplitSize > 1` with
+SR-CG, and `NSplitSize > 1` with `NQPFull > 1`, are also rejected because the
+comm1-aware CG and grouped QP-split sampling paths are not implemented.
 
 The CI MPI smoke gate runs under `mpiexec` and checks rank0-only output,
 comm0 reductions, `VMCPhysCal` Green reductions, and failure-mode regressions:
 SR-CG `operate_by_s` collectives and a one-step `NSRCG = 1` C-reference
 comparison are exercised under `mpiexec -n 2`, while `NSRCG >= 2` and
-`NSplitSize > 1` are rejected before MPI context construction. This is a
-correctness smoke gate, not a performance or site-compatibility benchmark.
+`NSplitSize > 1` with SR-CG are rejected before MPI context construction. This
+is a correctness smoke gate, not a performance or site-compatibility benchmark.
 
 ## NSRCG=1 coverage
 

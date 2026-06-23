@@ -69,8 +69,8 @@ include("stochastic_opt.jl")
 include("parameter_sync.jl")
 include("data_io.jl")
 include("initial_params.jl")
-# Runtime compatibility contract: reject unsupported ModPara inputs
-# (e.g. NSplitSize > 1). Must precede the entry points that call it below.
+# Runtime compatibility contract: reject unsupported global and entry-point
+# ModPara combinations. Must precede the entry points that call it below.
 include("unsupported_inputs.jl")
 include("vmc_para_opt.jl")
 include("vmc_phys_cal.jl")
