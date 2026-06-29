@@ -574,6 +574,89 @@ end
           expected[(sr_opt_size*sr_opt_size+1):end]
 end
 
+@testset "unit/vmc_main_cal: store finalizers honor sample_start" begin
+    sr_opt_size = 3
+    size_2 = 2 * sr_opt_size
+    total_samples = 5
+    sample_start = 2
+    sample_size = 2
+
+    complex_store = ComplexF64[
+        ComplexF64(sin(0.19 * i), cos(0.23 * i))
+        for i = 1:(size_2 * total_samples)
+    ]
+    complex_oo = fill(999.0 + 0.0im, size_2 * size_2)
+    MVMCOptimizers.finalize_oo_store!(
+        complex_oo,
+        complex_store,
+        sr_opt_size,
+        sample_size;
+        nsrcg = false,
+        threaded = false,
+        sample_start = sample_start,
+    )
+
+    expected_complex = fill(0.0 + 0.0im, size_2 * size_2)
+    for i = 1:size_2
+        for j = 1:size_2
+            sum_val = 0.0 + 0.0im
+            for s = sample_start:(sample_start + sample_size - 1)
+                sum_val += complex_store[i+s*size_2] * conj(complex_store[j+s*size_2])
+            end
+            expected_complex[(i-1)*size_2+j] = sum_val
+        end
+    end
+    @test complex_oo ≈ expected_complex
+
+    real_store = [sin(0.17 * i) + cos(0.11 * i) for i = 1:(sr_opt_size * total_samples)]
+    real_oo = fill(999.0, sr_opt_size * sr_opt_size)
+    MVMCOptimizers.finalize_oo_store_real!(
+        real_oo,
+        real_store,
+        sr_opt_size,
+        sample_size;
+        nsrcg = false,
+        threaded = false,
+        sample_start = sample_start,
+    )
+
+    expected_real = fill(0.0, sr_opt_size * sr_opt_size)
+    for i = 1:sr_opt_size
+        for j = 1:sr_opt_size
+            sum_val = 0.0
+            for s = sample_start:(sample_start + sample_size - 1)
+                sum_val += real_store[i+s*sr_opt_size] * real_store[j+s*sr_opt_size]
+            end
+            expected_real[(i-1)+sr_opt_size*(j-1)+1] = sum_val
+        end
+    end
+    @test real_oo ≈ expected_real
+
+    empty_complex = fill(1.0 + 0.0im, size_2 * size_2)
+    MVMCOptimizers.finalize_oo_store!(
+        empty_complex,
+        complex_store,
+        sr_opt_size,
+        0;
+        nsrcg = false,
+        threaded = false,
+        sample_start = total_samples,
+    )
+    @test all(iszero, empty_complex)
+
+    empty_real = fill(1.0, sr_opt_size * sr_opt_size)
+    MVMCOptimizers.finalize_oo_store_real!(
+        empty_real,
+        real_store,
+        sr_opt_size,
+        0;
+        nsrcg = false,
+        threaded = false,
+        sample_start = total_samples,
+    )
+    @test all(iszero, empty_real)
+end
+
 @testset "unit/vmc_main_cal: threaded OO/store inner loops match sequential" begin
     sr_opt_size = 40
     size_2 = 2 * sr_opt_size

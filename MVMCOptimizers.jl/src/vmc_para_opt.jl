@@ -83,9 +83,10 @@ function vmc_para_opt!(
     c_timer::Union{CTimer,Nothing} = nothing,
     ctx::ParallelContext = serial_context(),
 )::Int
-    # Reject unsupported ModPara inputs (e.g. NSplitSize > 1) before any work.
+    # Reject unsupported global / para-opt combinations before any work.
     validate_supported_modpara(data.modpara)
     validate_supported_para_opt_parallel_modpara(ctx, data.modpara)
+    validate_supported_para_opt_data(data)
 
     # C-compatible section timer. `nothing` -> disabled singleton (no-op
     # start/stop). When run_para_opt_from_namelist enables it, a concretely
@@ -262,9 +263,9 @@ function vmc_para_opt!(
         # 4. Main calculation (energy and SR quantities)
         if n_proj_bf == 0
             if i_flg_orbital_general == 0
-                vmc_main_cal!(data, state, timer)
+                vmc_main_cal!(data, state, timer, ctx)
             else
-                vmc_main_cal_fsz!(data, state, timer)
+                vmc_main_cal_fsz!(data, state, timer, ctx)
             end
         else
             vmc_bf_main_cal!(data, state)
@@ -319,7 +320,7 @@ function vmc_para_opt!(
         ctimer_start!(timer, 5)
         # 8. Stochastic optimization
         if n_sr_cg != 0
-            info = stochastic_opt_cg!(data, state, timer)
+            info = stochastic_opt_cg!(data, state, timer, ctx, output_dir)
         else
             info = stochastic_opt!(data, state, timer)
         end

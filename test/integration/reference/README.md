@@ -57,6 +57,9 @@ Each subdirectory contains:
   fixture.
 - `zqp_opt_1step.dat` — C's raw `NSROptItrSmp=1` one-step output for the
   `NSRCG=1` fixture, used to gate the post-CG parameter update.
+- `zvo_out_mpi2_first1.dat` / `zvo_SRinfo_mpi2_1step.dat` /
+  `zqp_opt_mpi2_1step.dat` — the corresponding `NSRCG=1` `mpiexec -n 2`
+  C reference files used by the MPI smoke gate.
 - `ctest_ref/ref_mean.dat` and `ctest_ref/ref_std.dat` — reference vectors
   used by the C ctest-equivalent runner.
 - `inputs/*.def` — the full set of expert-mode input files used to drive the run.
@@ -129,6 +132,13 @@ OpenBLAS (`/opt/homebrew/opt/openblas/lib/libopenblas.dylib`), using:
 
 ```bash
 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 vmc.out -e namelist.def
+```
+
+The committed `zvo_out_mpi2_first1.dat`, `zvo_SRinfo_mpi2_1step.dat`, and
+`zqp_opt_mpi2_1step.dat` were generated from the same input and binary with:
+
+```bash
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 2 vmc.out -e namelist.def
 ```
 
 This fixture deliberately uses a C OpenBLAS reference rather than the older

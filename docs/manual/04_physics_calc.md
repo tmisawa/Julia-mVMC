@@ -32,9 +32,10 @@
   any `BackFlow*` keyword in `namelist.def`) are not supported; remove
   those keywords or fall back to the C reference at
   <https://github.com/issp-center-dev/mVMC>.
-- **MPI parallelisation** — v0.4 supports multi-rank sample-parallel execution
-  with `NSplitSize = 1` through MPI.jl-compatible launchers. C's grouped
-  MPI/QP split (`NSplitSize > 1`) is rejected before MPI context construction.
+- **MPI parallelisation** — physical measurement supports multi-rank
+  sample-parallel execution with `NSplitSize = 1` through MPI.jl-compatible
+  launchers. `NSplitSize > 1` is currently implemented only for `VMCParaOpt`
+  direct SR and is rejected by `VMCPhysCal` before MPI context construction.
   The CI MPI smoke gate covers rank0 Green output and reduce-to-root paths, but
   it is not a site performance benchmark.
 - **`InterAllTerm` spin metadata** — when the input does not provide
@@ -54,7 +55,7 @@ For published physics results, the safest path in this release is:
    can be run via
    [`run_phys_cal_from_namelist`](../../MVMCOptimizers.jl/src/run_phys_cal_from_namelist.jl);
    still fall back to C-mVMC for FSZ factored Green, Backflow, Lanczos
-   (`NLanczosMode > 0`), or grouped MPI/QP splitting (`NSplitSize > 1`).
+   (`NLanczosMode > 0`), or PhysCal runs that need `NSplitSize > 1`.
 
 The output formats of `zqp_opt.dat` are byte-compatible (same column
 layout), so the hand-off requires no conversion script.

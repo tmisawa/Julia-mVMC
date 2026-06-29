@@ -586,6 +586,59 @@ function xdot(p::Vector{Float64}, q::Vector{Float64})::Float64
     return z
 end
 
+function _write_cg_srinfo!(
+    data::ExpertModeData,
+    n_para_full::Int,
+    n_smat::Int,
+    opt_num::Int,
+    cut_num::Int,
+    s_diag_max::Float64,
+    s_diag_min::Float64,
+    smat_to_para_idx::Vector{Int},
+    x::Vector{Float64},
+    iter::Int,
+    output_dir::Union{String,Nothing},
+)
+    output_dir === nothing && return nothing
+    n_smat > 0 || return nothing
+
+    data_file_head = data.modpara.c_data_file_head
+    if isempty(data_file_head)
+        data_file_head = "zvo"
+    end
+    srinfo_file = _output_path(data_file_head * "_SRinfo.dat", output_dir)
+    write_header = !isfile(srinfo_file) || filesize(srinfo_file) == 0
+
+    simax = 1
+    rmax = x[1]
+    for si = 2:n_smat
+        if abs(rmax) < abs(x[si])
+            rmax = x[si]
+            simax = si
+        end
+    end
+
+    open(srinfo_file, write_header ? "w" : "a") do f
+        if write_header
+            println(f, "#Npara Msize optCut diagCut sDiagMax  sDiagMin    absRmax       imax")
+        end
+        @printf(
+            f,
+            "%5d %5d %5d %5d % .5e % .5e % .5e %5d, %d\n",
+            n_para_full,
+            n_smat,
+            opt_num,
+            cut_num,
+            s_diag_max,
+            s_diag_min,
+            rmax,
+            smat_to_para_idx[simax],
+            iter,
+        )
+    end
+    return nothing
+end
+
 """
     CGWorkspace
 
@@ -716,7 +769,8 @@ end
         n_vmc_sample::Int,
         inv_w::Float64,
         dsr_opt_sta_del::Float64,
-        all_complex::Bool
+        all_complex::Bool,
+        ctx::ParallelContext = serial_context()
     )
 
 Compute z = S*x without explicitly building S matrix.
@@ -733,7 +787,12 @@ function operate_by_s!(
     inv_w::Float64,
     dsr_opt_sta_del::Float64,
     all_complex::Bool,
+    ctx::ParallelContext = serial_context(),
 )
+    # C operate_by_S broadcasts the rank0 search vector before the local
+    # sampled matrix-vector product, then allreduces the sampled contribution.
+    bcast!(ctx, x; root = 0, which = :comm0)
+
     # y_real[sample] = sum{si} x[si] * O_real[si, sample]
     # = stcOs_real^T * x
     mul!(ws.y_real, ws.stcOs_real', x)
@@ -753,6 +812,9 @@ function operate_by_s!(
         mul!(z, ws.stcOs_imag, ws.y_imag, 1.0, 1.0)
     end
 
+    barrier(ctx; which = :comm0)
+    allreduce_sum!(ctx, z; which = :comm0)
+
     # Compute <O>^T * x
     coef = xdot(ws.stcO, x)
 
@@ -771,7 +833,8 @@ end
         dsr_opt_sta_del::Float64,
         dsr_opt_cg_tol::Float64,
         max_iter::Int,
-        all_complex::Bool
+        all_complex::Bool,
+        ctx::ParallelContext = serial_context()
     ) -> Int
 
 Main CG iteration loop.
@@ -789,6 +852,7 @@ function stochastic_opt_cg_main!(
     dsr_opt_cg_tol::Float64,
     max_iter::Int,
     all_complex::Bool,
+    ctx::ParallelContext = serial_context(),
 )::Int
     # Convergence threshold
     cg_thresh = dsr_opt_cg_tol^2 * Float64(n_smat)^2
@@ -820,6 +884,7 @@ function stochastic_opt_cg_main!(
             inv_w,
             dsr_opt_sta_del,
             all_complex,
+            ctx,
         )
 
         # alpha = delta / (d^T * q)
@@ -846,6 +911,7 @@ function stochastic_opt_cg_main!(
                 inv_w,
                 dsr_opt_sta_del,
                 all_complex,
+                ctx,
             )
             for si = 1:n_smat
                 ws.r[si] = ws.g[si] - ws.r[si]
@@ -884,7 +950,13 @@ which is more memory-efficient for large parameter spaces.
 # Returns
 - `info::Int`: 0 = success, non-zero = error (number of CG iterations if successful)
 """
-function stochastic_opt_cg!(data::ExpertModeData, state::VMCOptimizationState, c_timer::CTimer = CTIMER_DISABLED)::Int
+function stochastic_opt_cg!(
+    data::ExpertModeData,
+    state::VMCOptimizationState,
+    c_timer::CTimer = CTIMER_DISABLED,
+    ctx::ParallelContext = serial_context(),
+    output_dir::Union{String,Nothing} = nothing,
+)::Int
     # NOTE: CG-solver SR internals ([50]-[58]) are not broken down yet; the
     # total CG time is captured by [5] StochasticOpt at the vmc_para_opt! level.
     # The direct solver (stochastic_opt!) carries the [50]/[51]/[56]/[57]/[52]
@@ -1007,6 +1079,7 @@ function stochastic_opt_cg!(data::ExpertModeData, state::VMCOptimizationState, c
         data.modpara.dsr_opt_cg_tol,
         max_iter,
         all_complex,
+        ctx,
     )
 
     # Phase 4: Check for inf/nan in solution
@@ -1018,9 +1091,26 @@ function stochastic_opt_cg!(data::ExpertModeData, state::VMCOptimizationState, c
             break
         end
     end
+    info = Int(bcast_scalar(ctx, info))
+
+    if is_output_rank(ctx)
+        _write_cg_srinfo!(
+            data,
+            n_para_full,
+            n_smat,
+            opt_num,
+            cut_num,
+            s_diag_max,
+            s_diag_min,
+            smat_to_para_idx,
+            ws.x,
+            iter,
+            output_dir,
+        )
+    end
 
     # Phase 5: Update parameters
-    if info == 0
+    if info == 0 && is_output_rank(ctx)
         for (si, pi) in enumerate(smat_to_para_idx)
             r_val = ws.x[si]  # Solution vector
 

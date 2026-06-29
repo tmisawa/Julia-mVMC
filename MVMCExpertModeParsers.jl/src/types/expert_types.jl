@@ -92,6 +92,8 @@ mutable struct ModParaParameters
     # SR solver selection
     nsrcg::Int          # 0: direct solver (LAPACK), !=0: CG solver
     nstore_o::Int       # 0: normal, !=0: store O samples
+    use_diag_scale::Int # C useDiagScale: preconditioned CG, unsupported in Julia
+    rescale_smat::Int   # C RescaleSmat: S-matrix rescale, unsupported in Julia
 
     # Random number generation
     rnd_seed::Int
@@ -153,6 +155,8 @@ mutable struct ModParaParameters
         nsr_opt_cg_max_iter::Int = 0,
         nsrcg::Int = 0,
         nstore_o::Int = 1,
+        use_diag_scale::Int = 0,
+        rescale_smat::Int = 0,
         rnd_seed::Int = 11272,  # C parity: RndSeed 行欠落時の default (readdef.c:1967)
         nsplit_size::Int = 1,
         nsp_gauss_leg::Int = 1,
@@ -197,6 +201,8 @@ mutable struct ModParaParameters
             nsr_opt_cg_max_iter,
             nsrcg,
             nstore_o,
+            use_diag_scale,
+            rescale_smat,
             rnd_seed,
             nsplit_size,
             nsp_gauss_leg,

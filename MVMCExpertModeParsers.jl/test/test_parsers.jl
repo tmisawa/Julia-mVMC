@@ -18,6 +18,10 @@ using MVMCExpertModeParsers: parse_jastrow_content, parse_orbital_content
     defaults = ModParaParameters()
     @test defaults.dsr_opt_cg_tol == 1e-10
     @test defaults.nsr_opt_cg_max_iter == 0
+    @test defaults.nsrcg == 0
+    @test defaults.nstore_o == 1
+    @test defaults.use_diag_scale == 0
+    @test defaults.rescale_smat == 0
 
     # Test parsing from content
     content = """
@@ -26,6 +30,10 @@ using MVMCExpertModeParsers: parse_jastrow_content, parse_orbital_content
     NLocSpin = 0
     VMCCalMode = 0
     LanczosMode = 0
+    NStore = 0
+    NSRCG = 1
+    useDiagScale = 1
+    RescaleSmat = 1
     """
 
     result = parse_modpara_content(content)
@@ -35,6 +43,10 @@ using MVMCExpertModeParsers: parse_jastrow_content, parse_orbital_content
     @test result.data.nlocspin == 0
     @test result.data.dsr_opt_cg_tol == 1e-10
     @test result.data.nsr_opt_cg_max_iter == 0
+    @test result.data.nstore_o == 0
+    @test result.data.nsrcg == 1
+    @test result.data.use_diag_scale == 1
+    @test result.data.rescale_smat == 1
 end
 
 @testset "Transfer Parser" begin
