@@ -1,6 +1,6 @@
 name = "MVMCExpertModeParsers"
 uuid = "f8463493-42a4-4c1a-8bf4-93a3cbd844bc"
-version = "0.4.1"
+version = "0.4.2"
 authors = ["Takahiro Misawa <tmisawa@issp.u-tokyo.ac.jp>"]
 
 [deps]

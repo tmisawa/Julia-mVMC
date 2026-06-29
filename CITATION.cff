@@ -6,8 +6,8 @@ authors:
   - family-names: Misawa
     given-names: Takahiro
     email: tmisawa@issp.u-tokyo.ac.jp
-version: 0.4.1
-date-released: "2026-06-19"
+version: 0.4.2
+date-released: "2026-06-23"
 license: GPL-3.0-or-later
 repository-code: "https://github.com/tmisawa/Julia-mVMC"
 keywords:
