@@ -218,6 +218,102 @@ function output_opt_data!(data::ExpertModeData; output_dir::Union{String,Nothing
     end
 end
 
+function _lanczos_energy_by_alpha(
+    h1::Float64,
+    h2_1::Float64,
+    h2_2::Float64,
+    h3::Float64,
+    h4::Float64,
+    alpha::Float64,
+)
+    tmp_ene = h1 + alpha * (h2_1 + h2_2) + alpha^2 * h3
+    dnorm = 1.0 + 2.0 * alpha * h1 + alpha^2 * h2_1
+    tmp_ene_v = h2_1 + 2.0 * alpha * h3 + alpha^2 * h4
+    (!isfinite(h1) || abs(h1) < eps(Float64)) && return nothing
+    norm_ratio = dnorm / h1
+    (!isfinite(norm_ratio) || abs(norm_ratio) < 1.0e-12) && return nothing
+    ene = tmp_ene / dnorm
+    ene_v = ((tmp_ene_v / dnorm) - ene^2) / ene^2
+    (!isfinite(ene) || !isfinite(ene_v)) && return nothing
+    return ene, ene_v
+end
+
+function _invalid_lanczos_energy(reason::AbstractString)
+    @warn "Lanczos energy could not be calculated; writing NaN values" reason
+    return NaN, NaN, NaN
+end
+
+function _lanczos_energy(qqqq::AbstractVector{ComplexF64})
+    h1 = real(qqqq[3])
+    h2_1 = real(qqqq[4])
+    h2_2 = real(qqqq[11])
+    h3 = real(qqqq[12])
+    h4 = real(qqqq[16])
+
+    tmp_aa = h2_1 * (h2_1 + h2_2) - 2.0 * h1 * h3
+    tmp_bb = -h1 * h2_1 + h3
+    tmp_cc =
+        h2_1 * (h2_1 + h2_2)^2 -
+        h1^2 * h2_1 * (h2_1 + 2.0 * h2_2) +
+        4.0 * h1^3 * h3 -
+        2.0 * h1 * (2.0 * h2_1 + h2_2) * h3 +
+        h3^2
+    if !(isfinite(tmp_aa) && isfinite(tmp_bb) && isfinite(tmp_cc))
+        return _invalid_lanczos_energy("non-finite alpha equation")
+    end
+    tmp_cc < 0.0 && return _invalid_lanczos_energy("negative alpha discriminant")
+    abs(tmp_aa) < eps(Float64) && return _invalid_lanczos_energy("singular alpha equation")
+
+    root = sqrt(tmp_cc)
+    alpha_p = (tmp_bb + root) / tmp_aa
+    alpha_m = (tmp_bb - root) / tmp_aa
+    if !(isfinite(alpha_p) && isfinite(alpha_m))
+        return _invalid_lanczos_energy("non-finite alpha")
+    end
+    energy_p = _lanczos_energy_by_alpha(h1, h2_1, h2_2, h3, h4, alpha_p)
+    energy_m = _lanczos_energy_by_alpha(h1, h2_1, h2_2, h3, h4, alpha_m)
+    (energy_p === nothing || energy_m === nothing) &&
+        return _invalid_lanczos_energy("illegal norm or non-finite energy")
+    ene_p, ene_vp = energy_p
+    ene_m, ene_vm = energy_m
+
+    if ene_p > ene_m
+        return ene_m, ene_vm, alpha_m
+    end
+    return ene_p, ene_vp, alpha_p
+end
+
+function output_lanczos_func!(
+    data::ExpertModeData,
+    state::VMCOptimizationState,
+    ismp::Int;
+    output_dir::Union{String,Nothing} = nothing,
+)
+    data.modpara.lanczos_mode > 0 || return
+    state.phys_quantities === nothing && return
+
+    phys = state.phys_quantities
+    data_file_head = data.modpara.c_data_file_head
+    isempty(data_file_head) && (data_file_head = "zvo")
+
+    ene, ene_v, alpha = _lanczos_energy(phys.phys_lanczos_qqqq)
+
+    ls_filename = _output_path(@sprintf("%s_ls_out_%03d.dat", data_file_head, ismp), output_dir)
+    open(ls_filename, "w") do f
+        @printf(f, "% .18e  ", ene)
+        @printf(f, "% .18e  ", ene_v)
+        @printf(f, "% .18e  ", alpha)
+    end
+
+    qqqq_filename = _output_path(@sprintf("%s_ls_qqqq_%03d.dat", data_file_head, ismp), output_dir)
+    open(qqqq_filename, "w") do f
+        for val in phys.phys_lanczos_qqqq
+            @printf(f, "% .18e  ", real(val))
+        end
+        println(f)
+    end
+end
+
 """
     output_green_func!(data::ExpertModeData, state::VMCOptimizationState, ismp::Int; output_dir=nothing)
 
@@ -306,4 +402,6 @@ function output_green_func!(data::ExpertModeData, state::VMCOptimizationState, i
             println(f)  # Empty line at end (C format)
         end
     end
+
+    output_lanczos_func!(data, state, ismp; output_dir = output_dir)
 end

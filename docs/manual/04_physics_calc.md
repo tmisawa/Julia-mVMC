@@ -53,9 +53,11 @@ For published physics results, the safest path in this release is:
    factored two-body Green functions are gated against C references
    ([`phys_cal_equivalent.jl`](../../test/integration/phys_cal_equivalent.jl)) and
    can be run via
-   [`run_phys_cal_from_namelist`](../../MVMCOptimizers.jl/src/run_phys_cal_from_namelist.jl);
-   still fall back to C-mVMC for FSZ factored Green, Backflow, Lanczos
-   (`NLanczosMode > 0`), or PhysCal runs that need `NSplitSize > 1`.
+   [`run_phys_cal_from_namelist`](../../MVMCOptimizers.jl/src/run_phys_cal_from_namelist.jl).
+   `NLanczosMode = 1` also writes the R1 Full-Lanczos energy/QQQQ files
+   on the sz-conserved path. Still fall back to C-mVMC for FSZ factored
+   Green, Backflow, `NLanczosMode = 2`, FSZ/general-orbital Lanczos, or
+   PhysCal runs that need `NSplitSize > 1`.
 
 The output formats of `zqp_opt.dat` are byte-compatible (same column
 layout), so the hand-off requires no conversion script.

@@ -103,7 +103,7 @@ To regenerate this reference data from a fresh clone of the C mVMC tree:
 
    ```bash
    julia --project=@. test/integration/tools/generate_ctest_fixtures.jl \
-     --c-test-dir ../private-mVMC/mVMC/build/test/python
+     --c-test-dir <mVMC-build>/test/python
    ```
 
 5. For strict first-10 fixtures, also refresh `zvo_out_first10.dat`:
@@ -144,8 +144,8 @@ OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 2 vmc.out -e namelist.def
 This fixture deliberately uses a C OpenBLAS reference rather than the older
 Accelerate-backed mac reference. Truncated SR-CG is sensitive to BLAS and
 reduction order; C(Accelerate) and C(OpenBLAS) differ by `~3e-3` over 10 steps
-for this input. See
-`docs/reports/2026-06-12-julia-mvmc-nsrcg1-serial-cg-residual-rootcause.md`.
+for this input, so this fixture is intentionally gated with a coarse parameter
+tolerance while keeping the first `zvo_out` row tight.
 
 ## PhysCal e2e fixtures (`<model>/physcal_ref/`)
 
@@ -203,4 +203,36 @@ VMC=<mVMC-develop-build>/src/mVMC/vmc.out
 # (B) PhysCal: NVMCCalMode=1 input set incl. greentwoex.def, params as 2nd arg:
 ( cd phys_stage && "$VMC" -e namelist.def zqp_opt.dat )
 # -> output/{zvo_cisajs,zvo_cisajscktalt,zvo_cisajscktaltex}_001.dat
+```
+
+## Full Lanczos R1 PhysCal fixtures (`<model>/physcal_ref/`)
+
+`test/integration/lanczos_equivalent.jl` runs `run_phys_cal_from_namelist`
+(`NVMCCalMode = 1`, `NLanczosMode = 1`) for the systems below and compares the
+produced Lanczos files against committed C references.
+
+| Subdirectory | Mode | Source C fixture | Fixed params (`zqp_opt.dat`) |
+|--------------|------|------------------|------------------------------|
+| `hubbard_chain_lanczos/physcal_ref` | real | `HubbardChainLanczos` | copied from the C fixture |
+| `spin_chain_lanczos/physcal_ref`    | real | `SpinChainLanczos`    | copied from the C fixture |
+
+Each Lanczos `physcal_ref/` contains:
+
+- `inputs/` — expert-mode input files generated from the C standard-mode fixture.
+- `zqp_opt.dat` — fixed variational parameters fed to the runner (`opt_para`).
+- `expected/zvo_ls_out_001.dat` — C R1 energy, norm, and alpha output.
+- `expected/zvo_ls_qqqq_001.dat` — C 16-value flattened QQQQ output.
+- `metadata.txt` — per-system provenance and generation-time Julia-vs-C result.
+
+### Regenerating Full Lanczos R1 references (per model)
+
+```bash
+export OMP_NUM_THREADS=1
+VMC=<mVMC-build>/src/mVMC/vmc.out
+# Standard-mode fixture expansion + PhysCal run:
+( cd stage && "$VMC" -s StdFace.def zqp_opt.dat )
+# -> expert .def files and output/{zvo_ls_out,zvo_ls_qqqq}_001.dat
+#
+# The committed expert input set can also be replayed directly:
+( cd phys_stage && "$VMC" -e namelist.def zqp_opt.dat )
 ```

@@ -217,6 +217,7 @@ function weight_average_green_func!(state::VMCOptimizationState)
     phys.phys_cis_ajs .*= inv_w
     phys.phys_cis_ajs_ckt_alt .*= inv_w
     phys.phys_cis_ajs_ckt_alt_dc .*= inv_w
+    phys.phys_lanczos_qqqq .*= inv_w
 end
 
 """
@@ -239,12 +240,14 @@ function weight_average_green_func!(ctx::ParallelContext, state::VMCOptimization
     reduce_sum_to_root!(ctx, phys.phys_cis_ajs; root = 0, which = :comm0)
     reduce_sum_to_root!(ctx, phys.phys_cis_ajs_ckt_alt; root = 0, which = :comm0)
     reduce_sum_to_root!(ctx, phys.phys_cis_ajs_ckt_alt_dc; root = 0, which = :comm0)
+    reduce_sum_to_root!(ctx, phys.phys_lanczos_qqqq; root = 0, which = :comm0)
 
     if is_output_rank(ctx)
         inv_w = 1.0 / state.energy.wc
         phys.phys_cis_ajs .*= inv_w
         phys.phys_cis_ajs_ckt_alt .*= inv_w
         phys.phys_cis_ajs_ckt_alt_dc .*= inv_w
+        phys.phys_lanczos_qqqq .*= inv_w
     end
     return
 end

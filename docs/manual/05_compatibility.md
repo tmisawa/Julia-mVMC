@@ -156,9 +156,13 @@ are treated as C-compatible.
   `RescaleSmat != 0` raise unsupported-feature errors). Standard SR-CG
   (`NSRCG = 1`) is supported for serial and MPI `NSplitSize = 1` runs, but
   remains unsupported with `NSplitSize > 1`.
-- **Full Lanczos** (`NLanczosMode > 0`) — only the step-0 comparison
-  matches C. The post-Lanczos eigenvector / overlap pipeline is not
-  ported.
+- **Full Lanczos beyond R1** — `VMCPhysCal` supports `NLanczosMode = 1`
+  energy/QQQQ output on the sz-conserved path. `NLanczosMode = 2`,
+  FSZ/general-orbital Lanczos, and ParaOpt Lanczos (`NLanczosMode > 0`)
+  remain unsupported.
+  The R1 implementation uses conservative full-overlap recomputation for the
+  intermediate Lanczos configurations, so it is a correctness-oriented path
+  rather than a performance-equivalent port of C's Pfaffian update kernels.
 - **`InterAllTerm` full spin metadata** — when `interall.def` omits
   per-term spin info, defaults are substituted (see
   `src/vmc_main_cal.jl`).
