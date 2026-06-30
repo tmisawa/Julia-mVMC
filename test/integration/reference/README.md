@@ -48,6 +48,8 @@ input fixtures used by Julia-mVMC integration tests.
 | `heisenberg_chain_fsz` | fsz (generalized orbital) | `HeisenbergChain_fsz` | yes | yes |
 | `hubbard_chain_fsz` | fsz (generalized orbital) | `HubbardChain_fsz` | no | yes |
 | `kondo_chain_fsz` | fsz (generalized orbital) | `KondoChain_fsz` | no | yes |
+| `hubbard_chain_pairhop_real` | real | hand-authored from `HubbardChain` | 1-step PairHop only | no |
+| `hubbard_chain_pairhop_fsz` | fsz (generalized orbital) | hand-authored from `HubbardChain_fsz` | 1-step PairHop only | no |
 
 Each subdirectory contains:
 
@@ -66,6 +68,24 @@ Each subdirectory contains:
 - `inputs/zqp_opt.dat` / `inputs/initial.def` (when applicable) — initial
   variational parameters used by the C run, mirrored here so that
   Julia-mVMC starts from the same state.
+
+### PairHop first-step fixtures
+
+`hubbard_chain_pairhop_real` and `hubbard_chain_pairhop_fsz` are one-step
+fixtures derived from the corresponding Hubbard references with:
+
+- `PairHop pairhopp.def` added to `namelist.def`
+- one `pairhopp.def` data row, which C expands internally to both `(i,j)` and
+  `(j,i)`
+- `NSROptItrStep = 1`
+- `NSROptItrSmp = 1`
+
+The committed `zvo_out_first1.dat` files were generated with C-mVMC
+`622166afe33c6be3402d7c926db7e9c0003a47c4`, using:
+
+```bash
+OMP_NUM_THREADS=1 vmc.out -e namelist.def initial.def
+```
 
 ## Regenerating
 

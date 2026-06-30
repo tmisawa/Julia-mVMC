@@ -3,10 +3,11 @@ Tests for parser functions
 """
 
 using MVMCExpertModeParsers: ModParaParameters, TransferTerm, CoulombIntraTerm
-using MVMCExpertModeParsers: GutzwillerTerm, JastrowTerm, OrbitalTerm
+using MVMCExpertModeParsers: GutzwillerTerm, JastrowTerm, OrbitalTerm, PairHopTerm
 using MVMCExpertModeParsers: parse_modpara_content, parse_trans_content
 using MVMCExpertModeParsers: parse_coulomb_intra_content, parse_gutzwiller_content
 using MVMCExpertModeParsers: parse_jastrow_content, parse_orbital_content
+using MVMCExpertModeParsers: parse_pairhop_content
 
 @testset "ModPara Parser" begin
     # Test ModParaParameters creation
@@ -93,6 +94,53 @@ end
     @test length(result.data) == 2
     @test result.data[1].site == 0
     @test result.data[1].value == 4.0
+end
+
+@testset "PairHop Parser" begin
+    term = PairHopTerm(0, 1, 0.25)
+    @test term.site1 == 0
+    @test term.site2 == 1
+    @test term.value == 0.25
+
+    result = parse_pairhop_content("""
+    0 1 0.25
+    2 3 -0.5
+    """)
+
+    @test result.success
+    @test length(result.data) == 4
+    @test [(t.site1, t.site2, t.value) for t in result.data] == [
+        (0, 1, 0.25),
+        (1, 0, 0.25),
+        (2, 3, -0.5),
+        (3, 2, -0.5),
+    ]
+
+    raw_long = parse_pairhop_content(join(["$i $(i + 1) 0.1" for i = 0:5], "\n"))
+    @test raw_long.success
+    @test length(raw_long.data) == 12
+
+    with_header = parse_pairhop_content("""
+    =============================================
+    NPairHopp          1
+    =============================================
+    ====== Pair-Hopping term ============
+    =============================================
+        4     5         1.250000000000000
+    """)
+
+    @test with_header.success
+    @test [(t.site1, t.site2, t.value) for t in with_header.data] == [
+        (4, 5, 1.25),
+        (5, 4, 1.25),
+    ]
+
+    self_term = parse_pairhop_content("2 2 0.75")
+    @test self_term.success
+    @test [(t.site1, t.site2, t.value) for t in self_term.data] == [
+        (2, 2, 0.75),
+        (2, 2, 0.75),
+    ]
 end
 
 @testset "Gutzwiller Parser" begin
