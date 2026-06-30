@@ -159,3 +159,4 @@ end
 include(joinpath(@__DIR__, "tools", "test_green_compare.jl"))
 include(joinpath(@__DIR__, "test_run_phys_cal_contract.jl"))
 include(joinpath(@__DIR__, "lanczos_equivalent.jl"))
+include(joinpath(@__DIR__, "pairhop_equivalent.jl"))

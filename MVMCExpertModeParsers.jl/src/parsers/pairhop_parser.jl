@@ -37,6 +37,10 @@ end
 
 Parse pairhop.def content and return the pair hopping terms.
 
+C-mVMC expands each input PairHop line `(i, j, value)` into two internal terms,
+`(i, j, value)` and `(j, i, value)`. Return the expanded internal list so the
+runtime sees the same term ordering as C.
+
 # Arguments
 - `content`: Content of the pairhop.def file
 
@@ -48,10 +52,22 @@ function parse_pairhop_content(content::String)::ParseResult{Vector{PairHopTerm}
     errors = String[]
 
     lines = split(content, '\n')
-    line_number = 0
 
-    for line in lines
-        line_number += 1
+    # Skip header lines (first 5 lines) for StdFace-generated pairhopp.def.
+    IGNORE_LINES_IN_DEF = 5
+    start_line = 1
+    if length(lines) > IGNORE_LINES_IN_DEF
+        first_line = clean_line(lines[1])
+        second_line = clean_line(lines[2])
+        if startswith(first_line, "=") || startswith(second_line, "NPairHopp")
+            start_line = IGNORE_LINES_IN_DEF + 1
+        end
+    end
+
+    line_number = 0
+    for line_num = start_line:length(lines)
+        line = lines[line_num]
+        line_number = line_num
         clean_line_str = clean_line(line)
 
         # Skip empty lines and comments
@@ -109,16 +125,8 @@ function parse_pairhop_content(content::String)::ParseResult{Vector{PairHopTerm}
                 continue
             end
 
-            # Check for self-interaction
-            if site1 == site2
-                push!(
-                    errors,
-                    "Line $line_number: Self-interaction not allowed for pair hopping (site1 = site2 = $site1)",
-                )
-                continue
-            end
-
             push!(pairhop_terms, PairHopTerm(site1, site2, value))
+            push!(pairhop_terms, PairHopTerm(site2, site1, value))
 
         catch e
             push!(errors, "Line $line_number: Error parsing line '$clean_line_str': $e")

@@ -58,7 +58,6 @@ active is not reproducible bit-for-bit.
 
 | File | Status / reason |
 |------|--------|
-| `pairhop.def` (`PairHop`) | Pair-hopping interaction not wired into `CalculateHamiltonian`. |
 | `spinjastrow.def` (`SpinJastrow`) | Not implemented; parser hard-fails if the keyword is present because it would change projection offsets. |
 
 > Note: the factored/product two-body Green (`TwoBodyGEx` / `greentwoex.def` →
@@ -72,6 +71,9 @@ active is not reproducible bit-for-bit.
   the data block.
 - `qptransidx.def` accepts the 3-column form (`itmpsgn = 1` defaulted)
   in addition to the canonical 4-column form.
+- `pairhop.def` / `pairhopp.def` (`PairHop`) is consumed by the Hamiltonian in
+  both non-FSZ and FSZ paths. Each input row is expanded to `(i,j)` and `(j,i)`,
+  matching C-mVMC's internal `PairHopping` list.
 - For `interall.def`, fsz-style spin-flip terms are honoured.
 - The RNG layout matches C: `RndSeed` from `modpara.def` seeds an
   SFMT19937 stream with the C-parity rule (v0.4): missing line → `11272`
