@@ -48,6 +48,7 @@ function vmc_phys_cal!(
     # Reject unsupported global / PhysCal combinations before any work.
     validate_supported_modpara(data.modpara)
     validate_supported_phys_cal_modpara(data.modpara)
+    validate_supported_phys_cal_data(data)
     # Reject TwoBodyGEx in FSZ / general-orbital mode before any sampling or RNG
     # side effects (its Green measurement path is not yet wired).
     validate_factored_green_supported(data)

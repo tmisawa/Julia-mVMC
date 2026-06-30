@@ -9,6 +9,7 @@ using MVMCExpertModeParsers: ExpertModeData, GreenOneTerm, GreenTwoExTerm
     @test length(pq.phys_cis_ajs) == 2
     @test length(pq.phys_cis_ajs_ckt_alt) == 1
     @test length(pq.phys_cis_ajs_ckt_alt_dc) == 3
+    @test length(pq.phys_lanczos_qqqq) == 16
 end
 
 @testset "canonical one-body list" begin
@@ -102,6 +103,41 @@ end
 using MVMCOptimizers: VMCOptimizationState
 using Printf
 
+@testset "Lanczos QQQQ accumulation uses C flatten order" begin
+    pq = MVMCOptimizers.PhysicalQuantities(0, 0, 0)
+    MVMCOptimizers.accumulate_lanczos_qqqq!(
+        pq,
+        0.5,
+        2.0 + 3.0im,
+        5.0 + 7.0im;
+        all_complex = true,
+    )
+    @test pq.phys_lanczos_qqqq[1] ≈ 0.5
+    @test pq.phys_lanczos_qqqq[3] ≈ 0.5 * conj(2.0 + 3.0im)
+    @test pq.phys_lanczos_qqqq[16] ≈ 0.5 * conj(5.0 + 7.0im) * (5.0 + 7.0im)
+
+    pq_real = MVMCOptimizers.PhysicalQuantities(0, 0, 0)
+    MVMCOptimizers.accumulate_lanczos_qqqq!(
+        pq_real,
+        0.5,
+        2.0 + 0.0im,
+        5.0 + 0.0im;
+        all_complex = false,
+    )
+    @test pq_real.phys_lanczos_qqqq[3] ≈ 1.0 + 0.0im
+    @test pq_real.phys_lanczos_qqqq[16] ≈ 12.5 + 0.0im
+
+    pq_bad = MVMCOptimizers.PhysicalQuantities(0, 0, 0)
+    resize!(pq_bad.phys_lanczos_qqqq, 15)
+    @test_throws ArgumentError MVMCOptimizers.accumulate_lanczos_qqqq!(
+        pq_bad,
+        1.0,
+        1.0 + 0.0im,
+        1.0 + 0.0im;
+        all_complex = true,
+    )
+end
+
 @testset "output: canonical cisajs + factored ex, with output_dir and numbering" begin
     data = ExpertModeData()
     data.modpara.nsite = 4
@@ -132,6 +168,69 @@ using Printf
         @test length(vals) == 2
         @test vals[1] ≈ 2.5
         @test vals[2] ≈ -1.0
+    end
+end
+
+@testset "output: Lanczos R1 writes ls_out and ls_qqqq" begin
+    data = ExpertModeData()
+    data.modpara.nsite = 2
+    data.modpara.c_data_file_head = "zvo"
+    data.modpara.lanczos_mode = 1
+    state = VMCOptimizationState(2, 1, 0, 0, 1, 1, true, false)
+    pq = MVMCOptimizers.PhysicalQuantities(0, 0, 0)
+    pq.phys_lanczos_qqqq .= 0.0 + 0.0im
+    pq.phys_lanczos_qqqq[3] = 1.0 + 0.0im
+    pq.phys_lanczos_qqqq[4] = 2.0 + 0.0im
+    pq.phys_lanczos_qqqq[11] = 3.0 + 0.0im
+    pq.phys_lanczos_qqqq[12] = 1.0 + 0.0im
+    pq.phys_lanczos_qqqq[16] = 5.0 + 0.0im
+    state.phys_quantities = pq
+
+    mktempdir() do dir
+        MVMCOptimizers.output_green_func!(data, state, 7; output_dir = dir)
+
+        ls_out = joinpath(dir, "zvo_ls_out_007.dat")
+        ls_qqqq = joinpath(dir, "zvo_ls_qqqq_007.dat")
+        @test isfile(ls_out)
+        @test isfile(ls_qqqq)
+
+        ls_vals = parse.(Float64, split(read(ls_out, String)))
+        @test length(ls_vals) == 3
+        @test ls_vals[1] ≈ -3.5
+        @test ls_vals[3] ≈ -0.75
+
+        qqqq_vals = parse.(Float64, split(read(ls_qqqq, String)))
+        @test length(qqqq_vals) == 16
+        @test qqqq_vals[3] ≈ 1.0
+        @test qqqq_vals[4] ≈ 2.0
+        @test qqqq_vals[11] ≈ 3.0
+        @test qqqq_vals[12] ≈ 1.0
+        @test qqqq_vals[16] ≈ 5.0
+    end
+end
+
+@testset "output: Lanczos singular alpha writes NaN without aborting" begin
+    data = ExpertModeData()
+    data.modpara.nsite = 2
+    data.modpara.c_data_file_head = "zvo"
+    data.modpara.lanczos_mode = 1
+    state = VMCOptimizationState(2, 1, 0, 0, 1, 1, true, false)
+    state.phys_quantities = MVMCOptimizers.PhysicalQuantities(0, 0, 0)
+
+    mktempdir() do dir
+        @test_logs (:warn, r"Lanczos energy could not be calculated") MVMCOptimizers.output_green_func!(
+            data,
+            state,
+            3;
+            output_dir = dir,
+        )
+
+        ls_out = joinpath(dir, "zvo_ls_out_003.dat")
+        ls_qqqq = joinpath(dir, "zvo_ls_qqqq_003.dat")
+        @test isfile(ls_out)
+        @test isfile(ls_qqqq)
+        @test all(isnan, parse.(Float64, split(read(ls_out, String))))
+        @test length(parse.(Float64, split(read(ls_qqqq, String)))) == 16
     end
 end
 

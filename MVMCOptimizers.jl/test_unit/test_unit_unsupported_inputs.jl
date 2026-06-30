@@ -154,35 +154,78 @@ end
 end
 
 @testset "unit/unsupported_inputs: NLanczosMode contract" begin
-    # NLanczosMode = 0 (variational only) is the supported setting: no-op.
-    @testset "NLanczosMode = 0 is accepted" begin
-        modpara = ModParaParameters(lanczos_mode = 0)
-        @test MVMCOptimizers.validate_supported_modpara(modpara) === nothing
+    @testset "NLanczosMode = 0/1/2 are globally valid values" begin
+        for mode in (0, 1, 2)
+            modpara = ModParaParameters(lanczos_mode = mode)
+            @test MVMCOptimizers.validate_supported_modpara(modpara) === nothing
+        end
     end
 
-    # NLanczosMode > 0 (full Lanczos) is rejected: only step-0 matches C and the
-    # C indirect one-body Green list (NLanczosMode > 1) is not reproduced.
-    @testset "NLanczosMode > 0 is rejected with a clear message" begin
-        for bad in (1, 2)
+    @testset "unknown NLanczosMode values are rejected globally" begin
+        for bad in (-1, 3)
             modpara = ModParaParameters(lanczos_mode = bad)
             threw, msg = capture_error_message(
                 () -> MVMCOptimizers.validate_supported_modpara(modpara),
             )
             @test threw
-            @test occursin("NLanczosMode > 0", msg)
-            # Must not be mislabeled as an NSplitSize-specific combination.
-            @test !occursin("NSplitSize > 1 with", msg)
+            @test occursin("NLanczosMode must be 0, 1, or 2", msg)
         end
     end
 
-    # Enforced at the independent runtime entry points before any work.
-    @testset "entry points enforce the contract" begin
-        for entry in (vmc_para_opt!, vmc_phys_cal!)
-            data = ExpertModeData()
-            data.modpara.lanczos_mode = 2
-            threw, msg = capture_error_message(() -> entry(data))
+    @testset "NLanczosMode = 1 is accepted for PhysCal R1" begin
+        modpara = ModParaParameters(lanczos_mode = 1)
+        @test MVMCOptimizers.validate_supported_modpara(modpara) === nothing
+        @test MVMCOptimizers.validate_supported_phys_cal_modpara(modpara) === nothing
+        data = ExpertModeData()
+        data.modpara.lanczos_mode = 1
+        @test MVMCOptimizers.validate_supported_phys_cal_data(data) === nothing
+    end
+
+    @testset "NLanczosMode > 0 is rejected for ParaOpt" begin
+        for bad in (1, 2)
+            modpara = ModParaParameters(lanczos_mode = bad)
+            threw, msg = capture_error_message(
+                () -> MVMCOptimizers.validate_supported_para_opt_modpara(modpara),
+            )
             @test threw
             @test occursin("NLanczosMode > 0", msg)
+            @test occursin("parameter optimization", msg)
         end
+    end
+
+    @testset "NLanczosMode > 1 is rejected for PhysCal R1" begin
+        modpara = ModParaParameters(lanczos_mode = 2)
+        threw, msg = capture_error_message(
+            () -> MVMCOptimizers.validate_supported_phys_cal_modpara(modpara),
+        )
+        @test threw
+        @test occursin("NLanczosMode > 1", msg)
+        @test occursin("PhysCal", msg)
+    end
+
+    @testset "FSZ/general-orbital Lanczos is rejected for PhysCal R1" begin
+        data = ExpertModeData()
+        data.modpara.lanczos_mode = 1
+        data.i_flg_orbital_general = 1
+        threw, msg = capture_error_message(
+            () -> MVMCOptimizers.validate_supported_phys_cal_data(data),
+        )
+        @test threw
+        @test occursin("FSZ / general-orbital", msg)
+    end
+
+    @testset "entry points enforce the Lanczos contract" begin
+        para_data = ExpertModeData()
+        para_data.modpara.lanczos_mode = 1
+        threw, msg = capture_error_message(() -> vmc_para_opt!(para_data))
+        @test threw
+        @test occursin("NLanczosMode > 0", msg)
+        @test occursin("parameter optimization", msg)
+
+        phys_data = ExpertModeData()
+        phys_data.modpara.lanczos_mode = 2
+        threw, msg = capture_error_message(() -> vmc_phys_cal!(phys_data))
+        @test threw
+        @test occursin("NLanczosMode > 1", msg)
     end
 end

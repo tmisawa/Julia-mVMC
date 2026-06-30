@@ -104,8 +104,10 @@ on an unbundled model, please open an issue with a reduced fixture so
 it can be added to the public CI.
 
 `SpinChainLanczos` and `HubbardChainLanczos` reproduce C only at
-step 0 (the SR section is bypassed there); the full Lanczos section
-is **not** ported — see [`05_compatibility.md`](05_compatibility.md).
+step 0 in the ParaOpt path (the SR section is bypassed there).
+`NLanczosMode > 0` is still rejected for ParaOpt; the R1 Lanczos
+support is limited to PhysCal energy/QQQQ output — see
+[`05_compatibility.md`](05_compatibility.md).
 
 ## Output files
 

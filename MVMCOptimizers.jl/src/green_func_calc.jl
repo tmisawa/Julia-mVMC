@@ -152,6 +152,7 @@ function reset_phys_quantities!(state::VMCOptimizationState)
     fill!(phys.phys_cis_ajs_ckt_alt, 0.0 + 0.0im)
     fill!(phys.local_cis_ajs_ckt_alt_dc, 0.0 + 0.0im)
     fill!(phys.phys_cis_ajs_ckt_alt_dc, 0.0 + 0.0im)
+    fill!(phys.phys_lanczos_qqqq, 0.0 + 0.0im)
 end
 
 """
@@ -260,6 +261,511 @@ end
 )
     acc.local_cis_ajs_ckt_alt_dc[idx] = local_val
     acc.phys_cis_ajs_ckt_alt_dc[idx] += w * local_val
+    return nothing
+end
+
+const LANCZOS_N_LS_HAM = 2
+const LANCZOS_QQQQ_LENGTH = LANCZOS_N_LS_HAM^4
+
+struct LanczosElectronConfig
+    ele_idx::Vector{Int}
+    ele_cfg::Vector{Int}
+    ele_num::Vector{Int}
+    ele_proj_cnt::Vector{Int}
+end
+
+function _lanczos_config(
+    ele_idx::Vector{Int},
+    ele_cfg::Vector{Int},
+    ele_num::Vector{Int},
+    ele_proj_cnt::Vector{Int},
+)
+    return LanczosElectronConfig(copy(ele_idx), copy(ele_cfg), copy(ele_num), copy(ele_proj_cnt))
+end
+
+_copy_lanczos_config(cfg::LanczosElectronConfig) =
+    LanczosElectronConfig(copy(cfg.ele_idx), copy(cfg.ele_cfg), copy(cfg.ele_num), copy(cfg.ele_proj_cnt))
+
+function _lanczos_same_config(a::LanczosElectronConfig, b::LanczosElectronConfig)
+    return a.ele_idx == b.ele_idx &&
+           a.ele_cfg == b.ele_cfg &&
+           a.ele_num == b.ele_num &&
+           a.ele_proj_cnt == b.ele_proj_cnt
+end
+
+function _lanczos_recompute_proj_cnt!(cfg::LanczosElectronConfig, data::ExpertModeData)
+    make_proj_cnt!(cfg.ele_proj_cnt, cfg.ele_num, data)
+    return cfg
+end
+
+@inline _lanczos_value(value, all_complex::Bool) =
+    all_complex ? ComplexF64(value) : ComplexF64(real(value), 0.0)
+
+function _lanczos_hamiltonian0(data::ExpertModeData, cfg::LanczosElectronConfig)::ComplexF64
+    n_site = data.modpara.nsite
+    n0 = @view cfg.ele_num[1:n_site]
+    n1 = @view cfg.ele_num[(n_site+1):(2*n_site)]
+
+    e = 0.0 + 0.0im
+    for term in data.coulomb_intra_terms
+        ri = term.site
+        if 0 <= ri < n_site
+            e += term.value * n0[ri+1] * n1[ri+1]
+        end
+    end
+    for term in data.coulomb_inter_terms
+        ri = term.site1
+        rj = term.site2
+        if 0 <= ri < n_site && 0 <= rj < n_site
+            e += term.value * (n0[ri+1] + n1[ri+1]) * (n0[rj+1] + n1[rj+1])
+        end
+    end
+    for term in data.hund_terms
+        ri = term.site1
+        rj = term.site2
+        if 0 <= ri < n_site && 0 <= rj < n_site
+            e -= term.value * (n0[ri+1] * n0[rj+1] + n1[ri+1] * n1[rj+1])
+        end
+    end
+    return e
+end
+
+function _lanczos_preserve_m_all!(f, state::VMCOptimizationState)
+    sm = state.slater_matrix
+    inv_m = copy(sm.inv_m)
+    pf_m = copy(sm.pf_m)
+    inv_m_real = copy(sm.inv_m_real)
+    pf_m_real = copy(sm.pf_m_real)
+    try
+        return f()
+    finally
+        copyto!(sm.inv_m, inv_m)
+        copyto!(sm.pf_m, pf_m)
+        copyto!(sm.inv_m_real, inv_m_real)
+        copyto!(sm.pf_m_real, pf_m_real)
+    end
+end
+
+function _lanczos_overlap_ratio!(
+    state::VMCOptimizationState,
+    cfg::LanczosElectronConfig,
+    original::LanczosElectronConfig,
+    ip::ComplexF64,
+    data::ExpertModeData;
+    all_complex::Bool,
+)::ComplexF64
+    abs(ip) > 0.0 || error("Lanczos overlap ratio cannot be computed for zero inner product")
+    n_qp_full = get_n_qp_full(data)
+    z = proj_rbm_ratio(cfg.ele_proj_cnt, original.ele_proj_cnt, cfg.ele_num, original.ele_num, data)
+
+    ip_new = if all_complex
+        info = calculate_m_all_fcmp!(cfg.ele_idx, 1, n_qp_full + 1, data, state; threaded = false)
+        info == 0 || return 0.0 + 0.0im
+        calculate_ip_fcmp(state.slater_matrix.pf_m, 1, n_qp_full + 1, data)
+    else
+        info = calculate_m_all_real!(cfg.ele_idx, 1, n_qp_full + 1, data, state; threaded = false)
+        info == 0 || return 0.0 + 0.0im
+        ComplexF64(calculate_ip_real(state.slater_matrix.pf_m_real, 1, n_qp_full + 1, data), 0.0)
+    end
+
+    return conj(z * ip_new / ip)
+end
+
+function _lanczos_scale_terms(terms, scale::ComplexF64)
+    scaled = Vector{Tuple{ComplexF64,LanczosElectronConfig}}()
+    for (coef, cfg) in terms
+        new_coef = scale * coef
+        if abs(new_coef) > 0
+            push!(scaled, (new_coef, cfg))
+        end
+    end
+    return scaled
+end
+
+function _lanczos_apply_one_body(
+    cfg::LanczosElectronConfig,
+    ri::Int,
+    rj::Int,
+    s::Int,
+    data::ExpertModeData,
+)
+    n_site = data.modpara.nsite
+    n_elec = data.modpara.nelec
+    rsi = ri + s * n_site
+    rsj = rj + s * n_site
+
+    if ri == rj
+        if cfg.ele_num[rsi+1] == 1
+            return [(1.0 + 0.0im, _copy_lanczos_config(cfg))]
+        end
+        return Tuple{ComplexF64,LanczosElectronConfig}[]
+    end
+    if cfg.ele_num[rsi+1] == 1 || cfg.ele_num[rsj+1] == 0
+        return Tuple{ComplexF64,LanczosElectronConfig}[]
+    end
+
+    mj = cfg.ele_cfg[rsj+1]
+    mj < 0 && return Tuple{ComplexF64,LanczosElectronConfig}[]
+    moved = _copy_lanczos_config(cfg)
+    moved.ele_idx[mj+s*n_elec+1] = ri
+    moved.ele_cfg[rsj+1] = -1
+    moved.ele_cfg[rsi+1] = mj
+    moved.ele_num[rsj+1] = 0
+    moved.ele_num[rsi+1] = 1
+    _lanczos_recompute_proj_cnt!(moved, data)
+    return [(1.0 + 0.0im, moved)]
+end
+
+function _lanczos_diagonal_term(coef::Integer, cfg::LanczosElectronConfig)
+    coef == 0 && return Tuple{ComplexF64,LanczosElectronConfig}[]
+    return [(ComplexF64(coef, 0.0), _copy_lanczos_config(cfg))]
+end
+
+function _lanczos_apply_two_body(
+    cfg::LanczosElectronConfig,
+    ri::Int,
+    rj::Int,
+    rk::Int,
+    rl::Int,
+    s::Int,
+    t::Int,
+    data::ExpertModeData,
+)
+    n_site = data.modpara.nsite
+    rsi = ri + s * n_site
+    rsj = rj + s * n_site
+    rtk = rk + t * n_site
+    rtl = rl + t * n_site
+
+    if s == t
+        if rk == rl
+            cfg.ele_num[rtk+1] == 0 && return Tuple{ComplexF64,LanczosElectronConfig}[]
+            return _lanczos_apply_one_body(cfg, ri, rj, s, data)
+        elseif rj == rl
+            return Tuple{ComplexF64,LanczosElectronConfig}[]
+        elseif ri == rl
+            if cfg.ele_num[rsi+1] == 0
+                return Tuple{ComplexF64,LanczosElectronConfig}[]
+            elseif rj == rk
+                return _lanczos_diagonal_term(1 - cfg.ele_num[rsj+1], cfg)
+            else
+                return _lanczos_scale_terms(_lanczos_apply_one_body(cfg, rk, rj, s, data), -1.0 + 0.0im)
+            end
+        elseif rj == rk
+            if cfg.ele_num[rsj+1] == 1
+                return Tuple{ComplexF64,LanczosElectronConfig}[]
+            elseif ri == rl
+                return _lanczos_diagonal_term(cfg.ele_num[rsi+1], cfg)
+            else
+                return _lanczos_apply_one_body(cfg, ri, rl, s, data)
+            end
+        elseif ri == rk
+            return Tuple{ComplexF64,LanczosElectronConfig}[]
+        elseif ri == rj
+            cfg.ele_num[rsi+1] == 0 && return Tuple{ComplexF64,LanczosElectronConfig}[]
+            return _lanczos_apply_one_body(cfg, rk, rl, s, data)
+        end
+    else
+        if rk == rl
+            if cfg.ele_num[rtk+1] == 0
+                return Tuple{ComplexF64,LanczosElectronConfig}[]
+            elseif ri == rj
+                return _lanczos_diagonal_term(cfg.ele_num[rsi+1], cfg)
+            else
+                return _lanczos_apply_one_body(cfg, ri, rj, s, data)
+            end
+        elseif ri == rj
+            cfg.ele_num[rsi+1] == 0 && return Tuple{ComplexF64,LanczosElectronConfig}[]
+            return _lanczos_apply_one_body(cfg, rk, rl, t, data)
+        end
+    end
+
+    if cfg.ele_num[rsi+1] == 1 ||
+       cfg.ele_num[rsj+1] == 0 ||
+       cfg.ele_num[rtk+1] == 1 ||
+       cfg.ele_num[rtl+1] == 0
+        return Tuple{ComplexF64,LanczosElectronConfig}[]
+    end
+
+    results = Vector{Tuple{ComplexF64,LanczosElectronConfig}}()
+    for (coef1, cfg1) in _lanczos_apply_one_body(cfg, rk, rl, t, data)
+        for (coef2, cfg2) in _lanczos_apply_one_body(cfg1, ri, rj, s, data)
+            push!(results, (coef1 * coef2, cfg2))
+        end
+    end
+    return results
+end
+
+function _lanczos_transfer_spins(term)
+    term.spin == :both && return (0, 1)
+    return (term.spin1,)
+end
+
+function _lanczos_local_hamiltonian_from_config!(
+    cfg::LanczosElectronConfig,
+    original::LanczosElectronConfig,
+    original_h1::ComplexF64,
+    ip::ComplexF64,
+    data::ExpertModeData,
+    state::VMCOptimizationState;
+    all_complex::Bool,
+)::ComplexF64
+    if _lanczos_same_config(cfg, original)
+        return original_h1
+    end
+
+    value =
+        _lanczos_hamiltonian0(data, cfg) *
+        _lanczos_overlap_ratio!(state, cfg, original, ip, data; all_complex = all_complex)
+
+    for term in data.transfer_terms
+        coeff = -_lanczos_value(term.value, all_complex)
+        for s in _lanczos_transfer_spins(term)
+            for (op_coef, moved) in _lanczos_apply_one_body(cfg, term.site1, term.site2, s, data)
+                value += coeff * op_coef *
+                         _lanczos_overlap_ratio!(
+                             state,
+                             moved,
+                             original,
+                             ip,
+                             data;
+                             all_complex = all_complex,
+                         )
+            end
+        end
+    end
+
+    for term in data.pair_hop_terms
+        coeff = _lanczos_value(term.value, all_complex)
+        for (op_coef, moved) in
+            _lanczos_apply_two_body(cfg, term.site1, term.site2, term.site1, term.site2, 0, 1, data)
+            value += coeff * op_coef *
+                     _lanczos_overlap_ratio!(
+                         state,
+                         moved,
+                         original,
+                         ip,
+                         data;
+                         all_complex = all_complex,
+                     )
+        end
+    end
+
+    for term in data.exchange_terms
+        coeff = _lanczos_value(term.value, all_complex)
+        for (op_coef, moved) in
+            _lanczos_apply_two_body(cfg, term.site1, term.site2, term.site2, term.site1, 0, 1, data)
+            value += coeff * op_coef *
+                     _lanczos_overlap_ratio!(
+                         state,
+                         moved,
+                         original,
+                         ip,
+                         data;
+                         all_complex = all_complex,
+                     )
+        end
+        for (op_coef, moved) in
+            _lanczos_apply_two_body(cfg, term.site1, term.site2, term.site2, term.site1, 1, 0, data)
+            value += coeff * op_coef *
+                     _lanczos_overlap_ratio!(
+                         state,
+                         moved,
+                         original,
+                         ip,
+                         data;
+                         all_complex = all_complex,
+                     )
+        end
+    end
+
+    for term in data.inter_all_terms
+        coeff = _lanczos_value(term.value, all_complex)
+        for (op_coef, moved) in _lanczos_apply_two_body(
+            cfg,
+            term.site0,
+            term.site1,
+            term.site2,
+            term.site3,
+            term.spin1,
+            term.spin3,
+            data,
+        )
+            value += coeff * op_coef *
+                     _lanczos_overlap_ratio!(
+                         state,
+                         moved,
+                         original,
+                         ip,
+                         data;
+                         all_complex = all_complex,
+                     )
+        end
+    end
+
+    return value
+end
+
+function calculate_lanczos_h2!(
+    h1::ComplexF64,
+    ip::ComplexF64,
+    ele_idx::Vector{Int},
+    ele_cfg::Vector{Int},
+    ele_num::Vector{Int},
+    ele_proj_cnt::Vector{Int},
+    data::ExpertModeData,
+    state::VMCOptimizationState;
+    all_complex::Bool,
+)::ComplexF64
+    original = _lanczos_config(ele_idx, ele_cfg, ele_num, ele_proj_cnt)
+
+    return _lanczos_preserve_m_all!(state) do
+        h2 = h1 * _lanczos_hamiltonian0(data, original)
+
+        for term in data.transfer_terms
+            coeff = -_lanczos_value(term.value, all_complex)
+            for s in _lanczos_transfer_spins(term)
+                for (op_coef, moved) in
+                    _lanczos_apply_one_body(original, term.site1, term.site2, s, data)
+                    h2 += coeff * op_coef *
+                          _lanczos_local_hamiltonian_from_config!(
+                              moved,
+                              original,
+                              h1,
+                              ip,
+                              data,
+                              state;
+                              all_complex = all_complex,
+                          )
+                end
+            end
+        end
+
+        for term in data.pair_hop_terms
+            coeff = _lanczos_value(term.value, all_complex)
+            for (op_coef, moved) in _lanczos_apply_two_body(
+                original,
+                term.site1,
+                term.site2,
+                term.site1,
+                term.site2,
+                0,
+                1,
+                data,
+            )
+                h2 += coeff * op_coef *
+                      _lanczos_local_hamiltonian_from_config!(
+                          moved,
+                          original,
+                          h1,
+                          ip,
+                          data,
+                          state;
+                          all_complex = all_complex,
+                      )
+            end
+        end
+
+        for term in data.exchange_terms
+            coeff = _lanczos_value(term.value, all_complex)
+            for (op_coef, moved) in _lanczos_apply_two_body(
+                original,
+                term.site1,
+                term.site2,
+                term.site2,
+                term.site1,
+                0,
+                1,
+                data,
+            )
+                h2 += coeff * op_coef *
+                      _lanczos_local_hamiltonian_from_config!(
+                          moved,
+                          original,
+                          h1,
+                          ip,
+                          data,
+                          state;
+                          all_complex = all_complex,
+                      )
+            end
+            for (op_coef, moved) in _lanczos_apply_two_body(
+                original,
+                term.site1,
+                term.site2,
+                term.site2,
+                term.site1,
+                1,
+                0,
+                data,
+            )
+                h2 += coeff * op_coef *
+                      _lanczos_local_hamiltonian_from_config!(
+                          moved,
+                          original,
+                          h1,
+                          ip,
+                          data,
+                          state;
+                          all_complex = all_complex,
+                      )
+            end
+        end
+
+        for term in data.inter_all_terms
+            coeff = _lanczos_value(term.value, all_complex)
+            for (op_coef, moved) in _lanczos_apply_two_body(
+                original,
+                term.site0,
+                term.site1,
+                term.site2,
+                term.site3,
+                term.spin1,
+                term.spin3,
+                data,
+            )
+                h2 += coeff * op_coef *
+                      _lanczos_local_hamiltonian_from_config!(
+                          moved,
+                          original,
+                          h1,
+                          ip,
+                          data,
+                          state;
+                          all_complex = all_complex,
+                      )
+            end
+        end
+
+        h2
+    end
+end
+
+function accumulate_lanczos_qqqq!(
+    dst::Union{PhysicalQuantities,VMCPhysAccumulator},
+    w::Float64,
+    h1::ComplexF64,
+    h2::ComplexF64;
+    all_complex::Bool,
+)
+    length(dst.phys_lanczos_qqqq) == LANCZOS_QQQQ_LENGTH ||
+        throw(
+            ArgumentError(
+                "phys_lanczos_qqqq must have length $LANCZOS_QQQQ_LENGTH; " *
+                "got $(length(dst.phys_lanczos_qqqq)).",
+            ),
+        )
+
+    lslq = (1.0 + 0.0im, h1, h1, h2)
+    @inbounds for i0 = 0:(LANCZOS_QQQQ_LENGTH-1)
+        rj = i0 % LANCZOS_N_LS_HAM
+        ri = (i0 ÷ LANCZOS_N_LS_HAM) % LANCZOS_N_LS_HAM
+        rp = (i0 ÷ (LANCZOS_N_LS_HAM^2)) % LANCZOS_N_LS_HAM
+        rq = (i0 ÷ (LANCZOS_N_LS_HAM^3)) % LANCZOS_N_LS_HAM
+        left = lslq[rq*LANCZOS_N_LS_HAM+ri+1]
+        right = lslq[rp*LANCZOS_N_LS_HAM+rj+1]
+        dst.phys_lanczos_qqqq[i0+1] += w * (all_complex ? conj(left) : left) * right
+    end
     return nothing
 end
 

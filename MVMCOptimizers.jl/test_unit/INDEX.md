@@ -120,12 +120,15 @@
     - `NSRCG = 0/1` は許容、`NSRCG >= 2` は reject
     - `useDiagScale != 0` / `RescaleSmat != 0` は reject
   - `unit/unsupported_inputs: NLanczosMode contract` → `validate_supported_modpara`
-    - `NLanczosMode = 0` は許容、`> 0`（1/2）は `error()` で reject（full Lanczos 未サポート / C の indirect one-body list 非再現）
-    - `vmc_para_opt!` / `vmc_phys_cal!` の両 entry point で enforce、メッセージに `NLanczosMode > 0` を含む
+    - `NLanczosMode = 0/1/2` は global 値として許容、未知値は reject
+    - ParaOpt は `NLanczosMode > 0` を reject、PhysCal は R1 として `NLanczosMode = 1` を許容
+    - PhysCal R1 では `NLanczosMode > 1` と FSZ/general-orbital Lanczos を reject
 
 ### `src/green_func_calc.jl` + `vmc_phys_cal.jl`（factored two-body Green）
 - `test_unit/test_unit_physcal_factored_green.jl`
   - `PhysicalQuantities index fields` → `cis_ajs_idx` / `cis_ajs_ckt_alt_idx`
+  - `Lanczos QQQQ accumulation uses C flatten order` → `phys_lanczos_qqqq` の 16 要素 flatten order / complex conjugation
+  - `output: Lanczos R1 writes ls_out and ls_qqqq` → `*_ls_out_XXX.dat` / `*_ls_qqqq_XXX.dat` の R1 出力
   - `canonical one-body list` → `build_canonical_cis_ajs_idx`（greenone 先頭 → greentwoex 構成 append・dedup・site 範囲・spin 検証）
   - `factored index resolution is 1-based` → `resolve_cis_ajs_ckt_alt_idx`（C index 0 → Julia 1）
   - `factored accumulation` → `accumulate_factored_green!`（`w·local[idx0]·conj(local[idx1])`）

@@ -289,6 +289,9 @@ mutable struct PhysicalQuantities
     # Factored two-body pairs: 1-based indices into cis_ajs_idx / local_cis_ajs.
     cis_ajs_ckt_alt_idx::Vector{Tuple{Int,Int}}
 
+    # Full Lanczos R1 accumulator: QQQQ tensor flattened in C order.
+    phys_lanczos_qqqq::Vector{ComplexF64}
+
     function PhysicalQuantities(
         n_cis_ajs::Int,
         n_cis_ajs_ckt_alt::Int,
@@ -302,6 +305,7 @@ mutable struct PhysicalQuantities
             zeros(ComplexF64, n_cis_ajs_ckt_alt_dc),
             NTuple{4,Int}[],
             Tuple{Int,Int}[],
+            zeros(ComplexF64, 16),
         )
     end
 end
