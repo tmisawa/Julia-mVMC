@@ -231,12 +231,12 @@ function vmc_para_opt!(
 
             if i_flg_orbital_general == 0
                 if n_proj_bf == 0
-                    vmc_make_sample_real!(data, state, rng, timer)
+                    vmc_make_sample_real!(data, state, rng, timer; ctx = ctx)
                 else
                     vmc_bf_make_sample_real!(data, state, rng)
                 end
             else
-                vmc_make_sample_fsz_real!(data, state, rng, timer)
+                vmc_make_sample_fsz_real!(data, state, rng, timer; ctx = ctx)
             end
 
             # Convert back to complex if needed ([69] MAll: real/complex copy)
@@ -248,9 +248,9 @@ function vmc_para_opt!(
         else  # complex
             if n_proj_bf == 0
                 if i_flg_orbital_general == 0
-                    vmc_make_sample!(data, state, rng, timer)
+                    vmc_make_sample!(data, state, rng, timer; ctx = ctx)
                 else
-                    vmc_make_sample_fsz!(data, state, rng, timer)
+                    vmc_make_sample_fsz!(data, state, rng, timer; ctx = ctx)
                 end
             else
                 vmc_bf_make_sample!(data, state, rng)

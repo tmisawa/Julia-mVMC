@@ -80,7 +80,8 @@ include("run_phys_cal_from_namelist.jl")
 # Export main functions
 export ParallelContext, serial_context, build_parallel_context, is_output_rank
 export bcast!, bcast_scalar, allreduce_sum!, reduce_sum_to_root!, barrier,
-       reduce_counter!, abort_parallel, split_loop, split_range, resolve_rnd_seed
+       reduce_counter!, abort_parallel, split_loop, split_range, qp_split_range,
+       allreduce_sum_scalar, allreduce_max_scalar, resolve_rnd_seed
 export count_total_parameters, pack_parameters, unpack_parameters!,
        set_parameter_value!, get_parameter_value
 export vmc_para_opt!
