@@ -361,11 +361,20 @@ function _lanczos_overlap_ratio!(
     ip_new = if all_complex
         info = calculate_m_all_fcmp!(cfg.ele_idx, 1, n_qp_full + 1, data, state; threaded = false)
         info == 0 || return 0.0 + 0.0im
-        calculate_ip_fcmp(state.slater_matrix.pf_m, 1, n_qp_full + 1, data)
+        calculate_ip_fcmp(state.slater_matrix.pf_m, 1, n_qp_full + 1, data; reduce = :none)
     else
         info = calculate_m_all_real!(cfg.ele_idx, 1, n_qp_full + 1, data, state; threaded = false)
         info == 0 || return 0.0 + 0.0im
-        ComplexF64(calculate_ip_real(state.slater_matrix.pf_m_real, 1, n_qp_full + 1, data), 0.0)
+        ComplexF64(
+            calculate_ip_real(
+                state.slater_matrix.pf_m_real,
+                1,
+                n_qp_full + 1,
+                data;
+                reduce = :none,
+            ),
+            0.0,
+        )
     end
 
     return conj(z * ip_new / ip)

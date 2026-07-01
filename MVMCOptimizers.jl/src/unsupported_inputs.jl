@@ -110,19 +110,39 @@ end
     validate_supported_para_opt_data(data)
 
 Validate parameter-optimization settings that require parsed data, not just
-ModPara. The initial `NSplitSize > 1` implementation supports a single full
-QP sector per sample; grouped QP-split sampling is intentionally left out.
+ModPara. `NSplitSize > 1` supports standard-projection `NQPFull > 1` when
+`NQPOptTrans == 1` on sz-conserved paths; OptTrans-derived QP sectors and FSZ
+standard-projection `NQPFull > 1` stay rejected with split.
 """
 function validate_supported_para_opt_data(data::ExpertModeData)
-    n_qp_full = get_n_qp_full(data)
-    if data.modpara.nsplit_size > 1 && n_qp_full > 1
-        error(
-            "NSplitSize > 1 with NQPFull > 1 is not supported: grouped " *
-            "QP-split sampling is not implemented in Julia-mVMC " *
-            "(got NSplitSize = $(data.modpara.nsplit_size), " *
-            "NQPFull = $n_qp_full). Use NSplitSize = 1, or use an input with " *
-            "NQPFull = 1 for the direct SR sample-split path.",
-        )
+    if data.modpara.nsplit_size > 1
+        if data.i_flg_orbital_general != 0 &&
+           (data.modpara.nsp_gauss_leg > 1 || abs(data.modpara.nmp_trans) > 1)
+            error(
+                "NSplitSize > 1 with FSZ standard-projection NQPFull > 1 " *
+                "is not supported: " *
+                "split standard-projection sampling currently supports " *
+                "sz-conserved NQPFull > 1 paths only, got " *
+                "NSplitSize = $(data.modpara.nsplit_size), " *
+                "NSPGaussLeg = $(data.modpara.nsp_gauss_leg), " *
+                "NMPTrans = $(data.modpara.nmp_trans). Use NSplitSize = 1 " *
+                "or NSPGaussLeg = 1 and |NMPTrans| = 1 for FSZ inputs.",
+            )
+        end
+        n_qp_opt_trans = max(1, data.n_qp_opt_trans)
+        opt_trans_active =
+            n_qp_opt_trans > 1 || length(data.opt_trans) > 1 ||
+            length(data.qp_opt_trans) > 1
+        if opt_trans_active
+            error(
+                "NSplitSize > 1 with NQPOptTrans > 1 / OptTrans is not " *
+                "supported: grouped QP-split sampling currently supports " *
+                "standard-projection NQPFull only (NQPOptTrans = 1), got " *
+                "NSplitSize = $(data.modpara.nsplit_size), " *
+                "NQPOptTrans = $(data.n_qp_opt_trans). Use NSplitSize = 1 " *
+                "for OptTrans-derived QP sectors.",
+            )
+        end
     end
     return nothing
 end

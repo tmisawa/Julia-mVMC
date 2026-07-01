@@ -35,7 +35,9 @@
 - **MPI parallelisation** — physical measurement supports multi-rank
   sample-parallel execution with `NSplitSize = 1` through MPI.jl-compatible
   launchers. `NSplitSize > 1` is currently implemented only for `VMCParaOpt`
-  direct SR and is rejected by `VMCPhysCal` before MPI context construction.
+  direct SR, including sz-conserved standard-projection `NQPFull > 1` when
+  `NQPOptTrans = 1`, and is rejected by `VMCPhysCal` before MPI context
+  construction.
   The CI MPI smoke gate covers rank0 Green output and reduce-to-root paths, but
   it is not a site performance benchmark.
 - **`InterAllTerm` spin metadata** — when the input does not provide

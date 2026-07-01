@@ -55,16 +55,72 @@ end
         @test occursin("PhysCal", msg)
     end
 
-    @testset "NSplitSize > 1 with NQPFull > 1 is rejected for para-opt" begin
+    @testset "NSplitSize > 1 accepts standard-projection NQPFull > 1" begin
+        spin_data = ExpertModeData()
+        spin_data.modpara.nsplit_size = 2
+        spin_data.modpara.nsp_gauss_leg = 2
+        spin_data.modpara.nmp_trans = 1
+        spin_data.n_qp_opt_trans = 1
+        spin_data.i_flg_orbital_general = 0
+        @test MVMCOptimizers.validate_supported_para_opt_data(spin_data) === nothing
+
+        momentum_data = ExpertModeData()
+        momentum_data.modpara.nsplit_size = 2
+        momentum_data.modpara.nsp_gauss_leg = 1
+        momentum_data.modpara.nmp_trans = 4
+        momentum_data.n_qp_opt_trans = 1
+        momentum_data.i_flg_orbital_general = 0
+        @test MVMCOptimizers.validate_supported_para_opt_data(momentum_data) === nothing
+
+        trivial_opttrans_data = ExpertModeData()
+        trivial_opttrans_data.modpara.nsplit_size = 2
+        trivial_opttrans_data.modpara.nsp_gauss_leg = 8
+        trivial_opttrans_data.modpara.nmp_trans = -1
+        trivial_opttrans_data.n_qp_opt_trans = 1
+        trivial_opttrans_data.i_flg_orbital_general = 0
+        trivial_opttrans_data.opt_trans = ComplexF64[1.0 + 0.0im]
+        trivial_opttrans_data.qp_opt_trans = [[0]]
+        @test MVMCOptimizers.validate_supported_para_opt_data(trivial_opttrans_data) ===
+              nothing
+    end
+
+    @testset "NSplitSize > 1 rejects OptTrans-derived NQPFull > 1" begin
         data = ExpertModeData()
         data.modpara.nsplit_size = 2
-        data.modpara.nmp_trans = 2
+        data.modpara.nsp_gauss_leg = 1
+        data.modpara.nmp_trans = 1
+        data.n_qp_opt_trans = 2
+        data.opt_trans = ComplexF64[1.0 + 0.0im, 0.5 + 0.0im]
+        data.qp_opt_trans = [[0], [0]]
+
         threw, msg = capture_error_message(
             () -> MVMCOptimizers.validate_supported_para_opt_data(data),
         )
         @test threw
-        @test occursin("NSplitSize > 1 with NQPFull > 1", msg)
-        @test occursin("NQPFull = 2", msg)
+        @test occursin("NSplitSize > 1 with NQPOptTrans > 1", msg)
+        @test occursin("OptTrans", msg)
+    end
+
+    @testset "NSplitSize > 1 rejects FSZ standard-projection NQPFull > 1" begin
+        for (nsp, nmp) in ((2, 1), (1, 2), (1, -2))
+            data = ExpertModeData()
+            data.modpara.nsplit_size = 2
+            data.modpara.nsp_gauss_leg = nsp
+            data.modpara.nmp_trans = nmp
+            data.n_qp_opt_trans = 1
+            data.i_flg_orbital_general = 1
+
+            threw, msg = capture_error_message(
+                () -> MVMCOptimizers.validate_supported_para_opt_data(data),
+            )
+            @test threw
+            @test occursin(
+                "NSplitSize > 1 with FSZ standard-projection NQPFull > 1",
+                msg,
+            )
+            @test occursin("NSPGaussLeg = $nsp", msg)
+            @test occursin("NMPTrans = $nmp", msg)
+        end
     end
 
     # NSplitSize < 1 (0 or negative) is an invalid value: a process-split

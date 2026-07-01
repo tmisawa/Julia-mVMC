@@ -9,6 +9,8 @@ using Test
 const worker = joinpath(@__DIR__, "mpi_smoke.jl")
 const hubbard_worker = joinpath(@__DIR__, "mpi_hubbard_smoke.jl")
 const nsplit_nstore_worker = joinpath(@__DIR__, "mpi_nsplit_nstore_smoke.jl")
+const nsplit_standard_projection_worker =
+    joinpath(@__DIR__, "mpi_nsplit_standard_projection_smoke.jl")
 const physcal_worker = joinpath(@__DIR__, "mpi_physcal_smoke.jl")
 const weight_average_worker = joinpath(@__DIR__, "mpi_weight_average_smoke.jl")
 const srcg_operate_worker = joinpath(@__DIR__, "mpi_srcg_operate_smoke.jl")
@@ -31,6 +33,11 @@ const physcal_files = (
     "zvo_cisajscktaltex_001.dat",
 )
 const nsplit_nstore_tol = 1e-8
+# NQPFull > 1 changes the floating-point summation order: nsplit=1 sums QP
+# sectors locally in one loop, while nsplit>1 sums rank-local partial IP values
+# through comm1 allreduce before taking log(IP). Keep this slightly looser than
+# the NQPFull=1 smoke where the QP sum has one term.
+const nsplit_standard_projection_tol = 5e-8
 
 function assert_files_present(dir::AbstractString, names)
     for name in names
@@ -68,6 +75,31 @@ function run_nsplit_nstore_case(fixture::AbstractString, mode::AbstractString,
     return (
         zvo = parse_numeric_file(joinpath(mpi_dir, "zvo_out.dat")),
         zqp = parse_numeric_file(joinpath(mpi_dir, "zqp_opt.dat")),
+    )
+end
+
+function run_nsplit_standard_projection_case(
+    fixture::AbstractString,
+    mode::AbstractString,
+    nsplit::Int,
+    nstore::Int,
+    nranks::Int;
+    nsp_gauss_leg::Union{Nothing,Int} = nothing,
+)
+    mpi_dir = mktempdir()
+    cmd = `$(mpiexec()) -n $nranks $(Base.julia_cmd()) --project=$project $nsplit_standard_projection_worker $fixture $mode $nsplit $nstore $mpi_dir`
+    if nsp_gauss_leg !== nothing
+        cmd = addenv(cmd, "JULIA_MVMC_SMOKE_NSPGAUSSLEG" => string(nsp_gauss_leg))
+    end
+    out = read(cmd, String)
+    assert_files_present(mpi_dir, para_opt_files)
+    label = "nsplit-standard-projection worker: $fixture nsplit=$nsplit nstore=$nstore"
+    @test count("$label root rank ok", out) == 1
+    @test count("$label non-root rank ok", out) == nranks - 1
+    return (
+        zvo = parse_numeric_file(joinpath(mpi_dir, "zvo_out.dat")),
+        zqp = parse_numeric_file(joinpath(mpi_dir, "zqp_opt.dat")),
+        var = parse_numeric_file(joinpath(mpi_dir, "zvo_var.dat")),
     )
 end
 
@@ -156,6 +188,22 @@ end
     @test isempty(readdir(outdir))
 end
 
+@testset "v0.5 failure mode: NSplitSize > 1 with OptTrans rejects before MPI.Init" begin
+    outdir = mktempdir()
+    out = read(`$(mpiexec()) -n 2 $(Base.julia_cmd()) --project=$project $failure_worker nsplit_opttrans $outdir`,
+               String)
+    @test count("failure-mode worker: nsplit_opttrans expected rejection ok", out) == 2
+    @test isempty(readdir(outdir))
+end
+
+@testset "v0.5 failure mode: NSplitSize > 1 with FSZ projection rejects before MPI.Init" begin
+    outdir = mktempdir()
+    out = read(`$(mpiexec()) -n 2 $(Base.julia_cmd()) --project=$project $failure_worker nsplit_fsz_projection $outdir`,
+               String)
+    @test count("failure-mode worker: nsplit_fsz_projection expected rejection ok", out) == 2
+    @test isempty(readdir(outdir))
+end
+
 @testset "v0.5 NSplitSize/NStore direct-SR self-consistency" begin
     cases = (
         (fixture = "hubbard_chain_real", mode = "real"),
@@ -177,6 +225,63 @@ end
                                 atol = nsplit_nstore_tol)
             assert_close_vector("$prefix zqp_opt", result.zqp, direct_ref.zqp;
                                 atol = nsplit_nstore_tol)
+        end
+    end
+end
+
+@testset "v0.5 NSplitSize standard-projection NQPFull self-consistency" begin
+    cases = (
+        (fixture = "heisenberg_chain_real", mode = "real"),
+        (fixture = "hubbard_tetragonal_momentum_projection_real", mode = "real"),
+        (fixture = "heisenberg_chain_cmp", mode = "cmp"),
+    )
+    for case in cases
+        nsp = haskey(case, :nsp_gauss_leg) ? case.nsp_gauss_leg : nothing
+        direct_ref = run_nsplit_standard_projection_case(
+            case.fixture,
+            case.mode,
+            1,
+            0,
+            2;
+            nsp_gauss_leg = nsp,
+        )
+        store_ref = run_nsplit_standard_projection_case(
+            case.fixture,
+            case.mode,
+            1,
+            1,
+            2;
+            nsp_gauss_leg = nsp,
+        )
+        direct_split = run_nsplit_standard_projection_case(
+            case.fixture,
+            case.mode,
+            2,
+            0,
+            4;
+            nsp_gauss_leg = nsp,
+        )
+        store_split = run_nsplit_standard_projection_case(
+            case.fixture,
+            case.mode,
+            2,
+            1,
+            4;
+            nsp_gauss_leg = nsp,
+        )
+
+        for (label, result) in (
+            ("store_ref", store_ref),
+            ("direct_split", direct_split),
+            ("store_split", store_split),
+        )
+            prefix = "$(case.fixture) $label"
+            assert_close_vector("$prefix zvo_out", result.zvo, direct_ref.zvo;
+                                atol = nsplit_standard_projection_tol)
+            assert_close_vector("$prefix zqp_opt", result.zqp, direct_ref.zqp;
+                                atol = nsplit_standard_projection_tol)
+            assert_close_vector("$prefix zvo_var", result.var, direct_ref.var;
+                                atol = nsplit_standard_projection_tol)
         end
     end
 end

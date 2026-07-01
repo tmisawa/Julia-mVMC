@@ -149,9 +149,14 @@ are treated as C-compatible.
 
 - **BackFlow** correlation factor (`vmc_bf_*` entry points raise an error
   in this release; inputs that activate Back Flow are not supported).
-- **Grouped QP splitting** (`NSplitSize > 1` with `NQPFull > 1` raises an
-  unsupported-feature error). Direct-SR `VMCParaOpt` sample splitting is
-  supported for `NSplitSize >= 1` only when `NQPFull = 1`.
+- **OptTrans-derived QP splitting** (`NSplitSize > 1` with
+  `NQPOptTrans > 1` or active `OptTrans` raises an unsupported-feature error).
+  Direct-SR `VMCParaOpt` sample splitting is supported for `NSplitSize >= 1`
+  when `NQPFull = 1` and for sz-conserved standard-projection `NQPFull > 1`
+  when `NQPOptTrans = 1` (`NSPGaussLeg > 1` and/or `NMPTrans > 1`). FSZ
+  standard-projection `NQPFull > 1` (`NSPGaussLeg > 1` or
+  `abs(NMPTrans) > 1`)
+  remains unsupported.
 - **Additional CG modes** (`NSRCG >= 2`, `useDiagScale != 0`, and
   `RescaleSmat != 0` raise unsupported-feature errors). Standard SR-CG
   (`NSRCG = 1`) is supported for serial and MPI `NSplitSize = 1` runs, but
