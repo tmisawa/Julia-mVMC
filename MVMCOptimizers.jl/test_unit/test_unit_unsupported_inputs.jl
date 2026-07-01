@@ -1,6 +1,6 @@
 using Test
 using MVMCOptimizers
-using MVMCExpertModeParsers: ExpertModeData, ModParaParameters
+using MVMCExpertModeParsers: ExpertModeData, InterAllTerm, ModParaParameters, TransferTerm
 
 # Capture the showerror text of whatever `f()` throws.
 # Returns (threw::Bool, message::String). Used so the contract asserts on the
@@ -228,13 +228,15 @@ end
         end
     end
 
-    @testset "NLanczosMode = 1 is accepted for PhysCal R1" begin
-        modpara = ModParaParameters(lanczos_mode = 1)
-        @test MVMCOptimizers.validate_supported_modpara(modpara) === nothing
-        @test MVMCOptimizers.validate_supported_phys_cal_modpara(modpara) === nothing
-        data = ExpertModeData()
-        data.modpara.lanczos_mode = 1
-        @test MVMCOptimizers.validate_supported_phys_cal_data(data) === nothing
+    @testset "NLanczosMode = 1/2 are accepted for sz-conserved PhysCal" begin
+        for mode in (1, 2)
+            modpara = ModParaParameters(lanczos_mode = mode)
+            @test MVMCOptimizers.validate_supported_modpara(modpara) === nothing
+            @test MVMCOptimizers.validate_supported_phys_cal_modpara(modpara) === nothing
+            data = ExpertModeData()
+            data.modpara.lanczos_mode = mode
+            @test MVMCOptimizers.validate_supported_phys_cal_data(data) === nothing
+        end
     end
 
     @testset "NLanczosMode > 0 is rejected for ParaOpt" begin
@@ -249,25 +251,39 @@ end
         end
     end
 
-    @testset "NLanczosMode > 1 is rejected for PhysCal R1" begin
-        modpara = ModParaParameters(lanczos_mode = 2)
-        threw, msg = capture_error_message(
-            () -> MVMCOptimizers.validate_supported_phys_cal_modpara(modpara),
-        )
-        @test threw
-        @test occursin("NLanczosMode > 1", msg)
-        @test occursin("PhysCal", msg)
+    @testset "FSZ/general-orbital Lanczos is rejected for PhysCal" begin
+        for mode in (1, 2)
+            data = ExpertModeData()
+            data.modpara.lanczos_mode = mode
+            data.i_flg_orbital_general = 1
+            threw, msg = capture_error_message(
+                () -> MVMCOptimizers.validate_supported_phys_cal_data(data),
+            )
+            @test threw
+            @test occursin("FSZ / general-orbital", msg)
+        end
     end
 
-    @testset "FSZ/general-orbital Lanczos is rejected for PhysCal R1" begin
-        data = ExpertModeData()
-        data.modpara.lanczos_mode = 1
-        data.i_flg_orbital_general = 1
+    @testset "spin-changing Lanczos rejects use mode-independent wording" begin
+        transfer_data = ExpertModeData()
+        transfer_data.modpara.lanczos_mode = 2
+        transfer_data.transfer_terms = [TransferTerm(0, 0, 1, 1, 1.0 + 0.0im)]
         threw, msg = capture_error_message(
-            () -> MVMCOptimizers.validate_supported_phys_cal_data(data),
+            () -> MVMCOptimizers.validate_supported_phys_cal_data(transfer_data),
         )
         @test threw
-        @test occursin("FSZ / general-orbital", msg)
+        @test occursin("spin-flip Transfer", msg)
+        @test !occursin("R1", msg)
+
+        interall_data = ExpertModeData()
+        interall_data.modpara.lanczos_mode = 2
+        interall_data.inter_all_terms = [InterAllTerm(0, 0, 1, 1, 2, 0, 3, 0, 1.0 + 0.0im, false)]
+        threw, msg = capture_error_message(
+            () -> MVMCOptimizers.validate_supported_phys_cal_data(interall_data),
+        )
+        @test threw
+        @test occursin("spin-changing InterAll", msg)
+        @test !occursin("R1", msg)
     end
 
     @testset "entry points enforce the Lanczos contract" begin
@@ -280,8 +296,9 @@ end
 
         phys_data = ExpertModeData()
         phys_data.modpara.lanczos_mode = 2
+        phys_data.i_flg_orbital_general = 1
         threw, msg = capture_error_message(() -> vmc_phys_cal!(phys_data))
         @test threw
-        @test occursin("NLanczosMode > 1", msg)
+        @test occursin("FSZ / general-orbital", msg)
     end
 end

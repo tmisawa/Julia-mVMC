@@ -292,6 +292,12 @@ mutable struct PhysicalQuantities
     # Full Lanczos R1 accumulator: QQQQ tensor flattened in C order.
     phys_lanczos_qqqq::Vector{ComplexF64}
 
+    # Full Lanczos mode2 Green accumulators, flattened as
+    # idx + n_phys * (rp + 2 * rq) in C order.
+    phys_lanczos_qcisajsq::Vector{ComplexF64}
+    phys_lanczos_qcisajscktaltq::Vector{ComplexF64}
+    phys_lanczos_qcisajscktaltq_dc::Vector{ComplexF64}
+
     function PhysicalQuantities(
         n_cis_ajs::Int,
         n_cis_ajs_ckt_alt::Int,
@@ -306,6 +312,9 @@ mutable struct PhysicalQuantities
             NTuple{4,Int}[],
             Tuple{Int,Int}[],
             zeros(ComplexF64, 16),
+            zeros(ComplexF64, 4 * n_cis_ajs),
+            zeros(ComplexF64, 4 * n_cis_ajs_ckt_alt),
+            zeros(ComplexF64, 4 * n_cis_ajs_ckt_alt_dc),
         )
     end
 end

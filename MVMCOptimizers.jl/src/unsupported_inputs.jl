@@ -92,7 +92,7 @@ function validate_supported_para_opt_modpara(modpara::ModParaParameters)
             "NLanczosMode > 0 is not supported for parameter optimization in " *
             "Julia-mVMC (got NLanczosMode = $(modpara.lanczos_mode)). " *
             "Use NLanczosMode = 0 for ParaOpt, or run physical measurement " *
-            "with NLanczosMode = 1.",
+            "with NLanczosMode = 1 or 2.",
         )
     end
     if modpara.nsplit_size > 1 && modpara.nsrcg != 0
@@ -163,37 +163,30 @@ function validate_supported_phys_cal_modpara(modpara::ModParaParameters)
             "for physical measurement.",
         )
     end
-    if modpara.lanczos_mode > 1
-        error(
-            "NLanczosMode > 1 is not supported for PhysCal in Julia-mVMC R1 " *
-            "(got NLanczosMode = $(modpara.lanczos_mode)). Use NLanczosMode = 1 " *
-            "for Full Lanczos energy/QQQQ output, or NLanczosMode = 0.",
-        )
-    end
     return nothing
 end
 
 """
     validate_supported_phys_cal_data(data)
 
-Validate physical-measurement settings that require parsed data. Full Lanczos
-R1 is intentionally limited to the sz-conserved path; FSZ/general-orbital
-Lanczos and Lanczos-mode Green outputs are left for later R2+ work.
+Validate physical-measurement settings that require parsed data. Full Lanczos is
+currently limited to the sz-conserved path; FSZ/general-orbital Lanczos remains
+separate work.
 """
 function validate_supported_phys_cal_data(data::ExpertModeData)
-    if data.modpara.lanczos_mode == 1 && data.i_flg_orbital_general != 0
+    if data.modpara.lanczos_mode > 0 && data.i_flg_orbital_general != 0
         error(
-            "NLanczosMode = 1 is not supported in FSZ / general-orbital mode " *
+            "NLanczosMode > 0 is not supported in FSZ / general-orbital mode " *
             "(i_flg_orbital_general = $(data.i_flg_orbital_general)). " *
-            "Use sz-conserved inputs for Full Lanczos R1, or set NLanczosMode = 0.",
+            "Use sz-conserved inputs for Full Lanczos, or set NLanczosMode = 0.",
         )
     end
-    if data.modpara.lanczos_mode == 1
+    if data.modpara.lanczos_mode > 0
         for term in data.transfer_terms
             if term.spin1 != term.spin2
                 error(
-                    "NLanczosMode = 1 does not support spin-flip Transfer terms " *
-                    "in Julia-mVMC R1 (site1=$(term.site1), spin1=$(term.spin1), " *
+                    "NLanczosMode > 0 does not support spin-flip Transfer terms " *
+                    "in Julia-mVMC (site1=$(term.site1), spin1=$(term.spin1), " *
                     "site2=$(term.site2), spin2=$(term.spin2)).",
                 )
             end
@@ -201,8 +194,8 @@ function validate_supported_phys_cal_data(data::ExpertModeData)
         for term in data.inter_all_terms
             if term.spin0 != term.spin1 || term.spin2 != term.spin3
                 error(
-                    "NLanczosMode = 1 does not support spin-changing InterAll " *
-                    "terms in Julia-mVMC R1.",
+                    "NLanczosMode > 0 does not support spin-changing InterAll " *
+                    "terms in Julia-mVMC.",
                 )
             end
         end
