@@ -94,6 +94,21 @@ function resolve_cis_ajs_ckt_alt_idx(cis_ajs_idx, green_two_ex_terms)
     return pairs
 end
 
+function validate_lanczos_mode2_cis_ajs_unique(cis_ajs_idx)
+    seen = Set{NTuple{4,Int}}()
+    for key in cis_ajs_idx
+        if key in seen
+            error(
+                "NLanczosMode = 2 does not support duplicate OneBodyG entries " *
+                "without TwoBodyGEx in Julia-mVMC; duplicate entry = $key. " *
+                "Remove duplicate greenone.def rows before running mode2.",
+            )
+        end
+        push!(seen, key)
+    end
+    return nothing
+end
+
 """
     validate_factored_green_supported(data::ExpertModeData)
 
@@ -125,6 +140,9 @@ function initialize_phys_quantities!(state::VMCOptimizationState, data::ExpertMo
     cis_ajs_idx =
         build_canonical_cis_ajs_idx(data.green_one_terms, data.green_two_ex_terms, n_site)
     cis_ajs_ckt_alt_idx = resolve_cis_ajs_ckt_alt_idx(cis_ajs_idx, data.green_two_ex_terms)
+    if data.modpara.lanczos_mode > 1 && isempty(data.green_two_ex_terms)
+        validate_lanczos_mode2_cis_ajs_unique(cis_ajs_idx)
+    end
 
     n_cis_ajs = length(cis_ajs_idx)
     n_cis_ajs_ckt_alt = length(cis_ajs_ckt_alt_idx)  # == length(green_two_ex_terms)
@@ -153,6 +171,9 @@ function reset_phys_quantities!(state::VMCOptimizationState)
     fill!(phys.local_cis_ajs_ckt_alt_dc, 0.0 + 0.0im)
     fill!(phys.phys_cis_ajs_ckt_alt_dc, 0.0 + 0.0im)
     fill!(phys.phys_lanczos_qqqq, 0.0 + 0.0im)
+    fill!(phys.phys_lanczos_qcisajsq, 0.0 + 0.0im)
+    fill!(phys.phys_lanczos_qcisajscktaltq, 0.0 + 0.0im)
+    fill!(phys.phys_lanczos_qcisajscktaltq_dc, 0.0 + 0.0im)
 end
 
 """
@@ -776,6 +797,200 @@ function accumulate_lanczos_qqqq!(
         dst.phys_lanczos_qqqq[i0+1] += w * (all_complex ? conj(left) : left) * right
     end
     return nothing
+end
+
+@inline function _lanczos_local_value(value::ComplexF64, all_complex::Bool)
+    return all_complex ? value : ComplexF64(real(value), 0.0)
+end
+
+@inline _local_cis_ajs(dst::PhysicalQuantities, phys::PhysicalQuantities) = phys.local_cis_ajs
+@inline _local_cis_ajs(dst::VMCPhysAccumulator, phys::PhysicalQuantities) = dst.local_cis_ajs
+
+@inline _local_cis_ajs_ckt_alt_dc(dst::PhysicalQuantities, phys::PhysicalQuantities) =
+    phys.local_cis_ajs_ckt_alt_dc
+@inline _local_cis_ajs_ckt_alt_dc(dst::VMCPhysAccumulator, phys::PhysicalQuantities) =
+    dst.local_cis_ajs_ckt_alt_dc
+
+function _lanczos_hca_from_config!(
+    ri::Int,
+    rj::Int,
+    s::Int,
+    h1::ComplexF64,
+    ip::ComplexF64,
+    original::LanczosElectronConfig,
+    data::ExpertModeData,
+    state::VMCOptimizationState;
+    all_complex::Bool,
+)::ComplexF64
+    value = 0.0 + 0.0im
+    for (op_coef, moved) in _lanczos_apply_one_body(original, ri, rj, s, data)
+        value += op_coef *
+                 _lanczos_local_hamiltonian_from_config!(
+                     moved,
+                     original,
+                     h1,
+                     ip,
+                     data,
+                     state;
+                     all_complex = all_complex,
+                 )
+    end
+    return _lanczos_local_value(value, all_complex)
+end
+
+function _lanczos_hcaca_from_config!(
+    ri::Int,
+    rj::Int,
+    rk::Int,
+    rl::Int,
+    s::Int,
+    t::Int,
+    h1::ComplexF64,
+    ip::ComplexF64,
+    original::LanczosElectronConfig,
+    data::ExpertModeData,
+    state::VMCOptimizationState;
+    all_complex::Bool,
+)::ComplexF64
+    value = 0.0 + 0.0im
+    for (op_coef, moved) in _lanczos_apply_two_body(original, ri, rj, rk, rl, s, t, data)
+        value += op_coef *
+                 _lanczos_local_hamiltonian_from_config!(
+                     moved,
+                     original,
+                     h1,
+                     ip,
+                     data,
+                     state;
+                     all_complex = all_complex,
+                 )
+    end
+    return _lanczos_local_value(value, all_complex)
+end
+
+function accumulate_lanczos_green!(
+    dst::Union{PhysicalQuantities,VMCPhysAccumulator},
+    phys::PhysicalQuantities,
+    data::ExpertModeData,
+    state::VMCOptimizationState,
+    w::Float64,
+    h1::ComplexF64,
+    h2::ComplexF64,
+    ip::ComplexF64,
+    ele_idx::Vector{Int},
+    ele_cfg::Vector{Int},
+    ele_num::Vector{Int},
+    ele_proj_cnt::Vector{Int};
+    all_complex::Bool,
+)
+    n_cis_ajs = length(phys.cis_ajs_idx)
+    n_cis_ajs_ckt_alt = length(phys.cis_ajs_ckt_alt_idx)
+    n_cis_ajs_ckt_alt_dc = length(data.green_two_terms)
+
+    length(dst.phys_lanczos_qcisajsq) == LANCZOS_N_LS_HAM^2 * n_cis_ajs ||
+        throw(
+            ArgumentError(
+                "phys_lanczos_qcisajsq has length $(length(dst.phys_lanczos_qcisajsq)); " *
+                "expected $(LANCZOS_N_LS_HAM^2 * n_cis_ajs).",
+            ),
+        )
+    length(dst.phys_lanczos_qcisajscktaltq) == LANCZOS_N_LS_HAM^2 * n_cis_ajs_ckt_alt ||
+        throw(
+            ArgumentError(
+                "phys_lanczos_qcisajscktaltq has length " *
+                "$(length(dst.phys_lanczos_qcisajscktaltq)); expected " *
+                "$(LANCZOS_N_LS_HAM^2 * n_cis_ajs_ckt_alt).",
+            ),
+        )
+    length(dst.phys_lanczos_qcisajscktaltq_dc) ==
+    LANCZOS_N_LS_HAM^2 * n_cis_ajs_ckt_alt_dc ||
+        throw(
+            ArgumentError(
+                "phys_lanczos_qcisajscktaltq_dc has length " *
+                "$(length(dst.phys_lanczos_qcisajscktaltq_dc)); expected " *
+                "$(LANCZOS_N_LS_HAM^2 * n_cis_ajs_ckt_alt_dc).",
+            ),
+        )
+
+    original = _lanczos_config(ele_idx, ele_cfg, ele_num, ele_proj_cnt)
+    lslq = (1.0 + 0.0im, h1, h1, h2)
+    local_cis_ajs = _local_cis_ajs(dst, phys)
+    local_cis_ajs_ckt_alt_dc = _local_cis_ajs_ckt_alt_dc(dst, phys)
+
+    return _lanczos_preserve_m_all!(state) do
+        lslca = Vector{ComplexF64}(undef, LANCZOS_N_LS_HAM * n_cis_ajs)
+        @inbounds for idx in 1:n_cis_ajs
+            lslca[idx] = _lanczos_local_value(local_cis_ajs[idx], all_complex)
+        end
+        @inbounds for (idx, (ri, _si, rj, sj)) in enumerate(phys.cis_ajs_idx)
+            lslca[n_cis_ajs+idx] =
+                _lanczos_hca_from_config!(
+                    ri,
+                    rj,
+                    sj,
+                    h1,
+                    ip,
+                    original,
+                    data,
+                    state;
+                    all_complex = all_complex,
+                )
+        end
+
+        @inbounds for rq = 0:(LANCZOS_N_LS_HAM-1), rp = 0:(LANCZOS_N_LS_HAM-1)
+            right_q = _lanczos_local_value(lslq[rp*LANCZOS_N_LS_HAM+1], all_complex)
+            for idx in 1:n_cis_ajs
+                out_idx = idx + n_cis_ajs * (rp + LANCZOS_N_LS_HAM * rq)
+                left = lslca[rq*n_cis_ajs+idx]
+                dst.phys_lanczos_qcisajsq[out_idx] +=
+                    w * (all_complex ? conj(left) : left) * right_q
+            end
+        end
+
+        @inbounds for rq = 0:(LANCZOS_N_LS_HAM-1), rp = 0:(LANCZOS_N_LS_HAM-1)
+            for (idx, (idx0, idx1)) in enumerate(phys.cis_ajs_ckt_alt_idx)
+                out_idx = idx + n_cis_ajs_ckt_alt * (rp + LANCZOS_N_LS_HAM * rq)
+                left = lslca[rq*n_cis_ajs+idx0]
+                right = lslca[rp*n_cis_ajs+idx1]
+                dst.phys_lanczos_qcisajscktaltq[out_idx] +=
+                    w * (all_complex ? conj(left) : left) * right
+            end
+        end
+
+        @inbounds for rq = 0:(LANCZOS_N_LS_HAM-1), rp = 0:(LANCZOS_N_LS_HAM-1)
+            right_q = _lanczos_local_value(lslq[rp*LANCZOS_N_LS_HAM+1], all_complex)
+            for (idx, term) in enumerate(data.green_two_terms)
+                ri = term.site1
+                rj = term.site2
+                rk = term.site3
+                rl = term.site4
+                s = term.spin1 == :up ? 0 : 1
+                t = term.spin3 == :up ? 0 : 1
+                phys_value =
+                    if rq == 0
+                        _lanczos_local_value(local_cis_ajs_ckt_alt_dc[idx], all_complex)
+                    else
+                        _lanczos_hcaca_from_config!(
+                            ri,
+                            rj,
+                            rk,
+                            rl,
+                            s,
+                            t,
+                            h1,
+                            ip,
+                            original,
+                            data,
+                            state;
+                            all_complex = all_complex,
+                        )
+                    end
+                out_idx = idx + n_cis_ajs_ckt_alt_dc * (rp + LANCZOS_N_LS_HAM * rq)
+                dst.phys_lanczos_qcisajscktaltq_dc[out_idx] += w * right_q * phys_value
+            end
+        end
+        nothing
+    end
 end
 
 """

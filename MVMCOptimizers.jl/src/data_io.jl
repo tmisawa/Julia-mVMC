@@ -283,6 +283,33 @@ function _lanczos_energy(qqqq::AbstractVector{ComplexF64})
     return ene_p, ene_vp, alpha_p
 end
 
+function _lanczos_phys_values(
+    qqqq::AbstractVector{ComplexF64},
+    qphysq::AbstractVector{ComplexF64},
+    nphys::Int,
+    alpha::Float64,
+)
+    length(qphysq) == 4 * nphys ||
+        throw(
+            ArgumentError(
+                "Lanczos QPhysQ length $(length(qphysq)) does not match 4 * nphys = " *
+                "$(4 * nphys).",
+            ),
+        )
+    values = Vector{ComplexF64}(undef, nphys)
+    h1 = qqqq[3]
+    h2_1 = qqqq[4]
+    dnorm = real(1.0 + 2.0 * alpha * h1 + alpha^2 * h2_1)
+    @inbounds for i in 1:nphys
+        a0 = qphysq[i]
+        a1_01 = qphysq[nphys+i]
+        a1_10 = qphysq[2*nphys+i]
+        a2_11 = qphysq[3*nphys+i]
+        values[i] = (a0 + alpha * (a1_01 + a1_10) + alpha^2 * a2_11) / dnorm
+    end
+    return values
+end
+
 function output_lanczos_func!(
     data::ExpertModeData,
     state::VMCOptimizationState,
@@ -309,6 +336,81 @@ function output_lanczos_func!(
     open(qqqq_filename, "w") do f
         for val in phys.phys_lanczos_qqqq
             @printf(f, "% .18e  ", real(val))
+        end
+        println(f)
+    end
+
+    data.modpara.lanczos_mode > 1 || return
+
+    ls_cis_ajs = _lanczos_phys_values(
+        phys.phys_lanczos_qqqq,
+        phys.phys_lanczos_qcisajsq,
+        length(phys.cis_ajs_idx),
+        alpha,
+    )
+    cisajs_filename =
+        _output_path(@sprintf("%s_ls_cisajs_%03d.dat", data_file_head, ismp), output_dir)
+    open(cisajs_filename, "w") do f
+        for (idx, (ri, si, rj, sj)) in enumerate(phys.cis_ajs_idx)
+            val = ls_cis_ajs[idx]
+            @printf(
+                f,
+                "%d %d %d %d % .18e % .18e \n",
+                ri,
+                si,
+                rj,
+                sj,
+                real(val),
+                imag(val)
+            )
+        end
+        println(f)
+    end
+
+    ls_cis_ajs_ckt_alt_dc = _lanczos_phys_values(
+        phys.phys_lanczos_qqqq,
+        phys.phys_lanczos_qcisajscktaltq_dc,
+        length(data.green_two_terms),
+        alpha,
+    )
+    cktalt_filename =
+        _output_path(@sprintf("%s_ls_cisajscktalt_%03d.dat", data_file_head, ismp), output_dir)
+    open(cktalt_filename, "w") do f
+        for (idx, term) in enumerate(data.green_two_terms)
+            si = term.spin1 == :up ? 0 : 1
+            sj = term.spin2 == :up ? 0 : 1
+            sk = term.spin3 == :up ? 0 : 1
+            sl = term.spin4 == :up ? 0 : 1
+            val = ls_cis_ajs_ckt_alt_dc[idx]
+            @printf(
+                f,
+                "%d %d %d %d %d %d %d %d % .18e % .18e\n",
+                term.site1,
+                si,
+                term.site2,
+                sj,
+                term.site3,
+                sk,
+                term.site4,
+                sl,
+                real(val),
+                imag(val)
+            )
+        end
+        println(f)
+    end
+
+    ls_cis_ajs_ckt_alt = _lanczos_phys_values(
+        phys.phys_lanczos_qqqq,
+        phys.phys_lanczos_qcisajscktaltq,
+        length(phys.cis_ajs_ckt_alt_idx),
+        alpha,
+    )
+    cktaltex_filename =
+        _output_path(@sprintf("%s_ls_cisajscktaltex_%03d.dat", data_file_head, ismp), output_dir)
+    open(cktaltex_filename, "w") do f
+        for val in ls_cis_ajs_ckt_alt
+            @printf(f, "% .18e % .18e ", real(val), imag(val))
         end
         println(f)
     end

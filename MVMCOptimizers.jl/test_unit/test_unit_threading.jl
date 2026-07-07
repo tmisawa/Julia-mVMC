@@ -177,6 +177,12 @@ end
     b.phys_lanczos_qqqq[1] = -2.0 + 1.0im
     a.phys_lanczos_qqqq[16] = 3.0 + 0.0im
     b.phys_lanczos_qqqq[16] = 4.0 + 0.0im
+    a.phys_lanczos_qcisajsq[1] = 10.0 + 0.0im
+    b.phys_lanczos_qcisajsq[1] = 1.0 + 2.0im
+    a.phys_lanczos_qcisajscktaltq[1] = 11.0 + 0.0im
+    b.phys_lanczos_qcisajscktaltq[1] = -1.0 + 0.0im
+    a.phys_lanczos_qcisajscktaltq_dc[1] = 12.0 + 0.0im
+    b.phys_lanczos_qcisajscktaltq_dc[1] = -2.0 + 3.0im
 
     MO.merge_phys_accumulators!(phys, (a, b))
     @test phys.phys_cis_ajs == [4.0 + 1.0im, 1.0 + 2.0im]
@@ -184,6 +190,9 @@ end
     @test phys.phys_cis_ajs_ckt_alt_dc == [5.0 + 0.0im, 9.0 + 3.0im]
     @test phys.phys_lanczos_qqqq[1] == 6.0 + 1.0im
     @test phys.phys_lanczos_qqqq[16] == 7.0 + 0.0im
+    @test phys.phys_lanczos_qcisajsq[1] == 11.0 + 2.0im
+    @test phys.phys_lanczos_qcisajscktaltq[1] == 10.0 + 0.0im
+    @test phys.phys_lanczos_qcisajscktaltq_dc[1] == 10.0 + 3.0im
     @test phys.local_cis_ajs == [99.0 + 0.0im, 100.0 + 0.0im]
     @test phys.local_cis_ajs_ckt_alt_dc == zeros(ComplexF64, 2)
 
@@ -191,6 +200,9 @@ end
     @test isempty(none_acc.local_cis_ajs)
     @test isempty(none_acc.phys_cis_ajs)
     @test isempty(none_acc.phys_lanczos_qqqq)
+    @test isempty(none_acc.phys_lanczos_qcisajsq)
+    @test isempty(none_acc.phys_lanczos_qcisajscktaltq)
+    @test isempty(none_acc.phys_lanczos_qcisajscktaltq_dc)
     @test MO.merge_phys_accumulators!(nothing, (none_acc,)) === nothing
 
     phys.cis_ajs_ckt_alt_idx = [(1, 2)]
@@ -247,6 +259,9 @@ end
     @test length(local_acc.phys.local_cis_ajs) == 1
     @test length(local_acc.phys.phys_cis_ajs) == 1
     @test length(local_acc.phys.phys_lanczos_qqqq) == 16
+    @test length(local_acc.phys.phys_lanczos_qcisajsq) == 4
+    @test length(local_acc.phys.phys_lanczos_qcisajscktaltq) == 4
+    @test length(local_acc.phys.phys_lanczos_qcisajscktaltq_dc) == 4
     @test length(local_acc.main_cal_scratch.proj_cnt_new) ==
           length(state.electron_config.tmp_ele_proj_cnt)
     @test length(local_acc.main_cal_scratch.pf_m_new_real) ==
@@ -256,6 +271,7 @@ end
     MO.record_counter!(local_acc.counter, 1, 5)
     local_acc.phys.phys_cis_ajs[1] = 6.0 + 0.0im
     local_acc.phys.phys_lanczos_qqqq[2] = 7.0 + 1.0im
+    local_acc.phys.phys_lanczos_qcisajsq[2] = 8.0 + 0.0im
     MO.ctimer_add_elapsed!(local_acc.timer, 4, UInt64(13))
 
     MO.merge_thread_accumulator!(state, parent_timer, local_acc)
@@ -264,6 +280,7 @@ end
     @test state.electron_config.counter[1] == 5
     @test state.phys_quantities.phys_cis_ajs[1] == 6.0 + 0.0im
     @test state.phys_quantities.phys_lanczos_qqqq[2] == 7.0 + 1.0im
+    @test state.phys_quantities.phys_lanczos_qcisajsq[2] == 8.0 + 0.0im
     @test parent_timer.elapsed_ns[5] == UInt64(13)
 
     cached = MO.main_cal_accumulator!(
@@ -280,6 +297,7 @@ end
     cached.sr_opt.sr_opt_oo[1] = 11.0 + 0.0im
     cached.sr_opt.sr_opt_ho[1] = 12.0 + 0.0im
     cached.phys.phys_lanczos_qqqq[2] = 13.0 + 0.0im
+    cached.phys.phys_lanczos_qcisajsq[2] = 14.0 + 0.0im
     MO.ctimer_add_elapsed!(cached.timer, 4, UInt64(99))
 
     reused = MO.main_cal_accumulator!(
@@ -296,6 +314,7 @@ end
     @test iszero(reused.sr_opt.sr_opt_oo[1])
     @test iszero(reused.sr_opt.sr_opt_ho[1])
     @test iszero(reused.phys.phys_lanczos_qqqq[2])
+    @test iszero(reused.phys.phys_lanczos_qcisajsq[2])
     @test reused.timer.elapsed_ns[5] == UInt64(0)
 
     real_state = MO.VMCOptimizationState(2, 1, 1, 2, 1, 2, false, false)

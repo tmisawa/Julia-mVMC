@@ -4090,10 +4090,11 @@ function vmc_main_cal!(
             ctimer_stop!(maincal_diag_timer, 946)
             ctimer_stop!(maincal_diag_timer, 940)
 
+            lanczos_h2 = 0.0 + 0.0im
             if nvmc_cal_mode == 1 &&
                data.modpara.lanczos_mode > 0 &&
                worker_state.phys_quantities !== nothing
-                h2 = calculate_lanczos_h2!(
+                lanczos_h2 = calculate_lanczos_h2!(
                     e,
                     ip,
                     ele_idx,
@@ -4104,7 +4105,13 @@ function vmc_main_cal!(
                     worker_state;
                     all_complex = all_complex,
                 )
-                accumulate_lanczos_qqqq!(local_acc.phys, w, e, h2; all_complex = all_complex)
+                accumulate_lanczos_qqqq!(
+                    local_acc.phys,
+                    w,
+                    e,
+                    lanczos_h2;
+                    all_complex = all_complex,
+                )
             end
 
             # Calculate Green's functions (only in measurement mode)
@@ -4122,6 +4129,23 @@ function vmc_main_cal!(
                     ele_num,
                     ele_proj_cnt,
                 )
+                if data.modpara.lanczos_mode > 1
+                    accumulate_lanczos_green!(
+                        local_acc.phys,
+                        worker_state.phys_quantities,
+                        data,
+                        worker_state,
+                        w,
+                        e,
+                        lanczos_h2,
+                        ip,
+                        ele_idx,
+                        ele_cfg,
+                        ele_num,
+                        ele_proj_cnt;
+                        all_complex = all_complex,
+                    )
+                end
                 ctimer_stop!(maincal_diag_timer, 947)
                 ctimer_stop!(maincal_diag_timer, 940)
             end

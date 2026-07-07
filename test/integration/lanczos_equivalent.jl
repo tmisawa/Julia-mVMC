@@ -1,14 +1,16 @@
 # test/integration/lanczos_equivalent.jl
 #
-# Julia-mVMC Full Lanczos R1 PhysCal end-to-end integration gate.
+# Julia-mVMC Full Lanczos PhysCal end-to-end integration gate.
 #
 # For each committed system, this runner:
 #   1. loads fixed variational parameters from the committed C `zqp_opt.dat`,
 #   2. runs `run_phys_cal_from_namelist` on a committed PhysCal input set with
-#      NLanczosMode=1 into a fresh tempdir, and
+#      NLanczosMode=2 into a fresh tempdir, and
 #   3. compares the produced Lanczos files against committed C-mVMC references:
 #        - zvo_ls_out_001.dat   R1 energy, norm, and alpha
 #        - zvo_ls_qqqq_001.dat  16 flattened QQQQ moments
+#        - zvo_ls_cisajs_001.dat
+#        - zvo_ls_cisajscktalt_001.dat
 #
 # Run all systems:
 #   julia --project=@. test/integration/lanczos_equivalent.jl
@@ -23,6 +25,7 @@ using MVMCOptimizers
 const LANCZOS_MODEL_FILTER_ENV = "JULIA_MVMC_LANCZOS_MODELS"
 const LANCZOS_LS_OUT_TOL = 1e-8
 const LANCZOS_QQQQ_TOL = 1e-10
+const LANCZOS_GREEN_TOL = 1e-8
 
 const LANCZOS_MODELS = [
     (
@@ -50,12 +53,14 @@ end
 
 parse_float_vector(path::AbstractString) = parse.(Float64, split(read(path, String)))
 
-function assert_close_vector(actual_path, expected_path; nvalues, atol)
+function assert_close_vector(actual_path, expected_path; nvalues = nothing, atol)
     actual = parse_float_vector(actual_path)
     expected = parse_float_vector(expected_path)
 
-    @test length(actual) == nvalues
-    @test length(expected) == nvalues
+    if nvalues !== nothing
+        @test length(actual) == nvalues
+        @test length(expected) == nvalues
+    end
     @test length(actual) == length(expected)
     @test maximum(abs.(actual .- expected)) <= atol
 end
@@ -94,10 +99,18 @@ function run_lanczos_model(model)
             actual_qqqq, expected_qqqq;
             nvalues = 16, atol = LANCZOS_QQQQ_TOL,
         )
+
+        for file in ("zvo_ls_cisajs_001.dat", "zvo_ls_cisajscktalt_001.dat")
+            actual_path = joinpath(dir, file)
+            expected_path = joinpath(expected, file)
+            @test isfile(actual_path)
+            @test isfile(expected_path)
+            assert_close_vector(actual_path, expected_path; atol = LANCZOS_GREEN_TOL)
+        end
     end
 end
 
-@testset "Julia-mVMC Full Lanczos R1 PhysCal e2e (C reference)" begin
+@testset "Julia-mVMC Full Lanczos PhysCal e2e (C reference)" begin
     models = selected_lanczos_models()
     @test !isempty(models)
 
