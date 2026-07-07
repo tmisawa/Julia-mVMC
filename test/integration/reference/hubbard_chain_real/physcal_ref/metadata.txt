@@ -27,3 +27,30 @@
   (nearest-neighbour hops). mode=:real, itinerant chain.
 - Julia vs C: one-body max_abs 1.1e-16, direct 8.3e-17, factored 1.7e-16.
   n_para_consumed=19.
+
+## Full Lanczos mode2 addendum (Tier B TwoBodyGEx)
+- Generated for the `NLanczosMode = 2` factored Lanczos Green gate from the
+  same committed `hubbard_chain_real/physcal_ref` fixture, changing only
+  `NLanczosMode` from 0 to 2 in the staging copy.
+- C-mVMC source: issp-center-dev/mVMC @
+  622166afe33c6be3402d7c926db7e9c0003a47c4.
+- Threads: OMP_NUM_THREADS=1, single MPI rank.
+- Command summary: `vmc.out -e namelist.def ../zqp_opt.dat` from the staged
+  `inputs/` directory. C wrote outputs under `output/`; the committed
+  references are the curated `zvo_ls_*_001.dat` files.
+- Added Lanczos reference files:
+  `zvo_ls_out_001.dat`, `zvo_ls_qqqq_001.dat`,
+  `zvo_ls_cisajs_001.dat`, `zvo_ls_cisajscktalt_001.dat`,
+  `zvo_ls_cisajscktaltex_001.dat`.
+- One-body-list invariant: after C's `TwoBodyGEx` second-constituent swap
+  `(x6,x7,x4,x5)`, all factored constituents are already present in the
+  12-entry `greenone.def` list. Therefore the normal mode0 and mode2 one-body
+  list remains unchanged for this fixture.
+- C 622166a staging vs existing committed normal PhysCal references:
+  one-body max_abs 5.6e-17, direct max_abs 2.8e-17, factored max_abs 5.6e-17.
+  The existing non-Lanczos `zvo_cisajs*` references retain their original
+  provenance above.
+- Julia vs C for the committed Lanczos references:
+  `zvo_ls_out` max_abs 6.9e-14, `zvo_ls_qqqq` max_abs 1.5e-14,
+  `zvo_ls_cisajs` max_abs 2.3e-16, `zvo_ls_cisajscktalt` max_abs 2.2e-15,
+  `zvo_ls_cisajscktaltex` max_abs 1.2e-16. `n_para_consumed=19`.

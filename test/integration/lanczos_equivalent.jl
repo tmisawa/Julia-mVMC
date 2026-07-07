@@ -11,6 +11,7 @@
 #        - zvo_ls_qqqq_001.dat  16 flattened QQQQ moments
 #        - zvo_ls_cisajs_001.dat
 #        - zvo_ls_cisajscktalt_001.dat
+#        - zvo_ls_cisajscktaltex_001.dat for TwoBodyGEx fixtures
 #
 # Run all systems:
 #   julia --project=@. test/integration/lanczos_equivalent.jl
@@ -33,12 +34,21 @@ const LANCZOS_MODELS = [
         c_model = "HubbardChainLanczos",
         mode = :real,
         n_para = 31,
+        has_two_body_ex = false,
     ),
     (
         fixture = "spin_chain_lanczos",
         c_model = "SpinChainLanczos",
         mode = :real,
         n_para = 34,
+        has_two_body_ex = false,
+    ),
+    (
+        fixture = "hubbard_chain_real",
+        c_model = "HubbardChain",
+        mode = :real,
+        n_para = 19,
+        has_two_body_ex = true,
     ),
 ]
 
@@ -101,6 +111,15 @@ function run_lanczos_model(model)
         )
 
         for file in ("zvo_ls_cisajs_001.dat", "zvo_ls_cisajscktalt_001.dat")
+            actual_path = joinpath(dir, file)
+            expected_path = joinpath(expected, file)
+            @test isfile(actual_path)
+            @test isfile(expected_path)
+            assert_close_vector(actual_path, expected_path; atol = LANCZOS_GREEN_TOL)
+        end
+
+        if model.has_two_body_ex
+            file = "zvo_ls_cisajscktaltex_001.dat"
             actual_path = joinpath(dir, file)
             expected_path = joinpath(expected, file)
             @test isfile(actual_path)
