@@ -113,16 +113,21 @@
   - `unit/unsupported_inputs: NSplitSize contract` → `validate_supported_modpara`
     - `NSplitSize = 1` は許容（serial / MPI sample parallel、`vmc_para_opt!` / `vmc_phys_cal!`）
     - `NSplitSize > 1` は direct `VMCParaOpt` (`NSRCG = 0`) で許容
-    - `NSplitSize > 1` + SR-CG、PhysCal、`NQPFull > 1` は `error()` で reject
-    - エラーメッセージに該当する非対応組み合わせ（SR-CG / PhysCal / NQPFull）を含む
+    - `NSplitSize > 1` は sz-conserved normal-Green `VMCPhysCal` で許容
+    - `NSplitSize > 1` + SR-CG、FSZ/general-orbital PhysCal、PhysCal Lanczos、
+      OptTrans-derived QP split、FSZ standard-projection `NQPFull > 1` は
+      `error()` で reject
+    - エラーメッセージに該当する非対応組み合わせ（SR-CG / PhysCal split
+      scope / NQPFull）を含む
     - 検証は型ではなくメッセージ部分文字列で行う（design review A2）
   - `unit/unsupported_inputs: SR-CG option contract` → `validate_supported_modpara`
     - `NSRCG = 0/1` は許容、`NSRCG >= 2` は reject
     - `useDiagScale != 0` / `RescaleSmat != 0` は reject
   - `unit/unsupported_inputs: NLanczosMode contract` → `validate_supported_modpara`
     - `NLanczosMode = 0/1/2` は global 値として許容、未知値は reject
-    - ParaOpt は `NLanczosMode > 0` を reject、PhysCal は R1 として `NLanczosMode = 1` を許容
-    - PhysCal R1 では `NLanczosMode > 1` と FSZ/general-orbital Lanczos を reject
+    - ParaOpt は `NLanczosMode > 0` を reject、PhysCal は sz-conserved
+      `NSplitSize = 1` path で `NLanczosMode = 1/2` を許容
+    - PhysCal では `NSplitSize > 1` Lanczos と FSZ/general-orbital Lanczos を reject
 
 ### `src/green_func_calc.jl` + `vmc_phys_cal.jl`（factored two-body Green）
 - `test_unit/test_unit_physcal_factored_green.jl`

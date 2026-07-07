@@ -12,6 +12,7 @@ const nsplit_nstore_worker = joinpath(@__DIR__, "mpi_nsplit_nstore_smoke.jl")
 const nsplit_standard_projection_worker =
     joinpath(@__DIR__, "mpi_nsplit_standard_projection_smoke.jl")
 const physcal_worker = joinpath(@__DIR__, "mpi_physcal_smoke.jl")
+const physcal_nsplit_worker = joinpath(@__DIR__, "mpi_physcal_nsplit_smoke.jl")
 const weight_average_worker = joinpath(@__DIR__, "mpi_weight_average_smoke.jl")
 const srcg_operate_worker = joinpath(@__DIR__, "mpi_srcg_operate_smoke.jl")
 const srcg_e2e_worker = joinpath(@__DIR__, "mpi_srcg_e2e_smoke.jl")
@@ -38,6 +39,7 @@ const nsplit_nstore_tol = 1e-8
 # through comm1 allreduce before taking log(IP). Keep this slightly looser than
 # the NQPFull=1 smoke where the QP sum has one term.
 const nsplit_standard_projection_tol = 5e-8
+const physcal_nsplit_tol = 5e-8
 
 function assert_files_present(dir::AbstractString, names)
     for name in names
@@ -100,6 +102,30 @@ function run_nsplit_standard_projection_case(
         zvo = parse_numeric_file(joinpath(mpi_dir, "zvo_out.dat")),
         zqp = parse_numeric_file(joinpath(mpi_dir, "zqp_opt.dat")),
         var = parse_numeric_file(joinpath(mpi_dir, "zvo_var.dat")),
+    )
+end
+
+function run_physcal_nsplit_case(
+    fixture::AbstractString,
+    mode::AbstractString,
+    nsplit::Int,
+    nranks::Int,
+)
+    mpi_dir = mktempdir()
+    out = read(
+        `$(mpiexec()) -n $nranks $(Base.julia_cmd()) --project=$project $physcal_nsplit_worker $fixture $mode $nsplit $mpi_dir`,
+        String,
+    )
+    assert_files_present(mpi_dir, physcal_files)
+    label = "physcal-nsplit worker: $fixture nsplit=$nsplit"
+    @test count("$label root rank ok", out) == 1
+    @test count("$label non-root rank ok", out) == nranks - 1
+    return (
+        zvo = parse_numeric_file(joinpath(mpi_dir, "zvo_out.dat")),
+        var = parse_numeric_file(joinpath(mpi_dir, "zvo_var.dat")),
+        cisajs = parse_numeric_file(joinpath(mpi_dir, "zvo_cisajs_001.dat")),
+        two_body = parse_numeric_file(joinpath(mpi_dir, "zvo_cisajscktalt_001.dat")),
+        factored = parse_numeric_file(joinpath(mpi_dir, "zvo_cisajscktaltex_001.dat")),
     )
 end
 
@@ -282,6 +308,26 @@ end
                                 atol = nsplit_standard_projection_tol)
             assert_close_vector("$prefix zvo_var", result.var, direct_ref.var;
                                 atol = nsplit_standard_projection_tol)
+        end
+    end
+end
+
+@testset "v0.5 PhysCal NSplitSize self-consistency" begin
+    cases = (
+        (fixture = "heisenberg_chain_real", mode = "real"),
+        (fixture = "heisenberg_chain_cmp", mode = "cmp"),
+    )
+    for case in cases
+        direct_ref = run_physcal_nsplit_case(case.fixture, case.mode, 1, 2)
+        split = run_physcal_nsplit_case(case.fixture, case.mode, 2, 4)
+
+        for field in (:zvo, :var, :cisajs, :two_body, :factored)
+            assert_close_vector(
+                "$(case.fixture) PhysCal $field",
+                getfield(split, field),
+                getfield(direct_ref, field);
+                atol = physcal_nsplit_tol,
+            )
         end
     end
 end
