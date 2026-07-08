@@ -1,6 +1,7 @@
 using Test
 using MVMCOptimizers
-using MVMCExpertModeParsers: ExpertModeData, InterAllTerm, ModParaParameters, TransferTerm
+using MVMCExpertModeParsers:
+    ExpertModeData, GreenTwoExTerm, InterAllTerm, ModParaParameters, TransferTerm
 
 # Capture the showerror text of whatever `f()` throws.
 # Returns (threw::Bool, message::String). Used so the contract asserts on the
@@ -134,6 +135,7 @@ end
         fsz_data.modpara.nsplit_size = 2
         fsz_data.modpara.lanczos_mode = 0
         fsz_data.i_flg_orbital_general = 1
+        fsz_data.green_two_ex_terms = [GreenTwoExTerm(0, 0, 1, 0, 2, 1, 3, 1)]
         threw, msg = capture_error_message(
             () -> MVMCOptimizers.validate_supported_phys_cal_data(fsz_data),
         )
@@ -310,6 +312,7 @@ end
             data = ExpertModeData()
             data.modpara.lanczos_mode = mode
             data.i_flg_orbital_general = 1
+            data.green_two_ex_terms = [GreenTwoExTerm(0, 0, 1, 0, 2, 1, 3, 1)]
             threw, msg = capture_error_message(
                 () -> MVMCOptimizers.validate_supported_phys_cal_data(data),
             )
