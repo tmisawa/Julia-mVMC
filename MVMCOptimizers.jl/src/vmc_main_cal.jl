@@ -4513,9 +4513,7 @@ function vmc_main_cal_fsz!(
         # Calculate Green's functions (only in measurement mode)
         # C implementation: VMCMainCal_fsz calls CalculateGreenFunc_fsz when NVMCCalMode==1
         if nvmc_cal_mode == 1 && worker_state.phys_quantities !== nothing
-            # TODO: Implement FSZ-specific green function calculation
-            # For now, use standard version (may not be accurate for spin-flip terms)
-            calculate_green_func!(
+            calculate_green_func_fsz!(
                 data,
                 worker_state,
                 local_acc.phys,
@@ -4525,6 +4523,7 @@ function vmc_main_cal_fsz!(
                 ele_cfg,
                 ele_num,
                 ele_proj_cnt,
+                ele_spn,
             )
         end
 

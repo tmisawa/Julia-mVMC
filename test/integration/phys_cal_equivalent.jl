@@ -39,6 +39,7 @@ const PHYS_CAL_MODEL_FILTER_ENV = "JULIA_MVMC_PHYS_CAL_MODELS"
 const PHYS_CAL_MODELS = [
     (fixture = "heisenberg_chain_real", c_model = "HeisenbergChain",     mode = :real, n_para = 14),
     (fixture = "heisenberg_chain_cmp",  c_model = "HeisenbergChain_cmp", mode = :cmp,  n_para = 14),
+    (fixture = "heisenberg_chain_fsz",  c_model = "HeisenbergChain_fsz", mode = :fsz,  n_para = 24),
     (fixture = "hubbard_chain_real",    c_model = "HubbardChain",        mode = :real, n_para = 19),
     (fixture = "hubbard_chain_dh_real", c_model = "HubbardChain_DH",     mode = :real, n_para = 35),
     (fixture = "kondo_chain_real",      c_model = "KondoChain",          mode = :real, n_para = 76),

@@ -49,8 +49,8 @@ function vmc_phys_cal!(
     validate_supported_modpara(data.modpara)
     validate_supported_phys_cal_modpara(data.modpara)
     validate_supported_phys_cal_data(data)
-    # Reject TwoBodyGEx in FSZ / general-orbital mode before any sampling or RNG
-    # side effects (its Green measurement path is not yet wired).
+    # Factored Green support hook. Currently all supported PhysCal modes pass;
+    # keep the call here so future unsupported combinations fail before RNG use.
     validate_factored_green_supported(data)
 
     # Initialize RNG if not provided. Match the C-compatible seed convention

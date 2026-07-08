@@ -103,6 +103,58 @@ end
     @test phys.phys_cis_ajs_ckt_alt == [0.5 + 0.0im]
 end
 
+@testset "calculate_green_func_fsz! uses FSZ spin dispatch and accumulator locals" begin
+    data = ExpertModeData()
+    data.modpara.nsite = 2
+    data.modpara.nelec = 1
+    data.i_flg_orbital_general = 1
+    data.green_one_terms = [
+        GreenOneTerm(0, 0, :up, :up),      # same-spin diagonal -> GreenFunc1_fsz
+        GreenOneTerm(0, 1, :up, :down),    # spin-changing occupied target -> GreenFunc1_fsz2 = 0
+    ]
+    data.green_two_terms = [
+        GreenTwoTerm(0, 0, 0, 0, :up, :up, :up, :up),          # GreenFunc2_fsz
+        GreenTwoTerm(0, 1, 0, 1, :up, :down, :up, :down),      # GreenFunc2_fsz2 special zero
+    ]
+    data.green_two_ex_terms = [
+        GreenTwoExTerm(0, 0, 0, 0, 0, 0, 0, 0),
+    ]
+
+    state = MVMCOptimizers.VMCOptimizationState(2, 1, 0, 0, 1, 1, true, true)
+    MVMCOptimizers.initialize_phys_quantities!(state, data)
+    phys = state.phys_quantities
+    acc = MVMCOptimizers.VMCPhysAccumulator(phys)
+
+    ele_idx = Int[0, 1]
+    ele_spn = Int[0, 1]
+    ele_cfg = Int[0, -1, -1, 1]
+    ele_num = Int[1, 0, 0, 1]
+
+    MVMCOptimizers.calculate_green_func_fsz!(
+        data,
+        state,
+        acc,
+        0.5,
+        1.0 + 0.0im,
+        ele_idx,
+        ele_cfg,
+        ele_num,
+        Int[],
+        ele_spn,
+    )
+
+    @test acc.local_cis_ajs == [1.0 + 0.0im, 0.0 + 0.0im]
+    @test acc.phys_cis_ajs == [0.5 + 0.0im, 0.0 + 0.0im]
+    @test acc.local_cis_ajs_ckt_alt_dc == [1.0 + 0.0im, 0.0 + 0.0im]
+    @test acc.phys_cis_ajs_ckt_alt_dc == [0.5 + 0.0im, 0.0 + 0.0im]
+    @test acc.phys_cis_ajs_ckt_alt == [0.5 + 0.0im]
+
+    # The accumulator overload must not rely on state-local values for factored
+    # Green accumulation; the sampling loop merges acc into state after the range.
+    @test phys.local_cis_ajs == [0.0 + 0.0im, 0.0 + 0.0im]
+    @test phys.phys_cis_ajs == [0.0 + 0.0im, 0.0 + 0.0im]
+end
+
 using MVMCOptimizers: VMCOptimizationState
 using Printf
 
@@ -469,7 +521,7 @@ end
     @test length(pq2.phys_cis_ajs_ckt_alt) == 2
 end
 
-@testset "FSZ + factored is rejected before sampling" begin
+@testset "FSZ + factored validation hook accepts supported PhysCal path" begin
     data = ExpertModeData()
     data.green_two_ex_terms = [GreenTwoExTerm(0, 0, 1, 0, 2, 1, 3, 1)]
 
@@ -477,41 +529,11 @@ end
     data.i_flg_orbital_general = 0
     @test MVMCOptimizers.validate_factored_green_supported(data) === nothing
 
-    # FSZ / general-orbital (== 1): rejected with a clear message.
+    # FSZ / general-orbital (== 1): supported by calculate_green_func_fsz!.
     data.i_flg_orbital_general = 1
-    threw = false
-    msg = ""
-    try
-        MVMCOptimizers.validate_factored_green_supported(data)
-    catch err
-        threw = true
-        msg = sprint(showerror, err)
-    end
-    @test threw
-    @test occursin("TwoBodyGEx", msg)
-    @test occursin("FSZ", msg)
+    @test MVMCOptimizers.validate_factored_green_supported(data) === nothing
 
-    # No factored terms: FSZ is fine for the rest of PhysCal.
+    # No factored terms remains accepted.
     data.green_two_ex_terms = GreenTwoExTerm[]
     @test MVMCOptimizers.validate_factored_green_supported(data) === nothing
-end
-
-@testset "vmc_phys_cal! rejects FSZ + factored before sampling" begin
-    # The guard runs before RNG / init_parameter!, so a minimal (physically
-    # incomplete) input still fails for the intended reason (Finding 2).
-    data = ExpertModeData()
-    data.green_two_ex_terms = [GreenTwoExTerm(0, 0, 1, 0, 2, 1, 3, 1)]
-    data.i_flg_orbital_general = 1
-
-    err = try
-        MVMCOptimizers.vmc_phys_cal!(data)
-        nothing
-    catch e
-        e
-    end
-
-    @test err isa ErrorException
-    msg = sprint(showerror, err)
-    @test occursin("TwoBodyGEx", msg)
-    @test occursin("FSZ", msg)
 end

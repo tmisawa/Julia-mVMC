@@ -61,7 +61,8 @@ active is not reproducible bit-for-bit.
 | `spinjastrow.def` (`SpinJastrow`) | Not implemented; parser hard-fails if the keyword is present because it would change projection offsets. |
 
 > Note: the factored/product two-body Green (`TwoBodyGEx` / `greentwoex.def` →
-> `zvo_cisajscktaltex`) **is** supported (non-FSZ) and gated against C; see
+> `zvo_cisajscktaltex`) **is** supported for sz-conserved and FSZ/general-orbital
+> `NSplitSize = 1` PhysCal runs and gated against C; see
 > [`04_physics_calc.md`](04_physics_calc.md).
 
 ## Compatibility notes

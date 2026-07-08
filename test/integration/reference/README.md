@@ -179,6 +179,7 @@ files against committed C references with the per-quantity tolerances of
 |--------------|------|------------------------------|
 | `heisenberg_chain_real/physcal_ref` | real | freshly optimised (NVMCCalMode=0) |
 | `heisenberg_chain_cmp/physcal_ref`  | cmp  | freshly optimised (NVMCCalMode=0) |
+| `heisenberg_chain_fsz/physcal_ref`  | fsz  | reused `../inputs/zqp_opt.dat` |
 | `hubbard_chain_real/physcal_ref`    | real | reused `../inputs/zqp_opt.dat` |
 | `hubbard_chain_dh_real/physcal_ref` | real | reused Hubbard params + hand-authored DH2/DH4 slice |
 | `kondo_chain_real/physcal_ref`      | real | reused `../inputs/zqp_opt.dat` |
@@ -190,6 +191,8 @@ Each `physcal_ref/` contains:
   already present in `greenone.def`), `modpara.def` with `NVMCCalMode = 1`, and a
   `namelist.def` that adds the `TwoBodyGEx greentwoex.def` line. The DH fixture
   also adds hand-authored `dh2.def` / `dh4.def` ring-neighbour index tables.
+  The FSZ fixture keeps the same `Orbital` + `OrbitalParallel` AP+P layout as
+  its optimisation fixture so the reused `zqp_opt.dat` parameter order matches C.
   Isolated from the committed optimisation `inputs/` (`NVMCCalMode = 0`), so a
   PhysCal fixture cannot regress the optimisation suite.
 - `zqp_opt.dat` — the fixed variational parameters fed to the runner (`opt_para`).
@@ -201,9 +204,9 @@ Each `physcal_ref/` contains:
 
 - **C source**: `issp-center-dev/mVMC`, branch `develop` @
   `66f17422968009f8cc70f1dec94b2f52e562d344` (the canonical integration head).
-  The DH fixture was generated with a local build at `622166afe33c6be3402d7c926db7e9c0003a47c4`,
-  which is based on that commit plus the OpenMP SIMD benchmark branch and a
-  test-data-only commit.
+  The DH and FSZ fixtures were generated with a reference build at
+  `622166afe33c6be3402d7c926db7e9c0003a47c4`, which is based on that commit
+  plus the OpenMP SIMD benchmark branch and test-data-only changes.
 - **Build**: `cmake -DCONFIG=apple -DCMAKE_BUILD_TYPE=Release -DUSE_GEMMT=OFF
   -DUSE_SCALAPACK=OFF -DTesting=OFF` — no BLIS (reference `dskr2k`/`zskr2k`).
 - **Toolchain**: Apple Clang 15.0.0 (C/C++) + gfortran 15.2.0 (Homebrew) + libomp,

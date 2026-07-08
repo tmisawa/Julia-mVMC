@@ -13,7 +13,7 @@ function _spin_int(s::Symbol)
     elseif s == :down
         return 1
     end
-    error("one-body Green spin must be :up or :down, got :$s")
+    error("Green spin must be :up or :down, got :$s")
 end
 
 """
@@ -112,20 +112,10 @@ end
 """
     validate_factored_green_supported(data::ExpertModeData)
 
-Reject the factored two-body Green (`TwoBodyGEx`) in FSZ / general-orbital mode.
-The FSZ measurement path is not yet wired for Green functions (a separate spec),
-so producing factored output there would be silently wrong. Non-mutating;
-returns `nothing` when supported.
+Validate factored two-body Green (`TwoBodyGEx`) support. Kept as an entry-point
+compatibility hook; current supported PhysCal modes return `nothing`.
 """
 function validate_factored_green_supported(data::ExpertModeData)
-    if !isempty(data.green_two_ex_terms) && data.i_flg_orbital_general != 0
-        error(
-            "TwoBodyGEx (factored two-body Green) is not supported in FSZ / " *
-            "general-orbital mode (i_flg_orbital_general = $(data.i_flg_orbital_general)). " *
-            "The FSZ Green measurement path is not yet implemented; use sz-conserved " *
-            "mode or remove the TwoBodyGEx input.",
-        )
-    end
     return nothing
 end
 
@@ -1130,5 +1120,189 @@ function calculate_green_func_into!(
 
     # 2-body Green's function (product): <c†_i c_j> × conj(<c†_k c_l>)
     # using the resolved 1-based index pairs into the one-body Greens above.
+    accumulate_factored_green!(dst, phys, w)
+end
+
+"""
+    calculate_green_func_fsz!(data::ExpertModeData, state::VMCOptimizationState,
+                              w::Float64, ip::ComplexF64,
+                              ele_idx::Vector{Int}, ele_cfg::Vector{Int},
+                              ele_num::Vector{Int}, ele_proj_cnt::Vector{Int},
+                              ele_spn::Vector{Int})
+
+Calculate and accumulate FSZ Green's functions for PhysCal measurement.
+Equivalent to C's `CalculateGreenFunc_fsz()` in `calgrn_fsz.c`.
+"""
+function calculate_green_func_fsz!(
+    data::ExpertModeData,
+    state::VMCOptimizationState,
+    w::Float64,
+    ip::ComplexF64,
+    ele_idx::Vector{Int},
+    ele_cfg::Vector{Int},
+    ele_num::Vector{Int},
+    ele_proj_cnt::Vector{Int},
+    ele_spn::Vector{Int},
+)
+    return calculate_green_func_fsz_into!(
+        data,
+        state,
+        state.phys_quantities,
+        w,
+        ip,
+        ele_idx,
+        ele_cfg,
+        ele_num,
+        ele_proj_cnt,
+        ele_spn,
+    )
+end
+
+function calculate_green_func_fsz!(
+    data::ExpertModeData,
+    state::VMCOptimizationState,
+    acc::VMCPhysAccumulator,
+    w::Float64,
+    ip::ComplexF64,
+    ele_idx::Vector{Int},
+    ele_cfg::Vector{Int},
+    ele_num::Vector{Int},
+    ele_proj_cnt::Vector{Int},
+    ele_spn::Vector{Int},
+)
+    return calculate_green_func_fsz_into!(
+        data,
+        state,
+        acc,
+        w,
+        ip,
+        ele_idx,
+        ele_cfg,
+        ele_num,
+        ele_proj_cnt,
+        ele_spn,
+    )
+end
+
+function calculate_green_func_fsz_into!(
+    data::ExpertModeData,
+    state::VMCOptimizationState,
+    dst::Union{PhysicalQuantities,VMCPhysAccumulator,Nothing},
+    w::Float64,
+    ip::ComplexF64,
+    ele_idx::Vector{Int},
+    ele_cfg::Vector{Int},
+    ele_num::Vector{Int},
+    ele_proj_cnt::Vector{Int},
+    ele_spn::Vector{Int},
+)
+    if state.phys_quantities === nothing
+        error("PhysicalQuantities not initialized. Call initialize_phys_quantities! first.")
+    end
+
+    dst === nothing &&
+        error("PhysicalQuantities not initialized. Call initialize_phys_quantities! first.")
+
+    phys = state.phys_quantities
+    all_complex = get_all_complex_flag(data)
+
+    # 1-body Green's function over the canonical CisAjs list. FSZ must honor
+    # both creation and annihilation spins; C dispatches same-spin rows to
+    # GreenFunc1_fsz and spin-changing rows to GreenFunc1_fsz2.
+    for (idx, (ri, si, rj, sj)) in enumerate(phys.cis_ajs_idx)
+        local_val =
+            if si == sj
+                green_func1_fsz(
+                    ri,
+                    rj,
+                    si,
+                    ip,
+                    ele_idx,
+                    ele_cfg,
+                    ele_num,
+                    ele_proj_cnt,
+                    ele_spn,
+                    data,
+                    state;
+                    all_complex = all_complex,
+                )
+            else
+                green_func1_fsz2(
+                    ri,
+                    rj,
+                    si,
+                    sj,
+                    ip,
+                    ele_idx,
+                    ele_cfg,
+                    ele_num,
+                    ele_proj_cnt,
+                    ele_spn,
+                    data,
+                    state;
+                    all_complex = all_complex,
+                )
+            end
+
+        accumulate_phys_cis_ajs!(dst, phys, idx, w, local_val)
+    end
+
+    # Direct 2-body Green. C's FSZ path uses all four spin labels and dispatches
+    # the sz-conserving subset to GreenFunc2_fsz.
+    for (idx, term) in enumerate(data.green_two_terms)
+        ri = term.site1
+        rj = term.site2
+        rk = term.site3
+        rl = term.site4
+        s = _spin_int(term.spin1)
+        t = _spin_int(term.spin2)
+        u = _spin_int(term.spin3)
+        v = _spin_int(term.spin4)
+
+        local_val =
+            if s == t && u == v
+                green_func2_fsz(
+                    ri,
+                    rj,
+                    rk,
+                    rl,
+                    s,
+                    u,
+                    ip,
+                    ele_idx,
+                    ele_cfg,
+                    ele_num,
+                    ele_proj_cnt,
+                    ele_spn,
+                    data,
+                    state;
+                    all_complex = all_complex,
+                )
+            else
+                green_func2_fsz2(
+                    ri,
+                    rj,
+                    rk,
+                    rl,
+                    s,
+                    t,
+                    u,
+                    v,
+                    ip,
+                    ele_idx,
+                    ele_cfg,
+                    ele_num,
+                    ele_proj_cnt,
+                    ele_spn,
+                    data,
+                    state;
+                    all_complex = all_complex,
+                )
+            end
+
+        accumulate_phys_cis_ajs_ckt_alt_dc!(dst, phys, idx, w, local_val)
+    end
+
+    # Factored 2-body Green uses the one-body locals produced above.
     accumulate_factored_green!(dst, phys, w)
 end
