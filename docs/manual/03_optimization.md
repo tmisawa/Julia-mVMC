@@ -32,7 +32,7 @@ result = run_para_opt_from_namelist(
 
 ## MPI limitations
 
-v0.4.2 supports `VMCParaOpt` sample-parallel MPI with the direct SR
+v0.5.0 supports `VMCParaOpt` sample-parallel MPI with the direct SR
 solver (`NSRCG = 0`) for `NSplitSize >= 1` when each sample uses either
 `NQPFull = 1` or sz-conserved standard-projection `NQPFull > 1` with
 `NQPOptTrans = 1` (`NSPGaussLeg > 1` and/or `NMPTrans > 1`). Non-FSZ, FSZ

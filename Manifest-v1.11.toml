@@ -356,13 +356,13 @@ version = "5.5.6+0"
 deps = ["Dates", "LinearAlgebra", "Printf", "Random", "SFMT"]
 path = "MVMCExpertModeParsers.jl"
 uuid = "f8463493-42a4-4c1a-8bf4-93a3cbd844bc"
-version = "0.4.2"
+version = "0.5.0"
 
 [[deps.MVMCOptimizers]]
 deps = ["FastGaussQuadrature", "LinearAlgebra", "LoopVectorization", "MPI", "MVMCExpertModeParsers", "PfaPack", "Printf", "Random", "SFMT"]
 path = "MVMCOptimizers.jl"
 uuid = "3516085a-728f-4003-a487-32232985ade4"
-version = "0.4.2"
+version = "0.5.0"
 
 [[deps.ManualMemory]]
 git-tree-sha1 = "bcaef4fc7a0cfe2cba636d84cda54b5e4e4ca3cd"
