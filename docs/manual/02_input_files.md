@@ -28,7 +28,7 @@ relative to its own directory.
 | `opttrans.def` (`OptTrans`) | optional QPOptTrans mapping and OptTrans weights | ✅ |
 | `greenone.def` (`OneBodyG`) | one-body Green-function targets | ✅ |
 | `greentwo.def` (`TwoBodyG`) | two-body Green-function targets (direct mode) | ✅ |
-| `initial.def` (CLI 2nd argument in C) | starting variational parameters | ✅ auto-detected from namelist dir |
+| `initial.def` (CLI 2nd argument in C) | starting variational parameters, including RBM triples | ✅ auto-detected from namelist dir |
 
 ## In* overlay files (consumed by `read_input_parameters!`)
 

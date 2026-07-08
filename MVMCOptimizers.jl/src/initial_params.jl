@@ -16,26 +16,36 @@ Shared core for the optimized-parameter file layout used by both
 - 6 leading floats (energy diagnostics) skipped;
 - `NProj` triples `(real, imag, gradient)` for the projection block:
   Gutzwiller, Jastrow, SpinJastrow(0), DH2, then DH4;
+- `NRBM` triples for RBM parameters, section order matching C:
+  Charge/Spin/General PhysLayer, Charge/Spin/General HiddenLayer, then
+  Charge/Spin/General PhysHidden;
 - `NSlater` triples for orbital parameters, scattered into `orbital_terms`
   via each term's `idx`;
 - `NOptTrans` triples for `OptTrans` when `opttrans.def` is active.
 
-Scope: **Projection block + Slater for `NRBM == 0` only.** RBM remains rejected
-up front because the C file places RBM triples between `NProj` and `NSlater`;
-silently reading that future block as Slater would corrupt Slater. SpinJastrow
-is not parsed by the toolchain at all; if a future model adds it, the
-float-count check below fails loud rather than mis-attributing.
+SpinJastrow is not parsed by the toolchain at all; if a future model adds it,
+the float-count check below fails loud rather than mis-attributing.
 
 Validate-before-commit: on any problem returns `(false, 0, reason)` and
 leaves `data` untouched. On success commits and returns
-`(true, n_proj + n_slater + n_opt_trans, "")`. Non-numeric tokens are reported as a stable
+`(true, n_proj + n_rbm + n_slater + n_opt_trans, "")`. Non-numeric tokens are reported as a stable
 reason (not a raw `ArgumentError`) so strict callers can test for them.
 """
+@inline _initial_param_section_width(terms) =
+    isempty(terms) ? 0 : maximum(t.idx for t in terms) + 1
+
+function _set_indexed_terms_from_values!(terms, section_values::Vector{ComplexF64})
+    isempty(terms) && return nothing
+    @inbounds for term in terms
+        if 0 <= term.idx < length(section_values)
+            term.value = section_values[term.idx+1]
+        end
+    end
+    return nothing
+end
+
 function _load_para_triples!(data::ExpertModeData, text::AbstractString)
     n_rbm = count_rbm_parameters(data)
-    if n_rbm > 0
-        return (false, 0, "RBM-bearing models are not supported by this loader (n_rbm = $n_rbm)")
-    end
 
     tokens = split(strip(text))
     values = Vector{Float64}(undef, length(tokens))
@@ -54,13 +64,13 @@ function _load_para_triples!(data::ExpertModeData, text::AbstractString)
     n_slater = count_orbital_parameters(data)
     n_opt_trans = count_opt_trans_parameters(data)
 
-    expected_floats = 6 + 3 * (n_proj + n_slater + n_opt_trans)  # NRBM = 0 verified above
+    expected_floats = 6 + 3 * (n_proj + n_rbm + n_slater + n_opt_trans)
     if length(values) < expected_floats
         return (
             false,
             0,
             "too short: got $(length(values)) floats, expected $expected_floats " *
-            "(6 + 3*(NProj=$n_proj + NSlater=$n_slater + NOptTrans=$n_opt_trans))",
+            "(6 + 3*(NProj=$n_proj + NRBM=$n_rbm + NSlater=$n_slater + NOptTrans=$n_opt_trans))",
         )
     end
     # Trailing floats beyond the expected count indicate an OptTrans block only
@@ -106,6 +116,17 @@ function _load_para_triples!(data::ExpertModeData, text::AbstractString)
         end
         idx += 3
     end
+    @inbounds for terms in _rbm_parameter_sections(data)
+        n_section = _initial_param_section_width(terms)
+        if n_section > 0
+            section_values = Vector{ComplexF64}(undef, n_section)
+            for i = 1:n_section
+                section_values[i] = ComplexF64(values[idx], values[idx+1])
+                idx += 3
+            end
+            _set_indexed_terms_from_values!(terms, section_values)
+        end
+    end
     slater_values = Vector{ComplexF64}(undef, n_slater)
     @inbounds for i = 1:n_slater
         slater_values[i] = ComplexF64(values[idx], values[idx+1])
@@ -121,7 +142,7 @@ function _load_para_triples!(data::ExpertModeData, text::AbstractString)
         idx += 3
     end
 
-    return (true, n_proj + n_slater + n_opt_trans, "")
+    return (true, n_proj + n_rbm + n_slater + n_opt_trans, "")
 end
 
 """
@@ -144,13 +165,13 @@ Layout (whitespace-separated, all on a single record):
 1. 6 leading floats are skipped (energy diagnostics written by C).
 2. NProj triples `(real, imag, gradient)` for the projection block
    (`Gutzwiller | Jastrow | SpinJastrow(0) | DH2 | DH4`).
-3. NRBM triples for RBM (only when FlagRBM > 0). **Not yet supported.**
+3. NRBM triples for RBM (only when FlagRBM > 0).
 4. NSlater triples for orbital parameters; values are scattered into
    `data.orbital_terms` via each term's `idx`.
 5. NOptTrans triples for OptTrans (`FlagOptTrans > 0`).
 
 Returns `true` on success, `false` on a recoverable problem (missing file,
-file too short for the parameter count, or unsupported RBM block present).
+file too short for the parameter count, or malformed trailing data).
 On `false` an `@warn` is emitted **and `data` is left
 untouched** — all validation runs before any mutation, so a refused load
 never leaves a partial overlay behind. The caller (e.g.
@@ -179,15 +200,15 @@ a deterministic gate rather than an optional warm-start overlay:
 
 - **Fails hard** (`error`) instead of `@warn`+`false` on a missing file, a
   non-numeric or non-finite (`NaN`/`Inf`) token, a too-short or trailing-garbage
-  record, or an unsupported RBM block.
-- **Returns the number of parameters consumed** (`n_proj + n_slater + n_opt_trans`) so the
+  record.
+- **Returns the number of parameters consumed** (`n_proj + n_rbm + n_slater + n_opt_trans`) so the
   caller can assert the fixed parameters were actually applied; errors if zero.
 - Does **not** perturb (the C test driver's `random.uniform` perturbation is
   external), so a committed unperturbed `zqp_opt.dat` loads verbatim.
 
-Scope is the `NSROptItrSmp > 1` layout for `NRBM == 0` projection + Slater
-models, with optional OptTrans tail when `opttrans.def` is active; the
-`NSROptItrSmp == 1` "pairs" layout and RBM models are rejected.
+Scope is the `NSROptItrSmp > 1` layout for projection + RBM + Slater models,
+with optional OptTrans tail when `opttrans.def` is active; the
+`NSROptItrSmp == 1` "pairs" layout is rejected.
 """
 function read_opt_para_file!(data::ExpertModeData, opt_para_path::AbstractString)::Int
     isfile(opt_para_path) ||

@@ -6,7 +6,9 @@ using MVMCExpertModeParsers:
     JastrowTerm,
     OrbitalTerm,
     DoublonHolon2SiteIndex,
-    ChargeRBMPhysLayerTerm
+    GeneralRBMPhysLayerTerm,
+    GeneralRBMHiddenLayerTerm,
+    GeneralRBMPhysHiddenTerm
 
 # Capture the showerror text of whatever `f()` throws (message is the stable
 # contract; assert on substrings, not the concrete exception type).
@@ -185,16 +187,53 @@ end
     end
 end
 
-@testset "read_opt_para_file!: RBM-bearing models still fail loud" begin
+@testset "read_opt_para_file!: RBM block loads before Slater" begin
     mktempdir() do dir
         path = joinpath(dir, "zqp_opt.dat")
-        write(path, _GOLDEN_OPT)
+        write(
+            path,
+            join(
+                [
+                    "1.0", "2.0", "3.0", "4.0", "5.0", "6.0",
+                    "0.10", "0.0", "9.9",
+                    "0.20", "0.0", "9.9",
+                    "0.30", "0.0", "9.9",
+                    "0.61", "-0.01", "9.9",
+                    "0.62", "-0.02", "9.9",
+                    "0.71", "-0.11", "9.9",
+                    "0.81", "-0.21", "9.9",
+                    "0.82", "-0.22", "9.9",
+                    "0.40", "-0.10", "9.9",
+                    "0.50", "-0.20", "9.9",
+                ],
+                " ",
+            ) * " \n",
+        )
         data = _make_data()
-        data.charge_rbm_phys_layer_terms = [
-            ChargeRBMPhysLayerTerm(0, 0.0 + 0.0im, false, 0),
+        data.general_rbm_phys_layer_terms = [
+            GeneralRBMPhysLayerTerm(0, 0, 0.0 + 0.0im, true, 0),
+            GeneralRBMPhysLayerTerm(1, 0, 0.0 + 0.0im, true, 0),
+            GeneralRBMPhysLayerTerm(2, 1, 0.0 + 0.0im, true, 1),
         ]
-        threw, msg = _capture_msg(() -> MVMCOptimizers.read_opt_para_file!(data, path))
-        @test threw && occursin("RBM-bearing", msg)
+        data.general_rbm_hidden_layer_terms = [
+            GeneralRBMHiddenLayerTerm(0, 0.0 + 0.0im, true, 0),
+        ]
+        data.general_rbm_phys_hidden_terms = [
+            GeneralRBMPhysHiddenTerm(0, 0, 0, 0.0 + 0.0im, true, 0),
+            GeneralRBMPhysHiddenTerm(1, 1, 0, 0.0 + 0.0im, true, 1),
+        ]
+
+        n = MVMCOptimizers.read_opt_para_file!(data, path)
+
+        @test n == 10  # NProj (3) + NRBM (5) + NSlater (2)
+        @test data.general_rbm_phys_layer_terms[1].value ≈ 0.61 - 0.01im
+        @test data.general_rbm_phys_layer_terms[2].value ≈ 0.61 - 0.01im
+        @test data.general_rbm_phys_layer_terms[3].value ≈ 0.62 - 0.02im
+        @test data.general_rbm_hidden_layer_terms[1].value ≈ 0.71 - 0.11im
+        @test data.general_rbm_phys_hidden_terms[1].value ≈ 0.81 - 0.21im
+        @test data.general_rbm_phys_hidden_terms[2].value ≈ 0.82 - 0.22im
+        @test data.orbital_terms[1].value ≈ 0.40 - 0.10im
+        @test data.orbital_terms[2].value ≈ 0.50 - 0.20im
     end
 end
 

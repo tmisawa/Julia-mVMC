@@ -24,6 +24,8 @@ fixtures, and FSZ/general-orbital `TwoBodyGEx` measurements.
   smoke coverage.
 - Added FSZ/general-orbital `TwoBodyGEx` / `greentwoex.def` support for
   factored two-body Green output and a C-referenced FSZ PhysCal fixture.
+- Added RBM-bearing `initial.def` / `zqp_opt.dat` parameter loading and promoted
+  `GeneralRBM_cmp` to the C ctest-equivalent integration gate.
 
 ### Changed
 
