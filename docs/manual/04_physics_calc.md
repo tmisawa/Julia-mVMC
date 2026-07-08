@@ -32,14 +32,15 @@
   any `BackFlow*` keyword in `namelist.def`) are not supported; remove
   those keywords or fall back to the C reference at
   <https://github.com/issp-center-dev/mVMC>.
-- **MPI parallelisation** — physical measurement supports multi-rank
-  sample-parallel execution with `NSplitSize = 1` through MPI.jl-compatible
-  launchers. `NSplitSize > 1` is currently implemented only for `VMCParaOpt`
-  direct SR, including sz-conserved standard-projection `NQPFull > 1` when
-  `NQPOptTrans = 1`, and is rejected by `VMCPhysCal` before MPI context
-  construction.
-  The CI MPI smoke gate covers rank0 Green output and reduce-to-root paths, but
-  it is not a site performance benchmark.
+- **MPI parallelisation** — physical measurement supports multi-rank execution
+  through MPI.jl-compatible launchers. `NSplitSize > 1` is supported for
+  sz-conserved normal-Green PhysCal runs (`NLanczosMode = 0`), including
+  standard-projection `NQPFull > 1` when `NQPOptTrans = 1`. FSZ/general-orbital
+  PhysCal split, PhysCal Lanczos split, and OptTrans-derived QP sectors with
+  split remain rejected at runtime.
+  The CI MPI smoke gate covers rank0 Green output, reduce-to-root paths, and
+  the same-chain-count `NSplitSize = 1` vs `NSplitSize = 2` self-consistency
+  path, but it is not a site performance benchmark.
 - **`InterAllTerm` spin metadata** — when the input does not provide
   spin information, `vmc_main_cal.jl` substitutes default values (see
   the TODO at `src/vmc_main_cal.jl` near the InterAll loop).
@@ -56,10 +57,10 @@ For published physics results, the safest path in this release is:
    ([`phys_cal_equivalent.jl`](../../test/integration/phys_cal_equivalent.jl)) and
    can be run via
    [`run_phys_cal_from_namelist`](../../MVMCOptimizers.jl/src/run_phys_cal_from_namelist.jl).
-   `NLanczosMode = 1` also writes the R1 Full-Lanczos energy/QQQQ files
-   on the sz-conserved path. Still fall back to C-mVMC for FSZ factored
-   Green, Backflow, `NLanczosMode = 2`, FSZ/general-orbital Lanczos, or
-   PhysCal runs that need `NSplitSize > 1`.
+   `NLanczosMode = 1/2` also writes Full-Lanczos files on the sz-conserved
+   `NSplitSize = 1` path. Still fall back to C-mVMC for FSZ factored Green,
+   Backflow, FSZ/general-orbital Lanczos, or Lanczos PhysCal runs that need
+   `NSplitSize > 1`.
 
 The output formats of `zqp_opt.dat` are byte-compatible (same column
 layout), so the hand-off requires no conversion script.

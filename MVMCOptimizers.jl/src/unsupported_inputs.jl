@@ -106,6 +106,12 @@ function validate_supported_para_opt_modpara(modpara::ModParaParameters)
     return nothing
 end
 
+function _has_opt_trans_derived_qp_sectors(data::ExpertModeData)
+    n_qp_opt_trans = max(1, data.n_qp_opt_trans)
+    return n_qp_opt_trans > 1 || length(data.opt_trans) > 1 ||
+           length(data.qp_opt_trans) > 1
+end
+
 """
     validate_supported_para_opt_data(data)
 
@@ -129,11 +135,7 @@ function validate_supported_para_opt_data(data::ExpertModeData)
                 "or NSPGaussLeg = 1 and |NMPTrans| = 1 for FSZ inputs.",
             )
         end
-        n_qp_opt_trans = max(1, data.n_qp_opt_trans)
-        opt_trans_active =
-            n_qp_opt_trans > 1 || length(data.opt_trans) > 1 ||
-            length(data.qp_opt_trans) > 1
-        if opt_trans_active
+        if _has_opt_trans_derived_qp_sectors(data)
             error(
                 "NSplitSize > 1 with NQPOptTrans > 1 / OptTrans is not " *
                 "supported: grouped QP-split sampling currently supports " *
@@ -152,28 +154,54 @@ end
 
 Validate physical-measurement-only ModPara combinations.
 
-`NSplitSize > 1` is implemented for parameter optimization first. Physical
-measurement still runs through the existing `NSplitSize = 1` path.
+Physical-measurement support for `NSplitSize > 1` is scoped by parsed data:
+sz-conserved normal Green paths are supported, while FSZ/general-orbital,
+Full Lanczos, and OptTrans-derived split combinations are rejected by
+`validate_supported_phys_cal_data`.
 """
 function validate_supported_phys_cal_modpara(modpara::ModParaParameters)
-    if modpara.nsplit_size > 1
-        error(
-            "NSplitSize > 1 is not supported for PhysCal in Julia-mVMC " *
-            "(got NSplitSize = $(modpara.nsplit_size)). Set NSplitSize = 1 " *
-            "for physical measurement.",
-        )
-    end
     return nothing
 end
 
 """
     validate_supported_phys_cal_data(data)
 
-Validate physical-measurement settings that require parsed data. Full Lanczos is
-currently limited to the sz-conserved path; FSZ/general-orbital Lanczos remains
-separate work.
+Validate physical-measurement settings that require parsed data.
+`NSplitSize > 1` is currently limited to sz-conserved normal Green paths.
+Full Lanczos is limited to `NSplitSize = 1` on the sz-conserved path;
+FSZ/general-orbital Lanczos remains separate work.
 """
 function validate_supported_phys_cal_data(data::ExpertModeData)
+    if data.modpara.nsplit_size > 1
+        if data.i_flg_orbital_general != 0
+            error(
+                "NSplitSize > 1 is not supported for FSZ / general-orbital " *
+                "PhysCal in Julia-mVMC (got NSplitSize = " *
+                "$(data.modpara.nsplit_size), i_flg_orbital_general = " *
+                "$(data.i_flg_orbital_general)). Current PhysCal split " *
+                "support is limited to sz-conserved normal Green paths.",
+            )
+        end
+        if data.modpara.lanczos_mode > 0
+            error(
+                "NSplitSize > 1 with NLanczosMode > 0 is not supported for " *
+                "PhysCal in Julia-mVMC (got NSplitSize = " *
+                "$(data.modpara.nsplit_size), NLanczosMode = " *
+                "$(data.modpara.lanczos_mode)). Current PhysCal split " *
+                "support is limited to sz-conserved normal Green paths.",
+            )
+        end
+        if _has_opt_trans_derived_qp_sectors(data)
+            error(
+                "NSplitSize > 1 with NQPOptTrans > 1 / OptTrans is not " *
+                "supported for PhysCal in Julia-mVMC: grouped PhysCal split " *
+                "currently supports standard-projection QP sectors only, got " *
+                "NSplitSize = $(data.modpara.nsplit_size), " *
+                "NQPOptTrans = $(data.n_qp_opt_trans). Use NSplitSize = 1 " *
+                "for OptTrans-derived QP sectors.",
+            )
+        end
+    end
     if data.modpara.lanczos_mode > 0 && data.i_flg_orbital_general != 0
         error(
             "NLanczosMode > 0 is not supported in FSZ / general-orbital mode " *

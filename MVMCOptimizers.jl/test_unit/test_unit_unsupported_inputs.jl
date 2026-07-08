@@ -44,15 +44,16 @@ end
         @test occursin("NSRCG = 1", msg)
     end
 
-    @testset "NSplitSize > 1 is rejected for PhysCal" begin
+    @testset "NSplitSize > 1 is accepted for sz-conserved PhysCal normal Green" begin
         modpara = ModParaParameters(nsplit_size = 2)
         @test MVMCOptimizers.validate_supported_modpara(modpara) === nothing
-        threw, msg = capture_error_message(
-            () -> MVMCOptimizers.validate_supported_phys_cal_modpara(modpara),
-        )
-        @test threw
-        @test occursin("NSplitSize > 1", msg)
-        @test occursin("PhysCal", msg)
+        @test MVMCOptimizers.validate_supported_phys_cal_modpara(modpara) === nothing
+
+        data = ExpertModeData()
+        data.modpara.nsplit_size = 2
+        data.modpara.lanczos_mode = 0
+        data.i_flg_orbital_general = 0
+        @test MVMCOptimizers.validate_supported_phys_cal_data(data) === nothing
     end
 
     @testset "NSplitSize > 1 accepts standard-projection NQPFull > 1" begin
@@ -99,6 +100,58 @@ end
         @test threw
         @test occursin("NSplitSize > 1 with NQPOptTrans > 1", msg)
         @test occursin("OptTrans", msg)
+    end
+
+    @testset "NSplitSize > 1 rejects OptTrans-derived PhysCal split" begin
+        trivial = ExpertModeData()
+        trivial.modpara.nsplit_size = 2
+        trivial.modpara.lanczos_mode = 0
+        trivial.i_flg_orbital_general = 0
+        trivial.n_qp_opt_trans = 1
+        trivial.opt_trans = ComplexF64[1.0 + 0.0im]
+        trivial.qp_opt_trans = [[0]]
+        @test MVMCOptimizers.validate_supported_phys_cal_data(trivial) === nothing
+
+        data = ExpertModeData()
+        data.modpara.nsplit_size = 2
+        data.modpara.lanczos_mode = 0
+        data.i_flg_orbital_general = 0
+        data.n_qp_opt_trans = 2
+        data.opt_trans = ComplexF64[1.0 + 0.0im, 0.5 + 0.0im]
+        data.qp_opt_trans = [[0], [0]]
+
+        threw, msg = capture_error_message(
+            () -> MVMCOptimizers.validate_supported_phys_cal_data(data),
+        )
+        @test threw
+        @test occursin("NSplitSize > 1 with NQPOptTrans > 1", msg)
+        @test occursin("PhysCal", msg)
+        @test occursin("OptTrans", msg)
+    end
+
+    @testset "NSplitSize > 1 rejects unsupported PhysCal split scopes" begin
+        fsz_data = ExpertModeData()
+        fsz_data.modpara.nsplit_size = 2
+        fsz_data.modpara.lanczos_mode = 0
+        fsz_data.i_flg_orbital_general = 1
+        threw, msg = capture_error_message(
+            () -> MVMCOptimizers.validate_supported_phys_cal_data(fsz_data),
+        )
+        @test threw
+        @test occursin("NSplitSize > 1", msg)
+        @test occursin("FSZ / general-orbital", msg)
+        @test occursin("PhysCal", msg)
+
+        lanczos_data = ExpertModeData()
+        lanczos_data.modpara.nsplit_size = 2
+        lanczos_data.modpara.lanczos_mode = 2
+        lanczos_data.i_flg_orbital_general = 0
+        threw, msg = capture_error_message(
+            () -> MVMCOptimizers.validate_supported_phys_cal_data(lanczos_data),
+        )
+        @test threw
+        @test occursin("NSplitSize > 1 with NLanczosMode > 0", msg)
+        @test occursin("PhysCal", msg)
     end
 
     @testset "NSplitSize > 1 rejects FSZ standard-projection NQPFull > 1" begin
@@ -153,10 +206,11 @@ end
 
         phys_data = ExpertModeData()
         phys_data.modpara.nsplit_size = 3
+        phys_data.i_flg_orbital_general = 1
         threw, msg = capture_error_message(() -> vmc_phys_cal!(phys_data))
         @test threw
         @test occursin("NSplitSize > 1", msg)
-        @test occursin("PhysCal", msg)
+        @test occursin("FSZ / general-orbital", msg)
     end
 end
 
