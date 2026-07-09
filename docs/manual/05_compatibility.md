@@ -5,7 +5,7 @@
 | C function | Julia function | Status |
 |------------|----------------|--------|
 | `VMCParaOpt` | `vmc_para_opt!` | ✅ |
-| `VMCPhysCal` | `vmc_phys_cal!` | 🚧 experimental |
+| `VMCPhysCal` | `vmc_phys_cal!` | ✅ verified for supported paths |
 | `VMCMainCal` | `vmc_main_cal!` | ✅ |
 | `VMCMainCal_fsz` | `vmc_main_cal_fsz!` | ✅ |
 | `VMCMakeSample` | `vmc_make_sample!` | ✅ |
