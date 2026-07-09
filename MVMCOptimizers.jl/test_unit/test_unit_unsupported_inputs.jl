@@ -1,6 +1,7 @@
 using Test
 using MVMCOptimizers
-using MVMCExpertModeParsers: ExpertModeData, ModParaParameters
+using MVMCExpertModeParsers:
+    ExpertModeData, GreenTwoExTerm, InterAllTerm, ModParaParameters, TransferTerm
 
 # Capture the showerror text of whatever `f()` throws.
 # Returns (threw::Bool, message::String). Used so the contract asserts on the
@@ -44,27 +45,137 @@ end
         @test occursin("NSRCG = 1", msg)
     end
 
-    @testset "NSplitSize > 1 is rejected for PhysCal" begin
+    @testset "NSplitSize > 1 is accepted for sz-conserved PhysCal normal Green" begin
         modpara = ModParaParameters(nsplit_size = 2)
         @test MVMCOptimizers.validate_supported_modpara(modpara) === nothing
-        threw, msg = capture_error_message(
-            () -> MVMCOptimizers.validate_supported_phys_cal_modpara(modpara),
-        )
-        @test threw
-        @test occursin("NSplitSize > 1", msg)
-        @test occursin("PhysCal", msg)
-    end
+        @test MVMCOptimizers.validate_supported_phys_cal_modpara(modpara) === nothing
 
-    @testset "NSplitSize > 1 with NQPFull > 1 is rejected for para-opt" begin
         data = ExpertModeData()
         data.modpara.nsplit_size = 2
-        data.modpara.nmp_trans = 2
+        data.modpara.lanczos_mode = 0
+        data.i_flg_orbital_general = 0
+        @test MVMCOptimizers.validate_supported_phys_cal_data(data) === nothing
+    end
+
+    @testset "NSplitSize > 1 accepts standard-projection NQPFull > 1" begin
+        spin_data = ExpertModeData()
+        spin_data.modpara.nsplit_size = 2
+        spin_data.modpara.nsp_gauss_leg = 2
+        spin_data.modpara.nmp_trans = 1
+        spin_data.n_qp_opt_trans = 1
+        spin_data.i_flg_orbital_general = 0
+        @test MVMCOptimizers.validate_supported_para_opt_data(spin_data) === nothing
+
+        momentum_data = ExpertModeData()
+        momentum_data.modpara.nsplit_size = 2
+        momentum_data.modpara.nsp_gauss_leg = 1
+        momentum_data.modpara.nmp_trans = 4
+        momentum_data.n_qp_opt_trans = 1
+        momentum_data.i_flg_orbital_general = 0
+        @test MVMCOptimizers.validate_supported_para_opt_data(momentum_data) === nothing
+
+        trivial_opttrans_data = ExpertModeData()
+        trivial_opttrans_data.modpara.nsplit_size = 2
+        trivial_opttrans_data.modpara.nsp_gauss_leg = 8
+        trivial_opttrans_data.modpara.nmp_trans = -1
+        trivial_opttrans_data.n_qp_opt_trans = 1
+        trivial_opttrans_data.i_flg_orbital_general = 0
+        trivial_opttrans_data.opt_trans = ComplexF64[1.0 + 0.0im]
+        trivial_opttrans_data.qp_opt_trans = [[0]]
+        @test MVMCOptimizers.validate_supported_para_opt_data(trivial_opttrans_data) ===
+              nothing
+    end
+
+    @testset "NSplitSize > 1 rejects OptTrans-derived NQPFull > 1" begin
+        data = ExpertModeData()
+        data.modpara.nsplit_size = 2
+        data.modpara.nsp_gauss_leg = 1
+        data.modpara.nmp_trans = 1
+        data.n_qp_opt_trans = 2
+        data.opt_trans = ComplexF64[1.0 + 0.0im, 0.5 + 0.0im]
+        data.qp_opt_trans = [[0], [0]]
+
         threw, msg = capture_error_message(
             () -> MVMCOptimizers.validate_supported_para_opt_data(data),
         )
         @test threw
-        @test occursin("NSplitSize > 1 with NQPFull > 1", msg)
-        @test occursin("NQPFull = 2", msg)
+        @test occursin("NSplitSize > 1 with NQPOptTrans > 1", msg)
+        @test occursin("OptTrans", msg)
+    end
+
+    @testset "NSplitSize > 1 rejects OptTrans-derived PhysCal split" begin
+        trivial = ExpertModeData()
+        trivial.modpara.nsplit_size = 2
+        trivial.modpara.lanczos_mode = 0
+        trivial.i_flg_orbital_general = 0
+        trivial.n_qp_opt_trans = 1
+        trivial.opt_trans = ComplexF64[1.0 + 0.0im]
+        trivial.qp_opt_trans = [[0]]
+        @test MVMCOptimizers.validate_supported_phys_cal_data(trivial) === nothing
+
+        data = ExpertModeData()
+        data.modpara.nsplit_size = 2
+        data.modpara.lanczos_mode = 0
+        data.i_flg_orbital_general = 0
+        data.n_qp_opt_trans = 2
+        data.opt_trans = ComplexF64[1.0 + 0.0im, 0.5 + 0.0im]
+        data.qp_opt_trans = [[0], [0]]
+
+        threw, msg = capture_error_message(
+            () -> MVMCOptimizers.validate_supported_phys_cal_data(data),
+        )
+        @test threw
+        @test occursin("NSplitSize > 1 with NQPOptTrans > 1", msg)
+        @test occursin("PhysCal", msg)
+        @test occursin("OptTrans", msg)
+    end
+
+    @testset "NSplitSize > 1 rejects unsupported PhysCal split scopes" begin
+        fsz_data = ExpertModeData()
+        fsz_data.modpara.nsplit_size = 2
+        fsz_data.modpara.lanczos_mode = 0
+        fsz_data.i_flg_orbital_general = 1
+        fsz_data.green_two_ex_terms = [GreenTwoExTerm(0, 0, 1, 0, 2, 1, 3, 1)]
+        threw, msg = capture_error_message(
+            () -> MVMCOptimizers.validate_supported_phys_cal_data(fsz_data),
+        )
+        @test threw
+        @test occursin("NSplitSize > 1", msg)
+        @test occursin("FSZ / general-orbital", msg)
+        @test occursin("PhysCal", msg)
+
+        lanczos_data = ExpertModeData()
+        lanczos_data.modpara.nsplit_size = 2
+        lanczos_data.modpara.lanczos_mode = 2
+        lanczos_data.i_flg_orbital_general = 0
+        threw, msg = capture_error_message(
+            () -> MVMCOptimizers.validate_supported_phys_cal_data(lanczos_data),
+        )
+        @test threw
+        @test occursin("NSplitSize > 1 with NLanczosMode > 0", msg)
+        @test occursin("PhysCal", msg)
+    end
+
+    @testset "NSplitSize > 1 rejects FSZ standard-projection NQPFull > 1" begin
+        for (nsp, nmp) in ((2, 1), (1, 2), (1, -2))
+            data = ExpertModeData()
+            data.modpara.nsplit_size = 2
+            data.modpara.nsp_gauss_leg = nsp
+            data.modpara.nmp_trans = nmp
+            data.n_qp_opt_trans = 1
+            data.i_flg_orbital_general = 1
+
+            threw, msg = capture_error_message(
+                () -> MVMCOptimizers.validate_supported_para_opt_data(data),
+            )
+            @test threw
+            @test occursin(
+                "NSplitSize > 1 with FSZ standard-projection NQPFull > 1",
+                msg,
+            )
+            @test occursin("NSPGaussLeg = $nsp", msg)
+            @test occursin("NMPTrans = $nmp", msg)
+        end
     end
 
     # NSplitSize < 1 (0 or negative) is an invalid value: a process-split
@@ -97,10 +208,11 @@ end
 
         phys_data = ExpertModeData()
         phys_data.modpara.nsplit_size = 3
+        phys_data.i_flg_orbital_general = 1
         threw, msg = capture_error_message(() -> vmc_phys_cal!(phys_data))
         @test threw
         @test occursin("NSplitSize > 1", msg)
-        @test occursin("PhysCal", msg)
+        @test occursin("FSZ / general-orbital", msg)
     end
 end
 
@@ -154,35 +266,96 @@ end
 end
 
 @testset "unit/unsupported_inputs: NLanczosMode contract" begin
-    # NLanczosMode = 0 (variational only) is the supported setting: no-op.
-    @testset "NLanczosMode = 0 is accepted" begin
-        modpara = ModParaParameters(lanczos_mode = 0)
-        @test MVMCOptimizers.validate_supported_modpara(modpara) === nothing
+    @testset "NLanczosMode = 0/1/2 are globally valid values" begin
+        for mode in (0, 1, 2)
+            modpara = ModParaParameters(lanczos_mode = mode)
+            @test MVMCOptimizers.validate_supported_modpara(modpara) === nothing
+        end
     end
 
-    # NLanczosMode > 0 (full Lanczos) is rejected: only step-0 matches C and the
-    # C indirect one-body Green list (NLanczosMode > 1) is not reproduced.
-    @testset "NLanczosMode > 0 is rejected with a clear message" begin
-        for bad in (1, 2)
+    @testset "unknown NLanczosMode values are rejected globally" begin
+        for bad in (-1, 3)
             modpara = ModParaParameters(lanczos_mode = bad)
             threw, msg = capture_error_message(
                 () -> MVMCOptimizers.validate_supported_modpara(modpara),
             )
             @test threw
-            @test occursin("NLanczosMode > 0", msg)
-            # Must not be mislabeled as an NSplitSize-specific combination.
-            @test !occursin("NSplitSize > 1 with", msg)
+            @test occursin("NLanczosMode must be 0, 1, or 2", msg)
         end
     end
 
-    # Enforced at the independent runtime entry points before any work.
-    @testset "entry points enforce the contract" begin
-        for entry in (vmc_para_opt!, vmc_phys_cal!)
+    @testset "NLanczosMode = 1/2 are accepted for sz-conserved PhysCal" begin
+        for mode in (1, 2)
+            modpara = ModParaParameters(lanczos_mode = mode)
+            @test MVMCOptimizers.validate_supported_modpara(modpara) === nothing
+            @test MVMCOptimizers.validate_supported_phys_cal_modpara(modpara) === nothing
             data = ExpertModeData()
-            data.modpara.lanczos_mode = 2
-            threw, msg = capture_error_message(() -> entry(data))
+            data.modpara.lanczos_mode = mode
+            @test MVMCOptimizers.validate_supported_phys_cal_data(data) === nothing
+        end
+    end
+
+    @testset "NLanczosMode > 0 is rejected for ParaOpt" begin
+        for bad in (1, 2)
+            modpara = ModParaParameters(lanczos_mode = bad)
+            threw, msg = capture_error_message(
+                () -> MVMCOptimizers.validate_supported_para_opt_modpara(modpara),
+            )
             @test threw
             @test occursin("NLanczosMode > 0", msg)
+            @test occursin("parameter optimization", msg)
         end
+    end
+
+    @testset "FSZ/general-orbital Lanczos is rejected for PhysCal" begin
+        for mode in (1, 2)
+            data = ExpertModeData()
+            data.modpara.lanczos_mode = mode
+            data.i_flg_orbital_general = 1
+            data.green_two_ex_terms = [GreenTwoExTerm(0, 0, 1, 0, 2, 1, 3, 1)]
+            threw, msg = capture_error_message(
+                () -> MVMCOptimizers.validate_supported_phys_cal_data(data),
+            )
+            @test threw
+            @test occursin("FSZ / general-orbital", msg)
+        end
+    end
+
+    @testset "spin-changing Lanczos rejects use mode-independent wording" begin
+        transfer_data = ExpertModeData()
+        transfer_data.modpara.lanczos_mode = 2
+        transfer_data.transfer_terms = [TransferTerm(0, 0, 1, 1, 1.0 + 0.0im)]
+        threw, msg = capture_error_message(
+            () -> MVMCOptimizers.validate_supported_phys_cal_data(transfer_data),
+        )
+        @test threw
+        @test occursin("spin-flip Transfer", msg)
+        @test !occursin("R1", msg)
+
+        interall_data = ExpertModeData()
+        interall_data.modpara.lanczos_mode = 2
+        interall_data.inter_all_terms = [InterAllTerm(0, 0, 1, 1, 2, 0, 3, 0, 1.0 + 0.0im, false)]
+        threw, msg = capture_error_message(
+            () -> MVMCOptimizers.validate_supported_phys_cal_data(interall_data),
+        )
+        @test threw
+        @test occursin("spin-changing InterAll", msg)
+        @test !occursin("R1", msg)
+    end
+
+    @testset "entry points enforce the Lanczos contract" begin
+        para_data = ExpertModeData()
+        para_data.modpara.lanczos_mode = 1
+        threw, msg = capture_error_message(() -> vmc_para_opt!(para_data))
+        @test threw
+        @test occursin("NLanczosMode > 0", msg)
+        @test occursin("parameter optimization", msg)
+
+        phys_data = ExpertModeData()
+        phys_data.modpara.lanczos_mode = 2
+        phys_data.i_flg_orbital_general = 1
+        threw, msg = capture_error_message(() -> vmc_phys_cal!(phys_data))
+        @test threw
+        @test occursin("FSZ / general-orbital", msg)
     end
 end

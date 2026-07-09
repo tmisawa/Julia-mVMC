@@ -32,12 +32,15 @@ result = run_para_opt_from_namelist(
 
 ## MPI limitations
 
-v0.4.2 supports `VMCParaOpt` sample-parallel MPI with the direct SR
-solver (`NSRCG = 0`) for `NSplitSize >= 1` when each sample uses a single full
-QP sector (`NQPFull = 1`). Non-FSZ and FSZ paths are gated by a four-way
-self-consistency comparison: `(NSplitSize=1, NStore=0/1)` under `mpiexec -n 2`
-and `(NSplitSize=2, NStore=0/1)` under `mpiexec -n 4` must agree for
-`zvo_out.dat` and `zqp_opt.dat`.
+v0.5.0 supports `VMCParaOpt` sample-parallel MPI with the direct SR
+solver (`NSRCG = 0`) for `NSplitSize >= 1` when each sample uses either
+`NQPFull = 1` or sz-conserved standard-projection `NQPFull > 1` with
+`NQPOptTrans = 1` (`NSPGaussLeg > 1` and/or `NMPTrans > 1`). Non-FSZ, FSZ
+`NQPFull = 1`, and sz-conserved standard-projection paths are gated by
+self-consistency comparisons:
+`(NSplitSize=1, NStore=0/1)` under `mpiexec -n 2` and
+`(NSplitSize=2, NStore=0/1)` under `mpiexec -n 4` must agree for the relevant
+parameter-optimization output files.
 
 The standard SR-CG solver (`NSRCG = 1`) remains limited to `NSplitSize = 1`.
 That path broadcasts the rank0 search vector and allreduces the sampled
@@ -46,15 +49,19 @@ for `NSplitSize = 1`.
 
 Additional C CG modes are not ported yet: `NSRCG >= 2`, `useDiagScale != 0`,
 and `RescaleSmat != 0` are rejected with clear errors. `NSplitSize > 1` with
-SR-CG, and `NSplitSize > 1` with `NQPFull > 1`, are also rejected because the
-comm1-aware CG and grouped QP-split sampling paths are not implemented.
+SR-CG is also rejected because the comm1-aware CG path is not implemented.
+OptTrans-derived QP sectors (`NQPOptTrans > 1` or active `OptTrans`) remain
+unsupported with `NSplitSize > 1`; use `NSplitSize = 1` for those inputs.
+FSZ standard-projection `NQPFull > 1` (`NSPGaussLeg > 1` or
+`abs(NMPTrans) > 1`) is not supported.
 
 The CI MPI smoke gate runs under `mpiexec` and checks rank0-only output,
 comm0 reductions, `VMCPhysCal` Green reductions, and failure-mode regressions:
 SR-CG `operate_by_s` collectives and a one-step `NSRCG = 1` C-reference
 comparison are exercised under `mpiexec -n 2`, while `NSRCG >= 2` and
-`NSplitSize > 1` with SR-CG are rejected before MPI context construction. This
-is a correctness smoke gate, not a performance or site-compatibility benchmark.
+`NSplitSize > 1` with SR-CG or active OptTrans are rejected before MPI context
+construction. This is a correctness smoke gate, not a performance or
+site-compatibility benchmark.
 
 ## NSRCG=1 coverage
 
@@ -90,22 +97,24 @@ for provenance):
 | `hubbard_chain_real` | real | charge fluctuations + Gutzwiller/Jastrow |
 
 A broader C ctest-equivalent CI gate covers the 12 supported standard C
-fixtures using C's `ref_mean.dat` / `ref_std.dat` criterion rather than a
-first-10-step comparison. See [`05_compatibility.md`](05_compatibility.md)
-for the runner and model selection details.
+fixtures plus `GeneralRBM_cmp` using C's `ref_mean.dat` / `ref_std.dat`
+criterion rather than a first-10-step comparison. See
+[`05_compatibility.md`](05_compatibility.md) for the runner and model
+selection details.
 
 Internal smoke runs (not part of the public CI, not bundled as
 fixtures) cover additional models in the same categories — Kondo
-chains, HubbardTetragonal momentum-projection, GeneralRBM_cmp, and
-the Lanczos chains at step 0 — and have historically reproduced C
-output within the same tolerances. Treat them as "expected to work
-but not continuously verified in this repo": if you hit a regression
-on an unbundled model, please open an issue with a reduced fixture so
-it can be added to the public CI.
+chains, HubbardTetragonal momentum-projection, and the Lanczos chains at step
+0 — and have historically reproduced C output within the same tolerances.
+Treat them as "expected to work but not continuously verified in this repo":
+if you hit a regression on an unbundled model, please open an issue with a
+reduced fixture so it can be added to the public CI.
 
 `SpinChainLanczos` and `HubbardChainLanczos` reproduce C only at
-step 0 (the SR section is bypassed there); the full Lanczos section
-is **not** ported — see [`05_compatibility.md`](05_compatibility.md).
+step 0 in the ParaOpt path (the SR section is bypassed there).
+`NLanczosMode > 0` is still rejected for ParaOpt; the R1 Lanczos
+support is limited to PhysCal energy/QQQQ output — see
+[`05_compatibility.md`](05_compatibility.md).
 
 ## Output files
 

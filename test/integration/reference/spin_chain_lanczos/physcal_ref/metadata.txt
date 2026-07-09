@@ -1,0 +1,23 @@
+# Full Lanczos mode2 PhysCal reference provenance
+
+## C-mVMC binary
+- Source: issp-center-dev/mVMC @ 622166afe33c6be3402d7c926db7e9c0003a47c4.
+- Threads: OMP_NUM_THREADS=1, single MPI rank.
+
+## Run
+- Source C fixture: `test/python/data/SpinChainLanczos`.
+- Expert input files: generated with `vmc.out -s StdFace.def zqp_opt.dat` and
+  committed under `inputs/`.
+- Fixed params: the committed `zqp_opt.dat` copied from the C fixture
+  (108 tokens = 6 + 3*34).
+- Reference outputs: the committed expert input set was replayed with
+  `vmc.out -e namelist.def zqp_opt.dat` and `NLanczosMode=2`, producing
+  `expected/zvo_ls_out_001.dat`, `expected/zvo_ls_qqqq_001.dat`,
+  `expected/zvo_ls_cisajs_001.dat`, and
+  `expected/zvo_ls_cisajscktalt_001.dat`. The C run also creates an empty
+  `zvo_ls_cisajscktaltex_001.dat` because this fixture has no `TwoBodyGEx`;
+  that empty byproduct is not committed as an expected file.
+- Julia comparison at generation time: `zvo_ls_out_001.dat` max_abs
+  3.4e-9; `zvo_ls_qqqq_001.dat` max_abs 2.3e-13;
+  `zvo_ls_cisajs_001.dat` max_abs 5.0e-12;
+  `zvo_ls_cisajscktalt_001.dat` max_abs 3.8e-10.

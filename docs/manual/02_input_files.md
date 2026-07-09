@@ -28,7 +28,7 @@ relative to its own directory.
 | `opttrans.def` (`OptTrans`) | optional QPOptTrans mapping and OptTrans weights | ✅ |
 | `greenone.def` (`OneBodyG`) | one-body Green-function targets | ✅ |
 | `greentwo.def` (`TwoBodyG`) | two-body Green-function targets (direct mode) | ✅ |
-| `initial.def` (CLI 2nd argument in C) | starting variational parameters | ✅ auto-detected from namelist dir |
+| `initial.def` (CLI 2nd argument in C) | starting variational parameters, including RBM triples | ✅ auto-detected from namelist dir |
 
 ## In* overlay files (consumed by `read_input_parameters!`)
 
@@ -58,11 +58,11 @@ active is not reproducible bit-for-bit.
 
 | File | Status / reason |
 |------|--------|
-| `pairhop.def` (`PairHop`) | Pair-hopping interaction not wired into `CalculateHamiltonian`. |
 | `spinjastrow.def` (`SpinJastrow`) | Not implemented; parser hard-fails if the keyword is present because it would change projection offsets. |
 
 > Note: the factored/product two-body Green (`TwoBodyGEx` / `greentwoex.def` →
-> `zvo_cisajscktaltex`) **is** supported (non-FSZ) and gated against C; see
+> `zvo_cisajscktaltex`) **is** supported for sz-conserved and FSZ/general-orbital
+> `NSplitSize = 1` PhysCal runs and gated against C; see
 > [`04_physics_calc.md`](04_physics_calc.md).
 
 ## Compatibility notes
@@ -72,6 +72,9 @@ active is not reproducible bit-for-bit.
   the data block.
 - `qptransidx.def` accepts the 3-column form (`itmpsgn = 1` defaulted)
   in addition to the canonical 4-column form.
+- `pairhop.def` / `pairhopp.def` (`PairHop`) is consumed by the Hamiltonian in
+  both non-FSZ and FSZ paths. Each input row is expanded to `(i,j)` and `(j,i)`,
+  matching C-mVMC's internal `PairHopping` list.
 - For `interall.def`, fsz-style spin-flip terms are honoured.
 - The RNG layout matches C: `RndSeed` from `modpara.def` seeds an
   SFMT19937 stream with the C-parity rule (v0.4): missing line → `11272`

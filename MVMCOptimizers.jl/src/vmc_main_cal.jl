@@ -410,12 +410,12 @@ function green_func1(
             data,
             state,
         )
-        ip_new_real = calculate_ip_real(pf_m_new_real, 1, n_qp_full + 1, data)
+        ip_new_real = calculate_ip_real(pf_m_new_real, 1, n_qp_full + 1, data; reduce = :none)
         ip_new = ComplexF64(ip_new_real, 0.0)
     else
         pf_m_new = zeros(ComplexF64, n_qp_full)
         calculate_new_pf_m2!(mj, s, pf_m_new, my_ele_idx, 1, n_qp_full + 1, data, state)
-        ip_new = calculate_ip_fcmp(pf_m_new, 1, n_qp_full + 1, data)
+        ip_new = calculate_ip_fcmp(pf_m_new, 1, n_qp_full + 1, data; reduce = :none)
     end
     z *= ip_new
 
@@ -523,7 +523,7 @@ function green_func1_real_value!(
             )
             ctimer_stop!(c_timer, 923)
             ctimer_start!(c_timer, 924)
-            value = calculate_ip_real(pf_m_new_real, 1, n_qp_full + 1, data)
+            value = calculate_ip_real(pf_m_new_real, 1, n_qp_full + 1, data; reduce = :none)
             ctimer_stop!(c_timer, 924)
             value
         end
@@ -660,7 +660,7 @@ function green_func1_fsz(
         data,
         state,
     )
-    ip_new = calculate_ip_fcmp(pf_m_new, 1, n_qp_full + 1, data)
+    ip_new = calculate_ip_fcmp(pf_m_new, 1, n_qp_full + 1, data; reduce = :none)
     z *= ip_new
 
     result = conj(z / ip)
@@ -771,7 +771,7 @@ function green_func1_fsz2(
         data,
         state,
     )
-    ip_new = calculate_ip_fcmp(pf_m_new, 1, n_qp_full + 1, data)
+    ip_new = calculate_ip_fcmp(pf_m_new, 1, n_qp_full + 1, data; reduce = :none)
     z *= ip_new
 
     result = conj(z / ip)
@@ -1013,7 +1013,7 @@ function green_func2_fsz(
         data,
         state,
     )
-    ip_new = calculate_ip_fcmp(pf_m_new, 1, n_qp_full + 1, data)
+    ip_new = calculate_ip_fcmp(pf_m_new, 1, n_qp_full + 1, data; reduce = :none)
     z *= ip_new
 
     result = conj(z / ip)
@@ -1286,7 +1286,7 @@ function green_func2_fsz2(
         data,
         state,
     )
-    ip_new = calculate_ip_fcmp(pf_m_new, 1, n_qp_full + 1, data)
+    ip_new = calculate_ip_fcmp(pf_m_new, 1, n_qp_full + 1, data; reduce = :none)
     z *= ip_new
 
     result = conj(z / ip)
@@ -1509,7 +1509,7 @@ function green_func2(
             data,
             state,
         )
-        ip_new_real = calculate_ip_real(pf_m_new_real, 1, n_qp_full + 1, data)
+        ip_new_real = calculate_ip_real(pf_m_new_real, 1, n_qp_full + 1, data; reduce = :none)
         ip_new = ComplexF64(ip_new_real, 0.0)
     else
         pf_m_new = zeros(ComplexF64, n_qp_full)
@@ -1525,7 +1525,7 @@ function green_func2(
             data,
             state,
         )
-        ip_new = calculate_ip_fcmp(pf_m_new, 1, n_qp_full + 1, data)
+        ip_new = calculate_ip_fcmp(pf_m_new, 1, n_qp_full + 1, data; reduce = :none)
     end
     z *= ip_new
 
@@ -3997,10 +3997,10 @@ function vmc_main_cal!(
             ctimer_start!(maincal_diag_timer, 944)
             if !all_complex
                 ip_real =
-                    calculate_ip_real(worker_state.slater_matrix.pf_m_real, 1, n_qp_full + 1, data)
+                    calculate_ip_real(worker_state.slater_matrix.pf_m_real, 1, n_qp_full + 1, data; reduce = :none)
                 ip = ComplexF64(ip_real, 0.0)  # Convert to ComplexF64 for calculate_hamiltonian
             else
-                ip = calculate_ip_fcmp(worker_state.slater_matrix.pf_m, 1, n_qp_full + 1, data)
+                ip = calculate_ip_fcmp(worker_state.slater_matrix.pf_m, 1, n_qp_full + 1, data; reduce = :none)
             end
             ctimer_stop!(maincal_diag_timer, 944)
             ctimer_stop!(maincal_diag_timer, 940)
@@ -4090,6 +4090,30 @@ function vmc_main_cal!(
             ctimer_stop!(maincal_diag_timer, 946)
             ctimer_stop!(maincal_diag_timer, 940)
 
+            lanczos_h2 = 0.0 + 0.0im
+            if nvmc_cal_mode == 1 &&
+               data.modpara.lanczos_mode > 0 &&
+               worker_state.phys_quantities !== nothing
+                lanczos_h2 = calculate_lanczos_h2!(
+                    e,
+                    ip,
+                    ele_idx,
+                    ele_cfg,
+                    ele_num,
+                    ele_proj_cnt,
+                    data,
+                    worker_state;
+                    all_complex = all_complex,
+                )
+                accumulate_lanczos_qqqq!(
+                    local_acc.phys,
+                    w,
+                    e,
+                    lanczos_h2;
+                    all_complex = all_complex,
+                )
+            end
+
             # Calculate Green's functions (only in measurement mode)
             if nvmc_cal_mode == 1 && worker_state.phys_quantities !== nothing
                 ctimer_start!(maincal_diag_timer, 940)
@@ -4105,6 +4129,23 @@ function vmc_main_cal!(
                     ele_num,
                     ele_proj_cnt,
                 )
+                if data.modpara.lanczos_mode > 1
+                    accumulate_lanczos_green!(
+                        local_acc.phys,
+                        worker_state.phys_quantities,
+                        data,
+                        worker_state,
+                        w,
+                        e,
+                        lanczos_h2,
+                        ip,
+                        ele_idx,
+                        ele_cfg,
+                        ele_num,
+                        ele_proj_cnt;
+                        all_complex = all_complex,
+                    )
+                end
                 ctimer_stop!(maincal_diag_timer, 947)
                 ctimer_stop!(maincal_diag_timer, 940)
             end
@@ -4428,7 +4469,7 @@ function vmc_main_cal_fsz!(
         end
 
         # Calculate inner product
-        ip = calculate_ip_fcmp(worker_state.slater_matrix.pf_m, 1, n_qp_full + 1, data)
+        ip = calculate_ip_fcmp(worker_state.slater_matrix.pf_m, 1, n_qp_full + 1, data; reduce = :none)
 
         if abs(ip) < 1e-100
             @warn "VMCMainCal_fsz: sample=$sample has zero ip" maxlog=5
@@ -4472,9 +4513,7 @@ function vmc_main_cal_fsz!(
         # Calculate Green's functions (only in measurement mode)
         # C implementation: VMCMainCal_fsz calls CalculateGreenFunc_fsz when NVMCCalMode==1
         if nvmc_cal_mode == 1 && worker_state.phys_quantities !== nothing
-            # TODO: Implement FSZ-specific green function calculation
-            # For now, use standard version (may not be accurate for spin-flip terms)
-            calculate_green_func!(
+            calculate_green_func_fsz!(
                 data,
                 worker_state,
                 local_acc.phys,
@@ -4484,6 +4523,7 @@ function vmc_main_cal_fsz!(
                 ele_cfg,
                 ele_num,
                 ele_proj_cnt,
+                ele_spn,
             )
         end
 

@@ -48,8 +48,9 @@ function vmc_phys_cal!(
     # Reject unsupported global / PhysCal combinations before any work.
     validate_supported_modpara(data.modpara)
     validate_supported_phys_cal_modpara(data.modpara)
-    # Reject TwoBodyGEx in FSZ / general-orbital mode before any sampling or RNG
-    # side effects (its Green measurement path is not yet wired).
+    validate_supported_phys_cal_data(data)
+    # Factored Green support hook. Currently all supported PhysCal modes pass;
+    # keep the call here so future unsupported combinations fail before RNG use.
     validate_factored_green_supported(data)
 
     # Initialize RNG if not provided. Match the C-compatible seed convention
@@ -213,19 +214,19 @@ function vmc_phys_cal!(
 
             if i_flg_orbital_general == 0
                 if n_proj_bf == 0
-                    vmc_make_sample_real!(data, state, rng)
+                    vmc_make_sample_real!(data, state, rng, CTIMER_DISABLED; ctx = ctx)
                 else
                     vmc_bf_make_sample_real!(data, state, rng)
                 end
             else
-                vmc_make_sample_fsz_real!(data, state, rng)
+                vmc_make_sample_fsz_real!(data, state, rng, CTIMER_DISABLED; ctx = ctx)
             end
         else  # complex
             if n_proj_bf == 0
                 if i_flg_orbital_general == 0
-                    vmc_make_sample!(data, state, rng)
+                    vmc_make_sample!(data, state, rng, CTIMER_DISABLED; ctx = ctx)
                 else
-                    vmc_make_sample_fsz!(data, state, rng)
+                    vmc_make_sample_fsz!(data, state, rng, CTIMER_DISABLED; ctx = ctx)
                 end
             else
                 vmc_bf_make_sample!(data, state, rng)

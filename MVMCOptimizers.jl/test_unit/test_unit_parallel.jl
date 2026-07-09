@@ -28,6 +28,31 @@ end
     @test isempty(split_range(2, 3, 4))     # 空 range → empty Julia range
 end
 
+using MVMCOptimizers: qp_split_range, allreduce_sum_scalar, allreduce_max_scalar
+
+@testset "qp_split_range returns 1-based half-open QP ranges" begin
+    fake_serial = serial_context()
+    @test qp_split_range(4, fake_serial) == (1, 5)
+
+    ctx0 = MVMCOptimizers.ParallelContext(false, nothing, nothing, nothing,
+                                          0, 4, 0, 2, 0, 2, 0)
+    ctx1 = MVMCOptimizers.ParallelContext(false, nothing, nothing, nothing,
+                                          1, 4, 1, 2, 1, 2, 0)
+    @test qp_split_range(4, ctx0) == (1, 3)
+    @test qp_split_range(4, ctx1) == (3, 5)
+
+    empty_ctx = MVMCOptimizers.ParallelContext(false, nothing, nothing, nothing,
+                                               3, 4, 3, 4, 3, 4, 0)
+    @test qp_split_range(1, empty_ctx) == (2, 2)
+end
+
+@testset "serial scalar reductions are no-ops" begin
+    ctx = serial_context()
+    @test allreduce_sum_scalar(ctx, 2.0 + 3.0im; which = :comm1) == 2.0 + 3.0im
+    @test allreduce_sum_scalar(ctx, 4.5; which = :comm1) == 4.5
+    @test allreduce_max_scalar(ctx, 7; which = :comm1) == 7
+end
+
 @testset "group1 assignment (C vmcmain.c:239)" begin
     # size0=3, NSplitSize=2: 最後の group が小さい (F8, warning のみで継続)
     @test [div(r, 2) for r in 0:2] == [0, 0, 1]

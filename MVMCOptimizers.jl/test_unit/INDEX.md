@@ -113,29 +113,39 @@
   - `unit/unsupported_inputs: NSplitSize contract` → `validate_supported_modpara`
     - `NSplitSize = 1` は許容（serial / MPI sample parallel、`vmc_para_opt!` / `vmc_phys_cal!`）
     - `NSplitSize > 1` は direct `VMCParaOpt` (`NSRCG = 0`) で許容
-    - `NSplitSize > 1` + SR-CG、PhysCal、`NQPFull > 1` は `error()` で reject
-    - エラーメッセージに該当する非対応組み合わせ（SR-CG / PhysCal / NQPFull）を含む
+    - `NSplitSize > 1` は sz-conserved normal-Green `VMCPhysCal` で許容
+    - `NSplitSize > 1` + SR-CG、FSZ/general-orbital PhysCal（`TwoBodyGEx` 付き含む）、
+      PhysCal Lanczos、OptTrans-derived QP split、FSZ standard-projection
+      `NQPFull > 1` は `error()` で reject
+    - エラーメッセージに該当する非対応組み合わせ（SR-CG / PhysCal split
+      scope / NQPFull）を含む
     - 検証は型ではなくメッセージ部分文字列で行う（design review A2）
   - `unit/unsupported_inputs: SR-CG option contract` → `validate_supported_modpara`
     - `NSRCG = 0/1` は許容、`NSRCG >= 2` は reject
     - `useDiagScale != 0` / `RescaleSmat != 0` は reject
   - `unit/unsupported_inputs: NLanczosMode contract` → `validate_supported_modpara`
-    - `NLanczosMode = 0` は許容、`> 0`（1/2）は `error()` で reject（full Lanczos 未サポート / C の indirect one-body list 非再現）
-    - `vmc_para_opt!` / `vmc_phys_cal!` の両 entry point で enforce、メッセージに `NLanczosMode > 0` を含む
+    - `NLanczosMode = 0/1/2` は global 値として許容、未知値は reject
+    - ParaOpt は `NLanczosMode > 0` を reject、PhysCal は sz-conserved
+      `NSplitSize = 1` path で `NLanczosMode = 1/2` を許容
+    - PhysCal では `NSplitSize > 1` Lanczos と FSZ/general-orbital Lanczos
+      （`TwoBodyGEx` 付き含む）を reject
 
 ### `src/green_func_calc.jl` + `vmc_phys_cal.jl`（factored two-body Green）
 - `test_unit/test_unit_physcal_factored_green.jl`
   - `PhysicalQuantities index fields` → `cis_ajs_idx` / `cis_ajs_ckt_alt_idx`
+  - `Lanczos QQQQ accumulation uses C flatten order` → `phys_lanczos_qqqq` の 16 要素 flatten order / complex conjugation
+  - `output: Lanczos R1 writes ls_out and ls_qqqq` → `*_ls_out_XXX.dat` / `*_ls_qqqq_XXX.dat` の R1 出力
   - `canonical one-body list` → `build_canonical_cis_ajs_idx`（greenone 先頭 → greentwoex 構成 append・dedup・site 範囲・spin 検証）
   - `factored index resolution is 1-based` → `resolve_cis_ajs_ckt_alt_idx`（C index 0 → Julia 1）
   - `factored accumulation` → `accumulate_factored_green!`（`w·local[idx0]·conj(local[idx1])`）
   - `calculate_green_func! legacy no-acc path writes to state phys` → accumulator なし旧 API の R1 follow-up 回帰ガード
+  - `calculate_green_func_fsz! uses FSZ spin dispatch and accumulator locals` → FSZ PhysCal Green driver の one-body / direct two-body dispatch と accumulator-local factored 加算
   - `output: canonical cisajs + factored ex` → `output_green_func!`（canonical 出力 / output_dir / `_001` 番号）
   - `PhysCal output file index uses NDataIdxStart` → `physcal_output_file_index`
   - `output_data_phys!: out/var truncate-on-first-sample, Green files use NDataIdxStart` → fmt-1 回帰ガード（out/var は 0-based ismp で write-mode 決定 → 初回 truncate・再実行で非汚染、Green は `ismp+NDataIdxStart` 番号）
   - `initialize_phys_quantities! wires the factored canonical list and pairs` → factored 分岐の統合（canonical/pairs を struct へ配線・buffer サイズ、共有構成2項の dedup append + 複数ペア順序）
   - `no TwoBodyGEx preserves greenone order and duplicates` → 既存 direct 経路の互換回帰
-  - `FSZ + factored is rejected` → `validate_factored_green_supported`（public path `vmc_phys_cal!` 経由も検証）
+  - `FSZ + factored validation hook accepts supported PhysCal path` → `validate_factored_green_supported` の FSZ TwoBodyGEx 受理
 
 ### `src/initial_params.jl`（fixed-parameter loader, Plan 3a）
 - `test_unit/test_unit_read_opt_para.jl`

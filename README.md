@@ -2,16 +2,16 @@
 
 Julia port of the [mVMC](https://github.com/issp-center-dev/mVMC) (many-variable Variational Monte Carlo) solver for quantum lattice models.
 
-## Status (v0.4.2)
+## Status (v0.5.0)
 
 | Component | Status | Notes |
 |-----------|--------|-------|
 | VMCParaOpt (parameter optimization) | ✅ Verified | Strict first-10-step C-reference checks, C ctest-equivalent gates for supported standard fixtures, and `NSRCG = 1` first-step tolerance gates for serial and `mpiexec -n 2`; see `test/integration/` and `test/mpi/`. |
-| VMCPhysCal (physical quantities) | 🚧 Experimental | C-referenced one-body, direct two-body, and factored/product two-body Green-function output for supported fixtures. |
+| VMCPhysCal (physical quantities) | 🚧 Experimental | C-referenced one-body, direct two-body, and factored/product two-body Green-function output for supported fixtures. `NSplitSize > 1` is supported for sz-conserved normal-Green runs (`NLanczosMode = 0`). |
 | Shared-memory threading | 🚧 Experimental | Conservative inner-loop opt-ins only; sample-level `VMCMainCal` threading is intentionally disabled for C-parity. |
-| Lanczos | ⚠️ Step-0 only | Single-step comparison verified; full Lanczos not yet ported. |
+| Lanczos | 🚧 PhysCal | `VMCPhysCal` supports `NLanczosMode = 1/2` output on the sz-conserved `NSplitSize = 1` path. Lanczos with `NSplitSize > 1`, FSZ/general-orbital Lanczos, and ParaOpt Lanczos remain unsupported. |
 | BackFlow | ❌ Not supported | Planned for a future release. |
-| MPI parallelization | 🚧 Experimental | `VMCParaOpt` supports direct SR (`NSRCG = 0`) with `NSplitSize >= 1` for the single-full-QP-sector path (`NQPFull = 1`), plus standard SR-CG (`NSRCG = 1`) with `NSplitSize = 1`; rank0 output/readback and comm0 reductions are smoke-tested for `mpiexec -n 2/-n 4`, with `NSplitSize/NStore` direct-SR self-consistency gates under `mpiexec -n 2/-n 4`. `VMCPhysCal` and SR-CG with `NSplitSize > 1`, grouped QP splitting (`NSplitSize > 1` with `NQPFull > 1`), `NSRCG >= 2`, `useDiagScale != 0`, and `RescaleSmat != 0` are still rejected. |
+| MPI parallelization | 🚧 Experimental | `VMCParaOpt` supports direct SR (`NSRCG = 0`) with `NSplitSize >= 1` for `NQPFull = 1` and for sz-conserved standard-projection `NQPFull > 1` when `NQPOptTrans = 1` (`NSPGaussLeg > 1` and/or `NMPTrans > 1`), plus standard SR-CG (`NSRCG = 1`) with `NSplitSize = 1`; rank0 output/readback, comm0 reductions, `NSplitSize/NStore`, and standard-projection self-consistency paths are smoke-tested under `mpiexec -n 2/-n 4`. `VMCPhysCal` supports `NSplitSize > 1` for sz-conserved normal-Green runs (`NLanczosMode = 0`). `VMCPhysCal` split with Lanczos, FSZ/general-orbital PhysCal split, SR-CG with `NSplitSize > 1`, FSZ standard-projection `NQPFull > 1` (`NSPGaussLeg > 1` or `abs(NMPTrans) > 1`), OptTrans-derived QP sectors (`NQPOptTrans > 1` or active `OptTrans`) with `NSplitSize > 1`, `NSRCG >= 2`, `useDiagScale != 0`, and `RescaleSmat != 0` are still rejected. |
 
 ## Installation
 
@@ -75,7 +75,7 @@ GPL-3.0-or-later. See [LICENSE](LICENSE) and [THIRD_PARTY_LICENSES.md](THIRD_PAR
 
 See [CITATION.cff](CITATION.cff). Plain-text:
 
-> Misawa, T. (2026). Julia-mVMC v0.4.2. https://github.com/tmisawa/Julia-mVMC
+> Misawa, T. (2026). Julia-mVMC v0.5.0. https://github.com/tmisawa/Julia-mVMC
 
 ## Acknowledgments
 

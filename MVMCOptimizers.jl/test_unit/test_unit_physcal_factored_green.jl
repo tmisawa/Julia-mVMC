@@ -1,6 +1,6 @@
 using Test
 using MVMCOptimizers
-using MVMCExpertModeParsers: ExpertModeData, GreenOneTerm, GreenTwoExTerm
+using MVMCExpertModeParsers: ExpertModeData, GreenOneTerm, GreenTwoTerm, GreenTwoExTerm
 
 @testset "PhysicalQuantities index fields" begin
     pq = MVMCOptimizers.PhysicalQuantities(2, 1, 3)
@@ -9,6 +9,10 @@ using MVMCExpertModeParsers: ExpertModeData, GreenOneTerm, GreenTwoExTerm
     @test length(pq.phys_cis_ajs) == 2
     @test length(pq.phys_cis_ajs_ckt_alt) == 1
     @test length(pq.phys_cis_ajs_ckt_alt_dc) == 3
+    @test length(pq.phys_lanczos_qqqq) == 16
+    @test length(pq.phys_lanczos_qcisajsq) == 8
+    @test length(pq.phys_lanczos_qcisajscktaltq) == 4
+    @test length(pq.phys_lanczos_qcisajscktaltq_dc) == 12
 end
 
 @testset "canonical one-body list" begin
@@ -99,8 +103,134 @@ end
     @test phys.phys_cis_ajs_ckt_alt == [0.5 + 0.0im]
 end
 
+@testset "calculate_green_func_fsz! uses FSZ spin dispatch and accumulator locals" begin
+    data = ExpertModeData()
+    data.modpara.nsite = 2
+    data.modpara.nelec = 1
+    data.i_flg_orbital_general = 1
+    data.green_one_terms = [
+        GreenOneTerm(0, 0, :up, :up),      # same-spin diagonal -> GreenFunc1_fsz
+        GreenOneTerm(0, 1, :up, :down),    # spin-changing occupied target -> GreenFunc1_fsz2 = 0
+    ]
+    data.green_two_terms = [
+        GreenTwoTerm(0, 0, 0, 0, :up, :up, :up, :up),          # GreenFunc2_fsz
+        GreenTwoTerm(0, 1, 0, 1, :up, :down, :up, :down),      # GreenFunc2_fsz2 special zero
+    ]
+    data.green_two_ex_terms = [
+        GreenTwoExTerm(0, 0, 0, 0, 0, 0, 0, 0),
+    ]
+
+    state = MVMCOptimizers.VMCOptimizationState(2, 1, 0, 0, 1, 1, true, true)
+    MVMCOptimizers.initialize_phys_quantities!(state, data)
+    phys = state.phys_quantities
+    acc = MVMCOptimizers.VMCPhysAccumulator(phys)
+
+    ele_idx = Int[0, 1]
+    ele_spn = Int[0, 1]
+    ele_cfg = Int[0, -1, -1, 1]
+    ele_num = Int[1, 0, 0, 1]
+
+    MVMCOptimizers.calculate_green_func_fsz!(
+        data,
+        state,
+        acc,
+        0.5,
+        1.0 + 0.0im,
+        ele_idx,
+        ele_cfg,
+        ele_num,
+        Int[],
+        ele_spn,
+    )
+
+    @test acc.local_cis_ajs == [1.0 + 0.0im, 0.0 + 0.0im]
+    @test acc.phys_cis_ajs == [0.5 + 0.0im, 0.0 + 0.0im]
+    @test acc.local_cis_ajs_ckt_alt_dc == [1.0 + 0.0im, 0.0 + 0.0im]
+    @test acc.phys_cis_ajs_ckt_alt_dc == [0.5 + 0.0im, 0.0 + 0.0im]
+    @test acc.phys_cis_ajs_ckt_alt == [0.5 + 0.0im]
+
+    # The accumulator overload must not rely on state-local values for factored
+    # Green accumulation; the sampling loop merges acc into state after the range.
+    @test phys.local_cis_ajs == [0.0 + 0.0im, 0.0 + 0.0im]
+    @test phys.phys_cis_ajs == [0.0 + 0.0im, 0.0 + 0.0im]
+end
+
 using MVMCOptimizers: VMCOptimizationState
 using Printf
+
+@testset "Lanczos QQQQ accumulation uses C flatten order" begin
+    pq = MVMCOptimizers.PhysicalQuantities(0, 0, 0)
+    MVMCOptimizers.accumulate_lanczos_qqqq!(
+        pq,
+        0.5,
+        2.0 + 3.0im,
+        5.0 + 7.0im;
+        all_complex = true,
+    )
+    @test pq.phys_lanczos_qqqq[1] ≈ 0.5
+    @test pq.phys_lanczos_qqqq[3] ≈ 0.5 * conj(2.0 + 3.0im)
+    @test pq.phys_lanczos_qqqq[16] ≈ 0.5 * conj(5.0 + 7.0im) * (5.0 + 7.0im)
+
+    pq_real = MVMCOptimizers.PhysicalQuantities(0, 0, 0)
+    MVMCOptimizers.accumulate_lanczos_qqqq!(
+        pq_real,
+        0.5,
+        2.0 + 0.0im,
+        5.0 + 0.0im;
+        all_complex = false,
+    )
+    @test pq_real.phys_lanczos_qqqq[3] ≈ 1.0 + 0.0im
+    @test pq_real.phys_lanczos_qqqq[16] ≈ 12.5 + 0.0im
+
+    pq_bad = MVMCOptimizers.PhysicalQuantities(0, 0, 0)
+    resize!(pq_bad.phys_lanczos_qqqq, 15)
+    @test_throws ArgumentError MVMCOptimizers.accumulate_lanczos_qqqq!(
+        pq_bad,
+        1.0,
+        1.0 + 0.0im,
+        1.0 + 0.0im;
+        all_complex = true,
+    )
+end
+
+@testset "Lanczos mode2 QCAQ accumulation uses C flatten order" begin
+    data = ExpertModeData()
+    data.modpara.nsite = 2
+    data.modpara.nelec = 1
+    data.modpara.lanczos_mode = 2
+    data.green_one_terms = [GreenOneTerm(0, 0, :up, :up)]
+
+    state = VMCOptimizationState(2, 1, 0, 0, 1, 1, true, false)
+    MVMCOptimizers.initialize_phys_quantities!(state, data)
+    phys = state.phys_quantities
+    phys.local_cis_ajs[1] = 1.0 + 0.0im
+
+    ele_idx = Int[0, 1]
+    ele_cfg = Int[0, -1, -1, 1]
+    ele_num = Int[1, 0, 0, 1]
+    MVMCOptimizers.accumulate_lanczos_green!(
+        phys,
+        phys,
+        data,
+        state,
+        0.5,
+        2.0 + 0.0im,
+        5.0 + 0.0im,
+        1.0 + 0.0im,
+        ele_idx,
+        ele_cfg,
+        ele_num,
+        Int[];
+        all_complex = false,
+    )
+
+    @test phys.phys_lanczos_qcisajsq == [
+        0.5 + 0.0im,
+        1.0 + 0.0im,
+        1.0 + 0.0im,
+        2.0 + 0.0im,
+    ]
+end
 
 @testset "output: canonical cisajs + factored ex, with output_dir and numbering" begin
     data = ExpertModeData()
@@ -132,6 +262,117 @@ using Printf
         @test length(vals) == 2
         @test vals[1] ≈ 2.5
         @test vals[2] ≈ -1.0
+    end
+end
+
+@testset "output: Lanczos R1 writes ls_out and ls_qqqq" begin
+    data = ExpertModeData()
+    data.modpara.nsite = 2
+    data.modpara.c_data_file_head = "zvo"
+    data.modpara.lanczos_mode = 1
+    state = VMCOptimizationState(2, 1, 0, 0, 1, 1, true, false)
+    pq = MVMCOptimizers.PhysicalQuantities(0, 0, 0)
+    pq.phys_lanczos_qqqq .= 0.0 + 0.0im
+    pq.phys_lanczos_qqqq[3] = 1.0 + 0.0im
+    pq.phys_lanczos_qqqq[4] = 2.0 + 0.0im
+    pq.phys_lanczos_qqqq[11] = 3.0 + 0.0im
+    pq.phys_lanczos_qqqq[12] = 1.0 + 0.0im
+    pq.phys_lanczos_qqqq[16] = 5.0 + 0.0im
+    state.phys_quantities = pq
+
+    mktempdir() do dir
+        MVMCOptimizers.output_green_func!(data, state, 7; output_dir = dir)
+
+        ls_out = joinpath(dir, "zvo_ls_out_007.dat")
+        ls_qqqq = joinpath(dir, "zvo_ls_qqqq_007.dat")
+        @test isfile(ls_out)
+        @test isfile(ls_qqqq)
+
+        ls_vals = parse.(Float64, split(read(ls_out, String)))
+        @test length(ls_vals) == 3
+        @test ls_vals[1] ≈ -3.5
+        @test ls_vals[3] ≈ -0.75
+
+        qqqq_vals = parse.(Float64, split(read(ls_qqqq, String)))
+        @test length(qqqq_vals) == 16
+        @test qqqq_vals[3] ≈ 1.0
+        @test qqqq_vals[4] ≈ 2.0
+        @test qqqq_vals[11] ≈ 3.0
+        @test qqqq_vals[12] ≈ 1.0
+        @test qqqq_vals[16] ≈ 5.0
+    end
+end
+
+@testset "output: Lanczos mode2 writes LS Green files" begin
+    data = ExpertModeData()
+    data.modpara.nsite = 2
+    data.modpara.c_data_file_head = "zvo"
+    data.modpara.lanczos_mode = 2
+    data.green_two_terms = [GreenTwoTerm(0, 1, 1, 0, :up, :up, :down, :down)]
+    state = VMCOptimizationState(2, 1, 0, 0, 1, 1, true, false)
+    pq = MVMCOptimizers.PhysicalQuantities(1, 1, 1)
+    pq.cis_ajs_idx = NTuple{4,Int}[(0, 0, 1, 0)]
+    pq.cis_ajs_ckt_alt_idx = [(1, 1)]
+    pq.phys_lanczos_qqqq .= 0.0 + 0.0im
+    pq.phys_lanczos_qqqq[3] = 1.0 + 0.0im
+    pq.phys_lanczos_qqqq[4] = 2.0 + 0.0im
+    pq.phys_lanczos_qqqq[11] = 3.0 + 0.0im
+    pq.phys_lanczos_qqqq[12] = 1.0 + 0.0im
+    pq.phys_lanczos_qqqq[16] = 5.0 + 0.0im
+    pq.phys_lanczos_qcisajsq .= ComplexF64[1, 2, 3, 4]
+    pq.phys_lanczos_qcisajscktaltq .= ComplexF64[9, 10, 11, 13]
+    pq.phys_lanczos_qcisajscktaltq_dc .= ComplexF64[5, 6, 7, 8]
+    state.phys_quantities = pq
+
+    mktempdir() do dir
+        MVMCOptimizers.output_green_func!(data, state, 4; output_dir = dir)
+
+        cisajs = joinpath(dir, "zvo_ls_cisajs_004.dat")
+        cktalt = joinpath(dir, "zvo_ls_cisajscktalt_004.dat")
+        cktaltex = joinpath(dir, "zvo_ls_cisajscktaltex_004.dat")
+        @test isfile(cisajs)
+        @test isfile(cktalt)
+        @test isfile(cktaltex)
+
+        cisajs_cols = split(first(filter(!isempty, split(read(cisajs, String), "\n"))))
+        @test cisajs_cols[1:4] == ["0", "0", "1", "0"]
+        @test parse(Float64, cisajs_cols[5]) ≈ -0.8
+        @test parse(Float64, cisajs_cols[6]) ≈ 0.0
+
+        cktalt_cols = split(first(filter(!isempty, split(read(cktalt, String), "\n"))))
+        @test cktalt_cols[1:8] == ["0", "0", "1", "0", "1", "1", "0", "1"]
+        @test parse(Float64, cktalt_cols[9]) ≈ -0.4
+        @test parse(Float64, cktalt_cols[10]) ≈ 0.0
+
+        ex_vals = parse.(Float64, split(read(cktaltex, String)))
+        @test length(ex_vals) == 2
+        @test ex_vals[1] ≈ 0.9
+        @test ex_vals[2] ≈ 0.0
+    end
+end
+
+@testset "output: Lanczos singular alpha writes NaN without aborting" begin
+    data = ExpertModeData()
+    data.modpara.nsite = 2
+    data.modpara.c_data_file_head = "zvo"
+    data.modpara.lanczos_mode = 1
+    state = VMCOptimizationState(2, 1, 0, 0, 1, 1, true, false)
+    state.phys_quantities = MVMCOptimizers.PhysicalQuantities(0, 0, 0)
+
+    mktempdir() do dir
+        @test_logs (:warn, r"Lanczos energy could not be calculated") MVMCOptimizers.output_green_func!(
+            data,
+            state,
+            3;
+            output_dir = dir,
+        )
+
+        ls_out = joinpath(dir, "zvo_ls_out_003.dat")
+        ls_qqqq = joinpath(dir, "zvo_ls_qqqq_003.dat")
+        @test isfile(ls_out)
+        @test isfile(ls_qqqq)
+        @test all(isnan, parse.(Float64, split(read(ls_out, String))))
+        @test length(parse.(Float64, split(read(ls_qqqq, String)))) == 16
     end
 end
 
@@ -215,6 +456,28 @@ end
     end
 end
 
+@testset "Lanczos mode2 rejects duplicate greenone entries without TwoBodyGEx" begin
+    data = ExpertModeData()
+    data.modpara.nsite = 2
+    data.modpara.lanczos_mode = 2
+    data.green_one_terms = [
+        GreenOneTerm(0, 1, :up, :up),
+        GreenOneTerm(0, 1, :up, :up),
+    ]
+
+    state = VMCOptimizationState(2, 2, 0, 0, 1, 2, true, false)
+    threw = false
+    msg = ""
+    try
+        MVMCOptimizers.initialize_phys_quantities!(state, data)
+    catch err
+        threw = err isa ErrorException
+        msg = sprint(showerror, err)
+    end
+    @test threw
+    @test occursin("duplicate OneBodyG", msg)
+end
+
 @testset "initialize_phys_quantities! wires the factored canonical list and pairs" begin
     # Integration of build_canonical_cis_ajs_idx + resolve_cis_ajs_ckt_alt_idx
     # through initialize_phys_quantities! (the helpers are unit-tested above, but
@@ -258,7 +521,7 @@ end
     @test length(pq2.phys_cis_ajs_ckt_alt) == 2
 end
 
-@testset "FSZ + factored is rejected before sampling" begin
+@testset "FSZ + factored validation hook accepts supported PhysCal path" begin
     data = ExpertModeData()
     data.green_two_ex_terms = [GreenTwoExTerm(0, 0, 1, 0, 2, 1, 3, 1)]
 
@@ -266,41 +529,11 @@ end
     data.i_flg_orbital_general = 0
     @test MVMCOptimizers.validate_factored_green_supported(data) === nothing
 
-    # FSZ / general-orbital (== 1): rejected with a clear message.
+    # FSZ / general-orbital (== 1): supported by calculate_green_func_fsz!.
     data.i_flg_orbital_general = 1
-    threw = false
-    msg = ""
-    try
-        MVMCOptimizers.validate_factored_green_supported(data)
-    catch err
-        threw = true
-        msg = sprint(showerror, err)
-    end
-    @test threw
-    @test occursin("TwoBodyGEx", msg)
-    @test occursin("FSZ", msg)
+    @test MVMCOptimizers.validate_factored_green_supported(data) === nothing
 
-    # No factored terms: FSZ is fine for the rest of PhysCal.
+    # No factored terms remains accepted.
     data.green_two_ex_terms = GreenTwoExTerm[]
     @test MVMCOptimizers.validate_factored_green_supported(data) === nothing
-end
-
-@testset "vmc_phys_cal! rejects FSZ + factored before sampling" begin
-    # The guard runs before RNG / init_parameter!, so a minimal (physically
-    # incomplete) input still fails for the intended reason (Finding 2).
-    data = ExpertModeData()
-    data.green_two_ex_terms = [GreenTwoExTerm(0, 0, 1, 0, 2, 1, 3, 1)]
-    data.i_flg_orbital_general = 1
-
-    err = try
-        MVMCOptimizers.vmc_phys_cal!(data)
-        nothing
-    catch e
-        e
-    end
-
-    @test err isa ErrorException
-    msg = sprint(showerror, err)
-    @test occursin("TwoBodyGEx", msg)
-    @test occursin("FSZ", msg)
 end

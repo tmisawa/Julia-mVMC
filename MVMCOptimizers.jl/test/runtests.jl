@@ -64,6 +64,7 @@ end
     include("../test_unit/test_unit_vmc_sampling_rbm.jl")
     include("../test_unit/test_unit_vmc_sampling_proj.jl")
     include("../test_unit/test_unit_vmc_sampling_misc.jl")
+    include("../test_unit/test_unit_vmc_sampling_qp_split.jl")
     include("../test_unit/test_unit_slater_update.jl")
     include("../test_unit/test_unit_vmc_main_cal_sr.jl")
     include("../test_unit/test_unit_parameter_sync.jl")

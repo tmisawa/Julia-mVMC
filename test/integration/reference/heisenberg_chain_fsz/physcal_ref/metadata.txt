@@ -1,0 +1,27 @@
+# PhysCal FSZ TwoBodyGEx reference provenance
+
+## C-mVMC binary
+- Source: issp-center-dev/mVMC, branch `feature/omp-simd-pfupdate`
+  @ `622166afe33c6be3402d7c926db7e9c0003a47c4`.
+- Version: mVMC 1.3.0.
+- Build: OpenMP SIMD benchmark build based on the canonical integration branch;
+  no ScaLAPACK. The reference contract is the per-quantity rtol/atol gate in
+  `test/integration/tools/green_compare.jl`, not byte identity across BLAS or
+  compiler choices.
+- Threads: `OMP_NUM_THREADS=1`, single MPI rank.
+
+## Run
+- Generated: 2026-07-08 11:57 JST.
+- Fixed parameters: copied from `../inputs/zqp_opt.dat`
+  (78 tokens = 6 + 3 * 24).
+- Input mode: FSZ/general-orbital via `Orbital` + `OrbitalParallel` (AP+P),
+  matching the optimisation fixture. Do not switch this fixture to pure
+  `OrbitalGeneral` without regenerating `zqp_opt.dat`; the parameter order differs.
+- PhysCal: `vmc.out -e namelist.def zqp_opt.dat` (`NVMCCalMode = 1`) ->
+  `expected/{zvo_cisajs,zvo_cisajscktalt,zvo_cisajscktaltex}_001.dat`.
+- `greentwoex.def`: 3 factored terms covering `n_{0up}^2`, `n_{0dn}^2`, and
+  the spin-flip product `<c^dagger_{0up}c_{0dn}> *
+  conj(<c^dagger_{0dn}c_{0up}>)`.
+- Julia `run_phys_cal_from_namelist` vs C:
+  one-body max_abs `1.5e-15`, direct max_abs `2.4e-13`,
+  factored max_abs `2.5e-15`; `n_para_consumed = 24`.

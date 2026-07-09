@@ -231,10 +231,24 @@ mutable struct VMCPhysAccumulator
     phys_cis_ajs_ckt_alt::Vector{ComplexF64}
     local_cis_ajs_ckt_alt_dc::Vector{ComplexF64}
     phys_cis_ajs_ckt_alt_dc::Vector{ComplexF64}
+    phys_lanczos_qqqq::Vector{ComplexF64}
+    phys_lanczos_qcisajsq::Vector{ComplexF64}
+    phys_lanczos_qcisajscktaltq::Vector{ComplexF64}
+    phys_lanczos_qcisajscktaltq_dc::Vector{ComplexF64}
 end
 
 VMCPhysAccumulator(::Nothing) =
-    VMCPhysAccumulator(ComplexF64[], ComplexF64[], ComplexF64[], ComplexF64[], ComplexF64[])
+    VMCPhysAccumulator(
+        ComplexF64[],
+        ComplexF64[],
+        ComplexF64[],
+        ComplexF64[],
+        ComplexF64[],
+        ComplexF64[],
+        ComplexF64[],
+        ComplexF64[],
+        ComplexF64[],
+    )
 
 function VMCPhysAccumulator(phys::PhysicalQuantities)
     return VMCPhysAccumulator(
@@ -243,6 +257,10 @@ function VMCPhysAccumulator(phys::PhysicalQuantities)
         zeros(ComplexF64, length(phys.phys_cis_ajs_ckt_alt)),
         zeros(ComplexF64, length(phys.local_cis_ajs_ckt_alt_dc)),
         zeros(ComplexF64, length(phys.phys_cis_ajs_ckt_alt_dc)),
+        zeros(ComplexF64, length(phys.phys_lanczos_qqqq)),
+        zeros(ComplexF64, length(phys.phys_lanczos_qcisajsq)),
+        zeros(ComplexF64, length(phys.phys_lanczos_qcisajscktaltq)),
+        zeros(ComplexF64, length(phys.phys_lanczos_qcisajscktaltq_dc)),
     )
 end
 
@@ -252,6 +270,10 @@ function clear_phys_accumulator!(acc::VMCPhysAccumulator)
     fill!(acc.phys_cis_ajs_ckt_alt, 0.0 + 0.0im)
     fill!(acc.local_cis_ajs_ckt_alt_dc, 0.0 + 0.0im)
     fill!(acc.phys_cis_ajs_ckt_alt_dc, 0.0 + 0.0im)
+    fill!(acc.phys_lanczos_qqqq, 0.0 + 0.0im)
+    fill!(acc.phys_lanczos_qcisajsq, 0.0 + 0.0im)
+    fill!(acc.phys_lanczos_qcisajscktaltq, 0.0 + 0.0im)
+    fill!(acc.phys_lanczos_qcisajscktaltq_dc, 0.0 + 0.0im)
     return acc
 end
 
@@ -259,6 +281,10 @@ function merge_phys_accumulator!(dst::VMCPhysAccumulator, src::VMCPhysAccumulato
     dst.phys_cis_ajs .+= src.phys_cis_ajs
     dst.phys_cis_ajs_ckt_alt .+= src.phys_cis_ajs_ckt_alt
     dst.phys_cis_ajs_ckt_alt_dc .+= src.phys_cis_ajs_ckt_alt_dc
+    dst.phys_lanczos_qqqq .+= src.phys_lanczos_qqqq
+    dst.phys_lanczos_qcisajsq .+= src.phys_lanczos_qcisajsq
+    dst.phys_lanczos_qcisajscktaltq .+= src.phys_lanczos_qcisajscktaltq
+    dst.phys_lanczos_qcisajscktaltq_dc .+= src.phys_lanczos_qcisajscktaltq_dc
     return dst
 end
 
@@ -266,6 +292,10 @@ function merge_phys_accumulator!(dst::PhysicalQuantities, src::VMCPhysAccumulato
     dst.phys_cis_ajs .+= src.phys_cis_ajs
     dst.phys_cis_ajs_ckt_alt .+= src.phys_cis_ajs_ckt_alt
     dst.phys_cis_ajs_ckt_alt_dc .+= src.phys_cis_ajs_ckt_alt_dc
+    dst.phys_lanczos_qqqq .+= src.phys_lanczos_qqqq
+    dst.phys_lanczos_qcisajsq .+= src.phys_lanczos_qcisajsq
+    dst.phys_lanczos_qcisajscktaltq .+= src.phys_lanczos_qcisajscktaltq
+    dst.phys_lanczos_qcisajscktaltq_dc .+= src.phys_lanczos_qcisajscktaltq_dc
     return dst
 end
 
@@ -542,6 +572,10 @@ function reset_phys_accumulator!(acc::VMCPhysAccumulator, ::Nothing)
     _resize_fill!(acc.phys_cis_ajs_ckt_alt, 0, 0.0 + 0.0im)
     _resize_fill!(acc.local_cis_ajs_ckt_alt_dc, 0, 0.0 + 0.0im)
     _resize_fill!(acc.phys_cis_ajs_ckt_alt_dc, 0, 0.0 + 0.0im)
+    _resize_fill!(acc.phys_lanczos_qqqq, 0, 0.0 + 0.0im)
+    _resize_fill!(acc.phys_lanczos_qcisajsq, 0, 0.0 + 0.0im)
+    _resize_fill!(acc.phys_lanczos_qcisajscktaltq, 0, 0.0 + 0.0im)
+    _resize_fill!(acc.phys_lanczos_qcisajscktaltq_dc, 0, 0.0 + 0.0im)
     return acc
 end
 
@@ -561,6 +595,26 @@ function reset_phys_accumulator!(acc::VMCPhysAccumulator, phys::PhysicalQuantiti
     _resize_fill!(
         acc.phys_cis_ajs_ckt_alt_dc,
         length(phys.phys_cis_ajs_ckt_alt_dc),
+        0.0 + 0.0im,
+    )
+    _resize_fill!(
+        acc.phys_lanczos_qqqq,
+        length(phys.phys_lanczos_qqqq),
+        0.0 + 0.0im,
+    )
+    _resize_fill!(
+        acc.phys_lanczos_qcisajsq,
+        length(phys.phys_lanczos_qcisajsq),
+        0.0 + 0.0im,
+    )
+    _resize_fill!(
+        acc.phys_lanczos_qcisajscktaltq,
+        length(phys.phys_lanczos_qcisajscktaltq),
+        0.0 + 0.0im,
+    )
+    _resize_fill!(
+        acc.phys_lanczos_qcisajscktaltq_dc,
+        length(phys.phys_lanczos_qcisajscktaltq_dc),
         0.0 + 0.0im,
     )
     return acc

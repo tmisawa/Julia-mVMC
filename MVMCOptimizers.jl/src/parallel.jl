@@ -84,6 +84,21 @@ end
 serial_context() =
     ParallelContext(false, nothing, nothing, nothing, 0, 1, 0, 1, 0, 1, 0)
 
+"""
+    qp_split_range(n_qp_full, ctx) -> (qp_start, qp_end)
+
+Return the 1-based half-open QP range used by Julia sampling call sites.
+Serial and single-rank comm1 runs get the full range.
+"""
+function qp_split_range(n_qp_full::Int, ctx::ParallelContext)
+    n_qp_full >= 0 || throw(ArgumentError("n_qp_full must be >= 0; got $n_qp_full"))
+    if ctx.size1 <= 1
+        return (1, n_qp_full + 1)
+    end
+    ist, ien = split_loop(n_qp_full, ctx.rank1, ctx.size1)
+    return (ist + 1, ien + 1)
+end
+
 "出力（zvo_*.dat / readback / 進捗 print）を担う rank か（C: `if(rank==0)`)。"
 is_output_rank(ctx::ParallelContext) = ctx.rank0 == 0
 
@@ -244,6 +259,16 @@ function allreduce_sum!(ctx::ParallelContext, buf::AbstractArray;
         MPI.Allreduce!(view(buf, r), +, comm)
     end
     return buf
+end
+
+function allreduce_sum_scalar(ctx::ParallelContext, value; which::Symbol = :comm0)
+    ctx.is_mpi || return value
+    return MPI.Allreduce(value, +, _comm(ctx, which))
+end
+
+function allreduce_max_scalar(ctx::ParallelContext, value::Integer; which::Symbol = :comm0)
+    ctx.is_mpi || return value
+    return MPI.Allreduce(value, max, _comm(ctx, which))
 end
 
 "C weightAverageReduce 相当の reduce-to-root（Green 用、F9）。root のみ合計値を持つ。"

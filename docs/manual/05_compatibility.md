@@ -10,7 +10,7 @@
 | `VMCMainCal_fsz` | `vmc_main_cal_fsz!` | ✅ |
 | `VMCMakeSample` | `vmc_make_sample!` | ✅ |
 | `InitParameter` | `init_parameter!` (MVMCExpertModeParsers) | ✅ |
-| `ReadInitParameter` | `read_initial_def!` (MVMCOptimizers) | ✅ (RBM block refused; OptTrans tail consumed when active) |
+| `ReadInitParameter` | `read_initial_def!` (MVMCOptimizers) | ✅ (projection, RBM, Slater, and active OptTrans triples) |
 | `ReadInputParameters` | `read_input_parameters!` (MVMCExpertModeParsers) | ✅ (In*.def parser; consumption depends on the block) |
 | `SyncModifiedParameter` | `sync_modified_parameter!` (MVMCOptimizers) | ✅ Slater rescale + GJ/DH shift + OptTrans normalization |
 | `InitQPWeight` | `init_qp_weight!` (MVMCExpertModeParsers) | ✅ |
@@ -149,20 +149,29 @@ are treated as C-compatible.
 
 - **BackFlow** correlation factor (`vmc_bf_*` entry points raise an error
   in this release; inputs that activate Back Flow are not supported).
-- **Grouped QP splitting** (`NSplitSize > 1` with `NQPFull > 1` raises an
-  unsupported-feature error). Direct-SR `VMCParaOpt` sample splitting is
-  supported for `NSplitSize >= 1` only when `NQPFull = 1`.
+- **OptTrans-derived QP splitting** (`NSplitSize > 1` with
+  `NQPOptTrans > 1` or active `OptTrans` raises an unsupported-feature error).
+  Direct-SR `VMCParaOpt` sample splitting is supported for `NSplitSize >= 1`
+  when `NQPFull = 1` and for sz-conserved standard-projection `NQPFull > 1`
+  when `NQPOptTrans = 1` (`NSPGaussLeg > 1` and/or `NMPTrans > 1`). FSZ
+  standard-projection `NQPFull > 1` (`NSPGaussLeg > 1` or
+  `abs(NMPTrans) > 1`)
+  remains unsupported.
+- **PhysCal split outside normal sz-conserved Green** — `VMCPhysCal` supports
+  `NSplitSize > 1` for sz-conserved normal-Green runs (`NLanczosMode = 0`).
+  FSZ/general-orbital PhysCal split, PhysCal Lanczos split, and
+  OptTrans-derived QP sectors with split remain unsupported.
 - **Additional CG modes** (`NSRCG >= 2`, `useDiagScale != 0`, and
   `RescaleSmat != 0` raise unsupported-feature errors). Standard SR-CG
   (`NSRCG = 1`) is supported for serial and MPI `NSplitSize = 1` runs, but
   remains unsupported with `NSplitSize > 1`.
-- **Full Lanczos** (`NLanczosMode > 0`) — only the step-0 comparison
-  matches C. The post-Lanczos eigenvector / overlap pipeline is not
-  ported.
+- **Full Lanczos split and FSZ/general-orbital Lanczos** — `VMCPhysCal`
+  supports `NLanczosMode = 1/2` output on the sz-conserved `NSplitSize = 1`
+  path. Lanczos with `NSplitSize > 1`, FSZ/general-orbital Lanczos, and
+  ParaOpt Lanczos (`NLanczosMode > 0`) remain unsupported. The implementation
+  uses conservative full-overlap recomputation for intermediate Lanczos
+  configurations, so it is a correctness-oriented path rather than a
+  performance-equivalent port of C's Pfaffian update kernels.
 - **`InterAllTerm` full spin metadata** — when `interall.def` omits
   per-term spin info, defaults are substituted (see
   `src/vmc_main_cal.jl`).
-- `initial.def` layouts with RBM triples are still refused because the C file
-  places RBM between `NProj` and `NSlater`; reading that block without full RBM
-  support would corrupt the Slater slice. See
-  [`02_input_files.md`](02_input_files.md) for the full input table.

@@ -1366,10 +1366,11 @@ function calculate_m_all_fcmp!(
     n_qp_full = length(state.slater_matrix.pf_m)
 
     # Validate qp_start and qp_end (1-based indexing)
-    if qp_start < 1 || qp_end > n_qp_full + 1 || qp_start >= qp_end
+    if qp_start < 1 || qp_end > n_qp_full + 1 || qp_start > qp_end
         @error "Invalid qp_start or qp_end: qp_start=$qp_start, qp_end=$qp_end, n_qp_full=$n_qp_full"
         return 1
     end
+    qp_start == qp_end && return 0
 
     # slater_elm: 1D array with C row-major layout
     # [qp_idx * n_site2 * n_site2 + rsi * n_site2 + rsj]
@@ -1617,9 +1618,36 @@ function calculate_new_pf_m2_fsz!(
     end
 end
 
+@inline function _check_reduce_mode(ctx::Union{Nothing,ParallelContext}, reduce::Symbol)
+    reduce in (:none, :comm1) ||
+        throw(ArgumentError("reduce must be :none or :comm1; got $reduce"))
+    if reduce == :comm1 && ctx === nothing
+        throw(ArgumentError("ctx is required when reduce = :comm1"))
+    end
+    return nothing
+end
+
+@inline function _maybe_reduce_ip(value, ctx::Union{Nothing,ParallelContext}, reduce::Symbol)
+    _check_reduce_mode(ctx, reduce)
+    reduce == :comm1 || return value
+    return allreduce_sum_scalar(ctx::ParallelContext, value; which = :comm1)
+end
+
+@inline function _valid_qp_range(qp_start::Int, qp_end::Int, n_qp_full::Int)
+    return 1 <= qp_start <= qp_end <= n_qp_full + 1
+end
+
+@inline function _comm1_max_status(ctx::ParallelContext, status::Integer)::Int
+    return Int(allreduce_max_scalar(ctx, Int(status); which = :comm1))
+end
+
+@inline function _comm1_any(ctx::ParallelContext, flag::Bool)::Bool
+    return _comm1_max_status(ctx, flag ? 1 : 0) != 0
+end
+
 """
     calculate_log_ip_fcmp(pf_m::Vector{ComplexF64}, qp_start::Int, qp_end::Int,
-                         data::ExpertModeData) -> ComplexF64
+                         data::ExpertModeData; ctx = nothing, reduce = :none) -> ComplexF64
 
 Calculate logarithm of inner product <phi|L|x>.
 Equivalent to C's `CalculateLogIP_fcmp()`.
@@ -1648,7 +1676,9 @@ function calculate_log_ip_fcmp(
     pf_m::Vector{ComplexF64},
     qp_start::Int,
     qp_end::Int,
-    data::ExpertModeData,
+    data::ExpertModeData;
+    ctx::Union{Nothing,ParallelContext} = nothing,
+    reduce::Symbol = :none,
 )::ComplexF64
     # Check if qp_weights is initialized
     if data.qp_weights === nothing
@@ -1656,11 +1686,10 @@ function calculate_log_ip_fcmp(
         return log(1e-100)  # Return log(0) equivalent to avoid errors
     end
 
-    qp_num = qp_end - qp_start
     qp_full_weight::Vector{ComplexF64} = data.qp_weights.qp_full_weight
 
     # Validate indices
-    if qp_start < 1 || qp_end > length(qp_full_weight) + 1 || qp_start >= qp_end
+    if !_valid_qp_range(qp_start, qp_end, length(qp_full_weight))
         @error "Invalid qp_start or qp_end: qp_start=$qp_start, qp_end=$qp_end, n_qp_full=$(length(qp_full_weight))"
         return log(1e-100)
     end
@@ -1672,19 +1701,11 @@ function calculate_log_ip_fcmp(
     end
 
     # Calculate inner product: ip = sum(QPFullWeight[qpidx] * pfM[qpidx])
-    # Note: C code uses 0-based indexing, Julia uses 1-based
-    # C: QPFullWeight[qpidx+qpStart] * pfM[qpidx] for qpidx in 0:qpNum-1
-    # Julia: qp_full_weight[qp_start + qpidx - 1] * pf_m[qp_start + qpidx] for qpidx in 1:qp_num
     ip = 0.0 + 0.0im
-    for qpidx = 1:qp_num
-        # C index: qpidx + qpStart - 1 (0-based)
-        # Julia index: qp_start + qpidx - 1 (1-based)
-        qp_idx = qp_start + qpidx - 1
-
-        if qp_idx <= length(qp_full_weight) && qp_idx <= length(pf_m)
-            ip += qp_full_weight[qp_idx] * pf_m[qp_idx]
-        end
+    @inbounds for qp_idx = qp_start:(qp_end - 1)
+        ip += qp_full_weight[qp_idx] * pf_m[qp_idx]
     end
+    ip = _maybe_reduce_ip(ip, ctx, reduce)
 
     # Return log(ip) - equivalent to C's clog(ip)
     # Match C implementation: return clog(ip) directly
@@ -1694,7 +1715,7 @@ end
 
 """
     calculate_ip_fcmp(pf_m::Vector{ComplexF64}, qp_start::Int, qp_end::Int,
-                     data::ExpertModeData)::ComplexF64
+                     data::ExpertModeData; ctx = nothing, reduce = :none)::ComplexF64
 
 Calculate inner product <phi|L|x> directly (without taking logarithm).
 Equivalent to C's `CalculateIP_fcmp()`.
@@ -1709,7 +1730,9 @@ function calculate_ip_fcmp(
     pf_m::Vector{ComplexF64},
     qp_start::Int,
     qp_end::Int,
-    data::ExpertModeData,
+    data::ExpertModeData;
+    ctx::Union{Nothing,ParallelContext} = nothing,
+    reduce::Symbol = :none,
 )::ComplexF64
     # Check if qp_weights is initialized
     if data.qp_weights === nothing
@@ -1717,11 +1740,10 @@ function calculate_ip_fcmp(
         return 0.0 + 0.0im
     end
 
-    qp_num = qp_end - qp_start
     qp_full_weight::Vector{ComplexF64} = data.qp_weights.qp_full_weight
 
     # Validate indices
-    if qp_start < 1 || qp_end > length(qp_full_weight) + 1 || qp_start >= qp_end
+    if !_valid_qp_range(qp_start, qp_end, length(qp_full_weight))
         @error "Invalid qp_start or qp_end: qp_start=$qp_start, qp_end=$qp_end, n_qp_full=$(length(qp_full_weight))"
         return 0.0 + 0.0im
     end
@@ -1733,22 +1755,13 @@ function calculate_ip_fcmp(
     end
 
     # Calculate inner product: ip = sum(QPFullWeight[qpidx] * pfM[qpidx])
-    # Note: C code uses 0-based indexing, Julia uses 1-based
-    # C: QPFullWeight[qpidx+qpStart] * pfM[qpidx] for qpidx in 0:qpNum-1
-    # Julia: qp_full_weight[qp_start + qpidx - 1] * pf_m[qp_start + qpidx] for qpidx in 1:qp_num
     ip = 0.0 + 0.0im
-    for qpidx = 1:qp_num
-        # C index: qpidx + qpStart - 1 (0-based)
-        # Julia index: qp_start + qpidx - 1 (1-based)
-        qp_idx = qp_start + qpidx - 1
-
-        if qp_idx <= length(qp_full_weight) && qp_idx <= length(pf_m)
-            ip += qp_full_weight[qp_idx] * pf_m[qp_idx]
-        end
+    @inbounds for qp_idx = qp_start:(qp_end - 1)
+        ip += qp_full_weight[qp_idx] * pf_m[qp_idx]
     end
 
     # Return ip directly (without taking logarithm)
-    return ip
+    return _maybe_reduce_ip(ip, ctx, reduce)
 end
 
 """
@@ -2591,7 +2604,8 @@ function vmc_make_sample!(
     data::ExpertModeData,
     state::VMCOptimizationState,
     rng::AbstractRNG = Random.GLOBAL_RNG,
-    c_timer::CTimer = CTIMER_DISABLED,
+    c_timer::CTimer = CTIMER_DISABLED;
+    ctx::ParallelContext = serial_context(),
 )
 
     n_site = data.modpara.nsite
@@ -2649,15 +2663,19 @@ function vmc_make_sample!(
             state,
             rng,
         )
+        result = _comm1_max_status(ctx, result)
         if result != 0
             @error "Failed to generate initial sample"
             return
         end
 
         @debug "After make_initial_sample!: tmp_ele_idx[1:10] = $(tmp_ele_idx[1:min(10, length(tmp_ele_idx))])"
-        if all(x -> x == 0 || x == -1, tmp_ele_idx)
-            @error "tmp_ele_idx is invalid after make_initial_sample! (all zeros or -1)"
-            @error "  tmp_ele_idx[1:min(20, length(tmp_ele_idx))] = $(tmp_ele_idx[1:min(20, length(tmp_ele_idx))])"
+        invalid_sample = all(x -> x == 0 || x == -1, tmp_ele_idx)
+        if _comm1_any(ctx, invalid_sample)
+            invalid_sample &&
+                @error "tmp_ele_idx is invalid after make_initial_sample! (all zeros or -1)"
+            invalid_sample &&
+                @error "  tmp_ele_idx[1:min(20, length(tmp_ele_idx))] = $(tmp_ele_idx[1:min(20, length(tmp_ele_idx))])"
             return
         end
     else
@@ -2673,8 +2691,7 @@ function vmc_make_sample!(
 
     # Calculate Pfaffian (CalculateMAll_fcmp)
     n_qp_full = length(state.slater_matrix.pf_m)
-    qp_start = 1
-    qp_end = n_qp_full + 1
+    qp_start, qp_end = qp_split_range(n_qp_full, ctx)
 
     # Retry loop for initial Pfaffian calculation (similar to C implementation)
     max_retries = 100
@@ -2687,6 +2704,7 @@ function vmc_make_sample!(
         end
 
         result = calculate_m_all_fcmp!(tmp_ele_idx, qp_start, qp_end, data, state)
+        result = _comm1_max_status(ctx, result)
         if result != 0
             # Regenerate sample if Pfaffian calculation fails
             retry_count += 1
@@ -2702,6 +2720,7 @@ function vmc_make_sample!(
                 state,
                 rng,
             )
+            result_init = _comm1_max_status(ctx, result_init)
             if result_init != 0
                 @error "Failed to regenerate initial sample after Pfaffian calculation failure"
                 return
@@ -2715,7 +2734,14 @@ function vmc_make_sample!(
     end
 
     # Calculate initial log inner product
-    log_ip_old = calculate_log_ip_fcmp(state.slater_matrix.pf_m, qp_start, qp_end, data)
+    log_ip_old = calculate_log_ip_fcmp(
+        state.slater_matrix.pf_m,
+        qp_start,
+        qp_end,
+        data;
+        ctx = ctx,
+        reduce = :comm1,
+    )
     use_rbm = has_rbm_terms(data)
     rbm_cnt_old = use_rbm ? make_rbm_cnt(tmp_ele_num, data) : ComplexF64[]
     rbm_cnt_new = use_rbm ? similar(rbm_cnt_old) : ComplexF64[]
@@ -2731,16 +2757,25 @@ function vmc_make_sample!(
             state,
             rng,
         )
+        result = _comm1_max_status(ctx, result)
         if result != 0
             @error "Failed to regenerate initial sample"
             return
         end
         result = calculate_m_all_fcmp!(tmp_ele_idx, qp_start, qp_end, data, state)
+        result = _comm1_max_status(ctx, result)
         if result != 0
             @error "Failed to recalculate Pfaffian"
             return
         end
-        log_ip_old = calculate_log_ip_fcmp(state.slater_matrix.pf_m, qp_start, qp_end, data)
+        log_ip_old = calculate_log_ip_fcmp(
+            state.slater_matrix.pf_m,
+            qp_start,
+            qp_end,
+            data;
+            ctx = ctx,
+            reduce = :comm1,
+        )
         rbm_cnt_old = use_rbm ? make_rbm_cnt(tmp_ele_num, data) : ComplexF64[]
         if use_rbm && length(rbm_cnt_new) != length(rbm_cnt_old)
             rbm_cnt_new = similar(rbm_cnt_old)
@@ -2833,7 +2868,14 @@ function vmc_make_sample!(
 
                 # [62] CalculateLogIP
                 ctimer_start!(c_timer, 62)
-                log_ip_new = calculate_log_ip_fcmp(pf_m_new, qp_start, qp_end, data)
+                log_ip_new = calculate_log_ip_fcmp(
+                    pf_m_new,
+                    qp_start,
+                    qp_end,
+                    data;
+                    ctx = ctx,
+                    reduce = :comm1,
+                )
                 ctimer_stop!(c_timer, 62)
                 if use_rbm
                     update_rbm_cnt_hopping!(rbm_cnt_new, rbm_cnt_old, ri, rj, s, data)
@@ -2991,7 +3033,14 @@ function vmc_make_sample!(
 
                 # [67] CalculateLogIP
                 ctimer_start!(c_timer, 67)
-                log_ip_new = calculate_log_ip_fcmp(pf_m_new, qp_start, qp_end, data)
+                log_ip_new = calculate_log_ip_fcmp(
+                    pf_m_new,
+                    qp_start,
+                    qp_end,
+                    data;
+                    ctx = ctx,
+                    reduce = :comm1,
+                )
                 ctimer_stop!(c_timer, 67)
                 if use_rbm
                     update_rbm_cnt_hopping!(rbm_cnt_new, rbm_cnt_old, ri, rj, s, data)
@@ -3066,12 +3115,15 @@ function vmc_make_sample!(
                 ctimer_start!(c_timer, 34)
                 # Recalculate PfM and InvM from scratch
                 result = calculate_m_all_fcmp!(tmp_ele_idx, qp_start, qp_end, data, state)
+                result = _comm1_max_status(ctx, result)
                 if result == 0
                     log_ip_old = calculate_log_ip_fcmp(
                         state.slater_matrix.pf_m,
                         qp_start,
                         qp_end,
-                        data,
+                        data;
+                        ctx = ctx,
+                        reduce = :comm1,
                     )
                     if use_rbm
                         rbm_cnt_old = make_rbm_cnt(tmp_ele_num, data)
@@ -3291,10 +3343,11 @@ function calculate_m_all_fsz!(
     n_qp_full = length(state.slater_matrix.pf_m)
 
     # Validate indices
-    if qp_start < 1 || qp_end > n_qp_full + 1 || qp_start >= qp_end
+    if qp_start < 1 || qp_end > n_qp_full + 1 || qp_start > qp_end
         @error "Invalid qp range: qp_start=$qp_start, qp_end=$qp_end, n_qp_full=$n_qp_full"
         return 1
     end
+    qp_start == qp_end && return 0
 
     qp_num = qp_end - qp_start
 
@@ -3850,7 +3903,8 @@ function vmc_make_sample_fsz!(
     data::ExpertModeData,
     state::VMCOptimizationState,
     rng::AbstractRNG = Random.GLOBAL_RNG,
-    c_timer::CTimer = CTIMER_DISABLED,
+    c_timer::CTimer = CTIMER_DISABLED;
+    ctx::ParallelContext = serial_context(),
 )
     n_site = data.modpara.nsite
     n_elec = data.modpara.nelec
@@ -3867,8 +3921,7 @@ function vmc_make_sample_fsz!(
 
     # QP range
     n_qp_full = length(state.slater_matrix.pf_m)
-    qp_start = 1
-    qp_end = n_qp_full + 1
+    qp_start, qp_end = qp_split_range(n_qp_full, ctx)
 
     # Get burn flag
     burn_flag =
@@ -3887,7 +3940,7 @@ function vmc_make_sample_fsz!(
 
     # Initialize or restore configuration
     if burn_flag == 0
-        make_initial_sample_fsz!(
+        info = make_initial_sample_fsz!(
             tmp_ele_idx,
             tmp_ele_cfg,
             tmp_ele_num,
@@ -3899,6 +3952,11 @@ function vmc_make_sample_fsz!(
             state,
             rng,
         )
+        info = _comm1_max_status(ctx, info)
+        if info != 0
+            @error "make_initial_sample_fsz! failed with info=$info"
+            return
+        end
     else
         copy_from_burn_sample_fsz!(
             tmp_ele_idx,
@@ -3911,13 +3969,25 @@ function vmc_make_sample_fsz!(
     end
 
     # Calculate initial Pfaffian
-    calculate_m_all_fsz!(tmp_ele_idx, tmp_ele_spn, qp_start, qp_end, data, state)
-    log_ip_old = calculate_log_ip_fcmp(state.slater_matrix.pf_m, qp_start, qp_end, data)
+    info = calculate_m_all_fsz!(tmp_ele_idx, tmp_ele_spn, qp_start, qp_end, data, state)
+    info = _comm1_max_status(ctx, info)
+    if info != 0
+        @error "calculate_m_all_fsz! failed with info=$info"
+        return
+    end
+    log_ip_old = calculate_log_ip_fcmp(
+        state.slater_matrix.pf_m,
+        qp_start,
+        qp_end,
+        data;
+        ctx = ctx,
+        reduce = :comm1,
+    )
 
     # Validate initial configuration
     if !isfinite(real(log_ip_old)) || !isfinite(imag(log_ip_old))
         @warn "VMCMakeSample_fsz: remakeSample logIpOld not finite"
-        make_initial_sample_fsz!(
+        info = make_initial_sample_fsz!(
             tmp_ele_idx,
             tmp_ele_cfg,
             tmp_ele_num,
@@ -3929,8 +3999,32 @@ function vmc_make_sample_fsz!(
             state,
             rng,
         )
-        calculate_m_all_fsz!(tmp_ele_idx, tmp_ele_spn, qp_start, qp_end, data, state)
-        log_ip_old = calculate_log_ip_fcmp(state.slater_matrix.pf_m, qp_start, qp_end, data)
+        info = _comm1_max_status(ctx, info)
+        if info != 0
+            @error "make_initial_sample_fsz! failed with info=$info"
+            return
+        end
+        info = calculate_m_all_fsz!(
+            tmp_ele_idx,
+            tmp_ele_spn,
+            qp_start,
+            qp_end,
+            data,
+            state,
+        )
+        info = _comm1_max_status(ctx, info)
+        if info != 0
+            @error "calculate_m_all_fsz! failed with info=$info"
+            return
+        end
+        log_ip_old = calculate_log_ip_fcmp(
+            state.slater_matrix.pf_m,
+            qp_start,
+            qp_end,
+            data;
+            ctx = ctx,
+            reduce = :comm1,
+        )
         burn_flag = 0
     end
 
@@ -4043,7 +4137,14 @@ function vmc_make_sample_fsz!(
                 )
 
                 # Calculate new log IP
-                log_ip_new = calculate_log_ip_fcmp(pf_m_new, 1, n_qp_full + 1, data)
+                log_ip_new = calculate_log_ip_fcmp(
+                    pf_m_new,
+                    qp_start,
+                    qp_end,
+                    data;
+                    ctx = ctx,
+                    reduce = :comm1,
+                )
 
                 # Metropolis criterion
                 x = log_proj_ratio(proj_cnt_new, tmp_ele_proj_cnt, data)
@@ -4163,7 +4264,14 @@ function vmc_make_sample_fsz!(
                     state,
                 )
 
-                log_ip_new = calculate_log_ip_fcmp(pf_m_new, 1, n_qp_full + 1, data)
+                log_ip_new = calculate_log_ip_fcmp(
+                    pf_m_new,
+                    qp_start,
+                    qp_end,
+                    data;
+                    ctx = ctx,
+                    reduce = :comm1,
+                )
 
                 x = log_proj_ratio(proj_cnt_new, tmp_ele_proj_cnt, data)
                 w = exp(2.0 * (x + real(log_ip_new - log_ip_old)))
@@ -4276,7 +4384,14 @@ function vmc_make_sample_fsz!(
                     state,
                 )
 
-                log_ip_new = calculate_log_ip_fcmp(pf_m_new, 1, n_qp_full + 1, data)
+                log_ip_new = calculate_log_ip_fcmp(
+                    pf_m_new,
+                    qp_start,
+                    qp_end,
+                    data;
+                    ctx = ctx,
+                    reduce = :comm1,
+                )
 
                 x = log_proj_ratio(proj_cnt_new, tmp_ele_proj_cnt, data)
                 w = exp(2.0 * (x + real(log_ip_new - log_ip_old)))
@@ -4319,7 +4434,7 @@ function vmc_make_sample_fsz!(
 
             # Recalculate if too many accepts
             if n_accept > n_site
-                calculate_m_all_fsz!(
+                info = calculate_m_all_fsz!(
                     tmp_ele_idx,
                     tmp_ele_spn,
                     qp_start,
@@ -4327,8 +4442,17 @@ function vmc_make_sample_fsz!(
                     data,
                     state,
                 )
-                log_ip_old =
-                    calculate_log_ip_fcmp(state.slater_matrix.pf_m, qp_start, qp_end, data)
+                info = _comm1_max_status(ctx, info)
+                if info == 0
+                    log_ip_old = calculate_log_ip_fcmp(
+                        state.slater_matrix.pf_m,
+                        qp_start,
+                        qp_end,
+                        data;
+                        ctx = ctx,
+                        reduce = :comm1,
+                    )
+                end
                 n_accept = 0
             end
         end
@@ -4803,10 +4927,11 @@ function calculate_m_all_real!(
     n_qp_full = length(state.slater_matrix.pf_m_real)
 
     # Validate qp_start and qp_end (1-based indexing)
-    if qp_start < 1 || qp_end > n_qp_full + 1 || qp_start >= qp_end
+    if qp_start < 1 || qp_end > n_qp_full + 1 || qp_start > qp_end
         @error "Invalid qp_start or qp_end: qp_start=$qp_start, qp_end=$qp_end, n_qp_full=$n_qp_full"
         return 1
     end
+    qp_start == qp_end && return 0
 
     # slater_elm_real: 1D array with C row-major layout
     # [qp_idx * n_site2 * n_site2 + rsi * n_site2 + rsj]
@@ -4904,10 +5029,11 @@ function calculate_m_all_fsz_real!(
     n_size = 2 * n_elec
     n_qp_full = length(state.slater_matrix.pf_m_real)
 
-    if qp_start < 1 || qp_end > n_qp_full + 1 || qp_start >= qp_end
+    if qp_start < 1 || qp_end > n_qp_full + 1 || qp_start > qp_end
         @error "Invalid qp_start or qp_end: qp_start=$qp_start, qp_end=$qp_end, n_qp_full=$n_qp_full"
         return 1
     end
+    qp_start == qp_end && return 0
 
     info = calculate_m_all_fsz!(ele_idx, ele_spn, qp_start, qp_end, data, state)
     if info != 0
@@ -4940,7 +5066,7 @@ end
 
 """
     calculate_log_ip_real(pf_m_real::Vector{Float64}, qp_start::Int, qp_end::Int,
-                          data::ExpertModeData)::Float64
+                          data::ExpertModeData; ctx = nothing, reduce = :none)::Float64
 
 Calculate logarithm of inner product using real arithmetic.
 Equivalent to C's `CalculateLogIP_real()`.
@@ -4949,36 +5075,39 @@ function calculate_log_ip_real(
     pf_m_real::Vector{Float64},
     qp_start::Int,
     qp_end::Int,
-    data::ExpertModeData,
+    data::ExpertModeData;
+    ctx::Union{Nothing,ParallelContext} = nothing,
+    reduce::Symbol = :none,
 )::Float64
     if data.qp_weights === nothing
         @error "Quantum projection weights not initialized. Call init_qp_weight!(data) first."
         return log(1e-100)
     end
 
-    qp_num = qp_end - qp_start
     qp_full_weight::Vector{ComplexF64} = data.qp_weights.qp_full_weight
 
-    if qp_start < 1 || qp_end > length(qp_full_weight) + 1 || qp_start >= qp_end
+    if !_valid_qp_range(qp_start, qp_end, length(qp_full_weight))
         @error "Invalid qp_start or qp_end: qp_start=$qp_start, qp_end=$qp_end"
+        return log(1e-100)
+    end
+    if length(pf_m_real) < qp_end - 1
+        @error "pf_m_real array too short: length=$(length(pf_m_real)), required=$(qp_end - 1)"
         return log(1e-100)
     end
 
     # Calculate inner product: ip = sum(QPFullWeight[qpidx] * pfM_real[qpidx])
     ip = 0.0
-    for qpidx = 1:qp_num
-        qp_idx = qp_start + qpidx - 1
-        if qp_idx <= length(qp_full_weight) && qp_idx <= length(pf_m_real)
-            ip += real(qp_full_weight[qp_idx]) * pf_m_real[qp_idx]
-        end
+    @inbounds for qp_idx = qp_start:(qp_end - 1)
+        ip += real(qp_full_weight[qp_idx]) * pf_m_real[qp_idx]
     end
+    ip = _maybe_reduce_ip(ip, ctx, reduce)
 
     return log(abs(ip) + 1e-100)
 end
 
 """
     calculate_ip_real(pf_m_real::Vector{Float64}, qp_start::Int, qp_end::Int,
-                     data::ExpertModeData)::Float64
+                     data::ExpertModeData; ctx = nothing, reduce = :none)::Float64
 
 Calculate inner product using real arithmetic.
 Equivalent to C's `CalculateIP_real()`.
@@ -4987,31 +5116,33 @@ function calculate_ip_real(
     pf_m_real::Vector{Float64},
     qp_start::Int,
     qp_end::Int,
-    data::ExpertModeData,
+    data::ExpertModeData;
+    ctx::Union{Nothing,ParallelContext} = nothing,
+    reduce::Symbol = :none,
 )::Float64
     if data.qp_weights === nothing
         @error "Quantum projection weights not initialized. Call init_qp_weight!(data) first."
         return 0.0
     end
 
-    qp_num = qp_end - qp_start
     qp_full_weight::Vector{ComplexF64} = data.qp_weights.qp_full_weight
 
-    if qp_start < 1 || qp_end > length(qp_full_weight) + 1 || qp_start >= qp_end
+    if !_valid_qp_range(qp_start, qp_end, length(qp_full_weight))
         @error "Invalid qp_start or qp_end: qp_start=$qp_start, qp_end=$qp_end"
+        return 0.0
+    end
+    if length(pf_m_real) < qp_end - 1
+        @error "pf_m_real array too short: length=$(length(pf_m_real)), required=$(qp_end - 1)"
         return 0.0
     end
 
     # Calculate inner product: ip = sum(QPFullWeight[qpidx] * pfM_real[qpidx])
     ip = 0.0
-    @inbounds for qpidx = 1:qp_num
-        qp_idx = qp_start + qpidx - 1
-        if qp_idx <= length(qp_full_weight) && qp_idx <= length(pf_m_real)
-            ip += real(qp_full_weight[qp_idx]) * pf_m_real[qp_idx]
-        end
+    @inbounds for qp_idx = qp_start:(qp_end - 1)
+        ip += real(qp_full_weight[qp_idx]) * pf_m_real[qp_idx]
     end
 
-    return ip
+    return _maybe_reduce_ip(ip, ctx, reduce)
 end
 
 """
@@ -5732,7 +5863,8 @@ function vmc_make_sample_real!(
     data::ExpertModeData,
     state::VMCOptimizationState,
     rng::AbstractRNG = Random.GLOBAL_RNG,
-    c_timer::CTimer = CTIMER_DISABLED,
+    c_timer::CTimer = CTIMER_DISABLED;
+    ctx::ParallelContext = serial_context(),
 )
     # Get parameters
     n_site = data.modpara.nsite
@@ -5792,6 +5924,7 @@ function vmc_make_sample_real!(
             state,
             rng,
         )
+        info = _comm1_max_status(ctx, info)
         if info != 0
             @error "make_initial_sample! failed with info=$info"
             return
@@ -5799,8 +5932,10 @@ function vmc_make_sample_real!(
 
         # Debug: Check tmp_ele_idx after make_initial_sample!
         @debug "vmc_make_sample_real!: After make_initial_sample!, tmp_ele_idx[1:10] = $(tmp_ele_idx[1:min(10, length(tmp_ele_idx))])"
-        if all(x -> x == 0 || x == -1, tmp_ele_idx)
-            @error "vmc_make_sample_real!: tmp_ele_idx is invalid after make_initial_sample! (all zeros or -1)"
+        invalid_sample = all(x -> x == 0 || x == -1, tmp_ele_idx)
+        if _comm1_any(ctx, invalid_sample)
+            invalid_sample &&
+                @error "vmc_make_sample_real!: tmp_ele_idx is invalid after make_initial_sample! (all zeros or -1)"
             return
         end
     else
@@ -5827,9 +5962,8 @@ function vmc_make_sample_real!(
         threaded = true,
     )
 
-    # Initialize QP range (single-process: use all)
-    qp_start = 1
-    qp_end = n_qp_full + 1
+    # Initialize QP range.
+    qp_start, qp_end = qp_split_range(n_qp_full, ctx)
 
     # Calculate M matrices using real arithmetic
     # Retry loop for initial Pfaffian calculation (similar to complex version)
@@ -5838,6 +5972,7 @@ function vmc_make_sample_real!(
     info = 1
     while info != 0 && retry_count < max_retries
         info = calculate_m_all_real!(tmp_ele_idx, qp_start, qp_end, data, state)
+        info = _comm1_max_status(ctx, info)
         if info != 0
             # Regenerate sample if Pfaffian calculation fails
             retry_count += 1
@@ -5853,6 +5988,7 @@ function vmc_make_sample_real!(
                 state,
                 rng,
             )
+            result_init = _comm1_max_status(ctx, result_init)
             if result_init != 0
                 @error "Failed to regenerate initial sample after Pfaffian calculation failure"
                 return
@@ -5866,8 +6002,14 @@ function vmc_make_sample_real!(
     end
 
     # Calculate initial log(ip) using real version
-    log_ip_old =
-        calculate_log_ip_real(state.slater_matrix.pf_m_real, qp_start, qp_end, data)
+    log_ip_old = calculate_log_ip_real(
+        state.slater_matrix.pf_m_real,
+        qp_start,
+        qp_end,
+        data;
+        ctx = ctx,
+        reduce = :comm1,
+    )
 
     if !isfinite(log_ip_old)
         @warn "Initial logIpOld is not finite, remaking sample"
@@ -5880,15 +6022,23 @@ function vmc_make_sample_real!(
             state,
             rng,
         )
+        info = _comm1_max_status(ctx, info)
         if info != 0
             return
         end
         info = calculate_m_all_real!(tmp_ele_idx, qp_start, qp_end, data, state)
+        info = _comm1_max_status(ctx, info)
         if info != 0
             return
         end
-        log_ip_old =
-            calculate_log_ip_real(state.slater_matrix.pf_m_real, qp_start, qp_end, data)
+        log_ip_old = calculate_log_ip_real(
+            state.slater_matrix.pf_m_real,
+            qp_start,
+            qp_end,
+            data;
+            ctx = ctx,
+            reduce = :comm1,
+        )
     end
     ctimer_stop!(c_timer, 30)
 
@@ -5974,7 +6124,14 @@ function vmc_make_sample_real!(
 
                 # [62] CalculateLogIP
                 ctimer_start!(c_timer, 62)
-                log_ip_new = calculate_log_ip_real(pf_m_new_real, qp_start, qp_end, data)
+                log_ip_new = calculate_log_ip_real(
+                    pf_m_new_real,
+                    qp_start,
+                    qp_end,
+                    data;
+                    ctx = ctx,
+                    reduce = :comm1,
+                )
                 ctimer_stop!(c_timer, 62)
 
                 # Metropolis acceptance/rejection
@@ -6104,7 +6261,14 @@ function vmc_make_sample_real!(
 
                 # [67] CalculateLogIP
                 ctimer_start!(c_timer, 67)
-                log_ip_new = calculate_log_ip_real(pf_m_new_real, qp_start, qp_end, data)
+                log_ip_new = calculate_log_ip_real(
+                    pf_m_new_real,
+                    qp_start,
+                    qp_end,
+                    data;
+                    ctx = ctx,
+                    reduce = :comm1,
+                )
                 ctimer_stop!(c_timer, 67)
 
                 # Metropolis acceptance/rejection
@@ -6168,12 +6332,15 @@ function vmc_make_sample_real!(
             if n_accept > n_site
                 ctimer_start!(c_timer, 34)
                 result = calculate_m_all_real!(tmp_ele_idx, qp_start, qp_end, data, state)
+                result = _comm1_max_status(ctx, result)
                 if result == 0
                     log_ip_old = calculate_log_ip_real(
                         state.slater_matrix.pf_m_real,
                         qp_start,
                         qp_end,
-                        data,
+                        data;
+                        ctx = ctx,
+                        reduce = :comm1,
                     )
                 end
                 n_accept = 0
@@ -6269,7 +6436,8 @@ function vmc_make_sample_fsz_real!(
     data::ExpertModeData,
     state::VMCOptimizationState,
     rng::AbstractRNG = Random.GLOBAL_RNG,
-    c_timer::CTimer = CTIMER_DISABLED,
+    c_timer::CTimer = CTIMER_DISABLED;
+    ctx::ParallelContext = serial_context(),
 )
     n_site = data.modpara.nsite
     n_elec = data.modpara.nelec
@@ -6285,8 +6453,7 @@ function vmc_make_sample_fsz_real!(
     loc_spn = get_loc_spn_array(data)
 
     n_qp_full = length(state.slater_matrix.pf_m_real)
-    qp_start = 1
-    qp_end = n_qp_full + 1
+    qp_start, qp_end = qp_split_range(n_qp_full, ctx)
 
     if length(state.electron_config.counter) < 11
         resize!(state.electron_config.counter, 11)
@@ -6331,6 +6498,7 @@ function vmc_make_sample_fsz_real!(
             state,
             rng,
         )
+        info = _comm1_max_status(ctx, info)
         if info != 0
             @error "make_initial_sample_fsz_real! failed with info=$info"
             return
@@ -6346,8 +6514,20 @@ function vmc_make_sample_fsz_real!(
         )
     end
 
-    calculate_m_all_fsz_real!(tmp_ele_idx, tmp_ele_spn, qp_start, qp_end, data, state)
-    log_ip_old = calculate_log_ip_real(state.slater_matrix.pf_m_real, qp_start, qp_end, data)
+    info = calculate_m_all_fsz_real!(tmp_ele_idx, tmp_ele_spn, qp_start, qp_end, data, state)
+    info = _comm1_max_status(ctx, info)
+    if info != 0
+        @error "calculate_m_all_fsz_real! failed with info=$info"
+        return
+    end
+    log_ip_old = calculate_log_ip_real(
+        state.slater_matrix.pf_m_real,
+        qp_start,
+        qp_end,
+        data;
+        ctx = ctx,
+        reduce = :comm1,
+    )
 
     if !isfinite(log_ip_old)
         @warn "VMCMakeSample_fsz_real: remakeSample logIpOld not finite"
@@ -6363,15 +6543,29 @@ function vmc_make_sample_fsz_real!(
             state,
             rng,
         )
+        info = _comm1_max_status(ctx, info)
         if info != 0
             return
         end
-        calculate_m_all_fsz_real!(tmp_ele_idx, tmp_ele_spn, qp_start, qp_end, data, state)
+        info = calculate_m_all_fsz_real!(
+            tmp_ele_idx,
+            tmp_ele_spn,
+            qp_start,
+            qp_end,
+            data,
+            state,
+        )
+        info = _comm1_max_status(ctx, info)
+        if info != 0
+            return
+        end
         log_ip_old = calculate_log_ip_real(
             state.slater_matrix.pf_m_real,
             qp_start,
             qp_end,
-            data,
+            data;
+            ctx = ctx,
+            reduce = :comm1,
         )
         burn_flag = false
     end
@@ -6493,8 +6687,14 @@ function vmc_make_sample_fsz_real!(
                     state,
                 )
 
-                log_ip_new =
-                    calculate_log_ip_real(pf_m_new_real, qp_start, qp_end, data)
+                log_ip_new = calculate_log_ip_real(
+                    pf_m_new_real,
+                    qp_start,
+                    qp_end,
+                    data;
+                    ctx = ctx,
+                    reduce = :comm1,
+                )
 
                 x = log_proj_ratio(proj_cnt_new, tmp_ele_proj_cnt, data)
                 w = exp(2.0 * (x + (log_ip_new - log_ip_old)))
@@ -6597,8 +6797,14 @@ function vmc_make_sample_fsz_real!(
                     state,
                 )
 
-                log_ip_new =
-                    calculate_log_ip_real(pf_m_new_real, qp_start, qp_end, data)
+                log_ip_new = calculate_log_ip_real(
+                    pf_m_new_real,
+                    qp_start,
+                    qp_end,
+                    data;
+                    ctx = ctx,
+                    reduce = :comm1,
+                )
 
                 x = log_proj_ratio(proj_cnt_new, tmp_ele_proj_cnt, data)
                 w = exp(2.0 * (x + (log_ip_new - log_ip_old)))
@@ -6704,8 +6910,14 @@ function vmc_make_sample_fsz_real!(
                     state,
                 )
 
-                log_ip_new =
-                    calculate_log_ip_real(pf_m_new_real, qp_start, qp_end, data)
+                log_ip_new = calculate_log_ip_real(
+                    pf_m_new_real,
+                    qp_start,
+                    qp_end,
+                    data;
+                    ctx = ctx,
+                    reduce = :comm1,
+                )
 
                 x = log_proj_ratio(proj_cnt_new, tmp_ele_proj_cnt, data)
                 w = exp(2.0 * (x + (log_ip_new - log_ip_old)))
@@ -6745,7 +6957,7 @@ function vmc_make_sample_fsz_real!(
             end
 
             if n_accept > n_site
-                calculate_m_all_fsz_real!(
+                info = calculate_m_all_fsz_real!(
                     tmp_ele_idx,
                     tmp_ele_spn,
                     qp_start,
@@ -6753,12 +6965,17 @@ function vmc_make_sample_fsz_real!(
                     data,
                     state,
                 )
-                log_ip_old = calculate_log_ip_real(
-                    state.slater_matrix.pf_m_real,
-                    qp_start,
-                    qp_end,
-                    data,
-                )
+                info = _comm1_max_status(ctx, info)
+                if info == 0
+                    log_ip_old = calculate_log_ip_real(
+                        state.slater_matrix.pf_m_real,
+                        qp_start,
+                        qp_end,
+                        data;
+                        ctx = ctx,
+                        reduce = :comm1,
+                    )
+                end
                 n_accept = 0
             end
         end
