@@ -32,7 +32,7 @@ result = run_para_opt_from_namelist(
 
 ## MPI limitations
 
-v0.4.2 supports `VMCParaOpt` sample-parallel MPI with the direct SR
+v0.5.0 supports `VMCParaOpt` sample-parallel MPI with the direct SR
 solver (`NSRCG = 0`) for `NSplitSize >= 1` when each sample uses either
 `NQPFull = 1` or sz-conserved standard-projection `NQPFull > 1` with
 `NQPOptTrans = 1` (`NSPGaussLeg > 1` and/or `NMPTrans > 1`). Non-FSZ, FSZ
@@ -97,18 +97,18 @@ for provenance):
 | `hubbard_chain_real` | real | charge fluctuations + Gutzwiller/Jastrow |
 
 A broader C ctest-equivalent CI gate covers the 12 supported standard C
-fixtures using C's `ref_mean.dat` / `ref_std.dat` criterion rather than a
-first-10-step comparison. See [`05_compatibility.md`](05_compatibility.md)
-for the runner and model selection details.
+fixtures plus `GeneralRBM_cmp` using C's `ref_mean.dat` / `ref_std.dat`
+criterion rather than a first-10-step comparison. See
+[`05_compatibility.md`](05_compatibility.md) for the runner and model
+selection details.
 
 Internal smoke runs (not part of the public CI, not bundled as
 fixtures) cover additional models in the same categories — Kondo
-chains, HubbardTetragonal momentum-projection, GeneralRBM_cmp, and
-the Lanczos chains at step 0 — and have historically reproduced C
-output within the same tolerances. Treat them as "expected to work
-but not continuously verified in this repo": if you hit a regression
-on an unbundled model, please open an issue with a reduced fixture so
-it can be added to the public CI.
+chains, HubbardTetragonal momentum-projection, and the Lanczos chains at step
+0 — and have historically reproduced C output within the same tolerances.
+Treat them as "expected to work but not continuously verified in this repo":
+if you hit a regression on an unbundled model, please open an issue with a
+reduced fixture so it can be added to the public CI.
 
 `SpinChainLanczos` and `HubbardChainLanczos` reproduce C only at
 step 0 in the ParaOpt path (the SR section is bypassed there).

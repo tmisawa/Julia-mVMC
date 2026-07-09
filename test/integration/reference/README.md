@@ -45,6 +45,7 @@ input fixtures used by Julia-mVMC integration tests.
 | `hubbard_chain_cmp` | complex | `HubbardChain_cmp` | no | yes |
 | `kondo_chain_cmp` | complex | `KondoChain_cmp` | no | yes |
 | `kondo_chain_stot1_cmp` | complex | `KondoChain_Stot1_cmp` | no | yes |
+| `general_rbm_cmp` | complex | `GeneralRBM_cmp` | no | yes |
 | `heisenberg_chain_fsz` | fsz (generalized orbital) | `HeisenbergChain_fsz` | yes | yes |
 | `hubbard_chain_fsz` | fsz (generalized orbital) | `HubbardChain_fsz` | no | yes |
 | `kondo_chain_fsz` | fsz (generalized orbital) | `KondoChain_fsz` | no | yes |
@@ -114,6 +115,7 @@ To regenerate this reference data from a fresh clone of the C mVMC tree:
    python3 runtest.py HubbardChain_cmp
    python3 runtest.py KondoChain_cmp
    python3 runtest.py KondoChain_Stot1_cmp
+   python3 runtest.py GeneralRBM_cmp
    python3 runtest.py HeisenbergChain_fsz
    python3 runtest.py HubbardChain_fsz
    python3 runtest.py KondoChain_fsz

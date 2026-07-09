@@ -10,7 +10,7 @@
 | `VMCMainCal_fsz` | `vmc_main_cal_fsz!` | ✅ |
 | `VMCMakeSample` | `vmc_make_sample!` | ✅ |
 | `InitParameter` | `init_parameter!` (MVMCExpertModeParsers) | ✅ |
-| `ReadInitParameter` | `read_initial_def!` (MVMCOptimizers) | ✅ (RBM block refused; OptTrans tail consumed when active) |
+| `ReadInitParameter` | `read_initial_def!` (MVMCOptimizers) | ✅ (projection, RBM, Slater, and active OptTrans triples) |
 | `ReadInputParameters` | `read_input_parameters!` (MVMCExpertModeParsers) | ✅ (In*.def parser; consumption depends on the block) |
 | `SyncModifiedParameter` | `sync_modified_parameter!` (MVMCOptimizers) | ✅ Slater rescale + GJ/DH shift + OptTrans normalization |
 | `InitQPWeight` | `init_qp_weight!` (MVMCExpertModeParsers) | ✅ |
@@ -175,7 +175,3 @@ are treated as C-compatible.
 - **`InterAllTerm` full spin metadata** — when `interall.def` omits
   per-term spin info, defaults are substituted (see
   `src/vmc_main_cal.jl`).
-- `initial.def` layouts with RBM triples are still refused because the C file
-  places RBM between `NProj` and `NSlater`; reading that block without full RBM
-  support would corrupt the Slater slice. See
-  [`02_input_files.md`](02_input_files.md) for the full input table.

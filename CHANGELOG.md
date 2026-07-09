@@ -1,5 +1,61 @@
 # Changelog
 
+## v0.5.0 - 2026-07-08
+
+This release extends the experimental PhysCal and MPI split coverage after
+v0.4.2. It adds C-referenced Full-Lanczos PhysCal output, split normal-Green
+PhysCal runs, sz-conserved standard-projection sample splitting, pair-hop
+fixtures, and FSZ/general-orbital `TwoBodyGEx` measurements.
+
+### Added
+
+- Added `VMCPhysCal` Full-Lanczos output support for `NLanczosMode = 1/2` on
+  the sz-conserved `NSplitSize = 1` path, with C-reference fixtures for
+  Lanczos energy, QQQQ, one-body, direct two-body, and factored two-body Green
+  output where supported.
+- Added C-reference integration coverage for pair-hop Hubbard fixtures in real
+  and FSZ/general-orbital modes.
+- Added direct-SR `VMCParaOpt` `NSplitSize > 1` support for sz-conserved
+  standard-projection `NQPFull > 1` inputs when `NQPOptTrans = 1`
+  (`NSPGaussLeg > 1` and/or `NMPTrans > 1`), including MPI self-consistency
+  smoke coverage.
+- Added `VMCPhysCal` `NSplitSize > 1` support for sz-conserved normal-Green
+  runs (`NLanczosMode = 0`), including MPI reduce-to-root and rank0 output
+  smoke coverage.
+- Added FSZ/general-orbital `TwoBodyGEx` / `greentwoex.def` support for
+  factored two-body Green output and a C-referenced FSZ PhysCal fixture.
+- Added RBM-bearing `initial.def` / `zqp_opt.dat` parameter loading and promoted
+  `GeneralRBM_cmp` to the C ctest-equivalent integration gate.
+
+### Changed
+
+- Updated the public version metadata for the in-repo packages
+  `MVMCOptimizers` and `MVMCExpertModeParsers` to `0.5.0`.
+- Tightened unsupported-input validation for split PhysCal, split Lanczos,
+  FSZ/general-orbital standard-projection splitting, OptTrans-derived QP
+  sectors, and additional SR-CG modes.
+- Updated README and manual compatibility notes for the v0.5.0 PhysCal,
+  Lanczos, MPI split, and unsupported-input scope.
+
+### Notes
+
+- `VMCPhysCal` remains experimental. Split PhysCal is limited to
+  sz-conserved normal-Green runs (`NLanczosMode = 0`); FSZ/general-orbital
+  split, Lanczos split, and OptTrans-derived QP-sector split runs remain
+  rejected.
+- `VMCPhysCal` Lanczos support is limited to the sz-conserved
+  `NSplitSize = 1` path. FSZ/general-orbital Lanczos, split Lanczos, and
+  ParaOpt Lanczos remain unsupported.
+- `VMCParaOpt` split standard projection is limited to sz-conserved inputs.
+  FSZ standard-projection `NQPFull > 1`, OptTrans-derived QP sectors with
+  `NSplitSize > 1`, SR-CG with `NSplitSize > 1`, `NSRCG >= 2`,
+  `useDiagScale != 0`, and `RescaleSmat != 0` remain rejected.
+- GitHub-generated source ZIP/TAR archives do not include submodule contents.
+  Use `git clone --recurse-submodules https://github.com/tmisawa/Julia-mVMC`
+  for a functional checkout.
+- `PfaPack.jl` and `SFMT.jl` are submodules and remain at their own package
+  version `0.1.0` in this release.
+
 ## v0.4.2 - 2026-06-23
 
 This patch release adds the next MPI compatibility slice after v0.4.1. It adds

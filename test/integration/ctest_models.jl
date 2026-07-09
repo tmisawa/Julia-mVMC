@@ -1,10 +1,9 @@
-# C-mVMC standard ctest models supported by the Julia ctest-equivalent runner.
+# C-mVMC ctest models supported by the Julia ctest-equivalent runner.
 #
 # `fixture` is the public Julia-mVMC fixture directory name.
 # `c_model` is the C-mVMC `runtest.py <ModelName>` argument.
-# The 3 deferred models complete the private 15-model set, but need additional
+# The 2 deferred models complete the private 15-model set, but need additional
 # Julia support before they can use this runner:
-#   - GeneralRBM_cmp: RBM-bearing initial.def support.
 #   - SpinChainLanczos, HubbardChainLanczos: mode1/Lanczos output path.
 
 const CTEST_STANDARD_MODELS = [
@@ -72,6 +71,13 @@ const CTEST_STANDARD_MODELS = [
         nsmp_override = nothing,
     ),
     (
+        fixture = "general_rbm_cmp",
+        c_model = "GeneralRBM_cmp",
+        mode = :cmp,
+        nsteps_override = nothing,
+        nsmp_override = nothing,
+    ),
+    (
         fixture = "heisenberg_chain_fsz",
         c_model = "HeisenbergChain_fsz",
         mode = :fsz,
@@ -95,12 +101,6 @@ const CTEST_STANDARD_MODELS = [
 ]
 
 const CTEST_DEFERRED_MODELS = [
-    (
-        fixture = "general_rbm_cmp",
-        c_model = "GeneralRBM_cmp",
-        mode = :cmp,
-        reason = "RBM-bearing initial.def is not supported yet",
-    ),
     (
         fixture = "spin_chain_lanczos",
         c_model = "SpinChainLanczos",
