@@ -27,7 +27,7 @@ julia --project=@. -e 'using Pkg; Pkg.instantiate(); Pkg.build()'
 
 If you cloned without `--recurse-submodules`, run `git submodule update --init --recursive` before `Pkg.instantiate()`.
 
-`Pkg.add(url=..., subdir=...)` is **not** a supported install path in this release because Julia-mVMC and its dependencies are coupled via the workspace `[sources]` block in the root `Project.toml` (relative paths into the submodules, not committed URLs). See [docs/manual/01_install.md](docs/manual/01_install.md) for native prerequisites and detailed setup.
+`Pkg.add(url=..., subdir=...)` is **not** a supported install path in this release because Julia-mVMC and its dependencies are coupled via the workspace `[sources]` block in the root `Project.toml` (relative paths into the submodules, not committed URLs). See [docs/src/en/installation.md](docs/src/en/installation.md) for native prerequisites and detailed setup.
 
 ## Quickstart
 
@@ -41,7 +41,9 @@ Expected output ends with a line like `Final energy / site = -0.44...`. Each exa
 
 ## Documentation
 
-[`docs/manual/`](docs/manual/) — installation, input files, optimization, physics calculations, and C/Julia compatibility notes.
+[`docs/src/`](docs/src/) — bilingual user manual source (English / Japanese), built with Documenter.jl for GitHub Pages.
+
+[`docs/manual/`](docs/manual/) — legacy Markdown manual pages retained during the Documenter.jl migration.
 
 [`CHANGELOG.md`](CHANGELOG.md) — release notes.
 
@@ -54,7 +56,7 @@ Julia-mVMC/
 ├── PfaPack.jl/               # submodule: Pfaffian (Fortran/C++ wrapper)
 ├── SFMT.jl/                  # submodule: SFMT random number generator (C wrapper)
 ├── examples/                 # 4 runnable examples
-├── docs/manual/              # user manual
+├── docs/src/                 # bilingual Documenter.jl manual source
 └── test/integration/         # C reference comparison tests
 ```
 
