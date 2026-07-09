@@ -1,12 +1,14 @@
-# 4. Physical-quantity measurement (VMCPhysCal) — experimental
+# 4. Physical-quantity measurement (VMCPhysCal) — verified for supported paths
 
-> ⚠️ `VMCPhysCal` (`NVMCCalMode = 1`) is **experimental** in this release. Major
-> components are implemented and exercised against C reference data — the
+> `VMCPhysCal` (`NVMCCalMode = 1`) is **C-verified for supported paths** in this
+> release. The
 > one-body, direct two-body, and factored/product two-body Green functions now
 > all match C-mVMC to the per-quantity gate tolerance (see
 > [`../../test/integration/phys_cal_equivalent.jl`](../../test/integration/phys_cal_equivalent.jl)).
-> Treat numbers as a sanity check, not as production output, until a later
-> release.
+> `NLanczosMode = 1/2` output is also C-referenced on the sz-conserved
+> `NSplitSize = 1` path (see
+> [`../../test/integration/lanczos_equivalent.jl`](../../test/integration/lanczos_equivalent.jl)).
+> Unsupported combinations still raise errors; see the limitations below.
 
 ## What is implemented
 
@@ -42,19 +44,20 @@
 
 ## When to fall back to C-mVMC
 
-For published physics results, the safest path in this release is:
+For published physics results, the recommended path in this release is:
 
 1. Use Julia-mVMC for `VMCParaOpt` (parameter optimisation) — verified
    bit-level for the modes listed in
    [`03_optimization.md`](03_optimization.md).
-2. For `VMCPhysCal` (physical-quantity measurement), the one-body, direct and
-   factored two-body Green functions are gated against C references
+2. For `VMCPhysCal` (physical-quantity measurement), use the supported paths:
+   the one-body, direct and factored two-body Green functions are gated against C references
    ([`phys_cal_equivalent.jl`](../../test/integration/phys_cal_equivalent.jl)) and
    can be run via
    [`run_phys_cal_from_namelist`](../../MVMCOptimizers.jl/src/run_phys_cal_from_namelist.jl).
    `NLanczosMode = 1/2` also writes Full-Lanczos files on the sz-conserved
-   `NSplitSize = 1` path. Still fall back to C-mVMC for Backflow,
-   FSZ/general-orbital Lanczos, or Lanczos PhysCal runs that need `NSplitSize > 1`.
+   `NSplitSize = 1` path with C-reference gates. Still fall back to C-mVMC for
+   Backflow, FSZ/general-orbital Lanczos, or Lanczos PhysCal runs that need
+   `NSplitSize > 1`.
 
 The output formats of `zqp_opt.dat` are byte-compatible (same column
 layout), so the hand-off requires no conversion script.
