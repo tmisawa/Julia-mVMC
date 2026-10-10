@@ -1,0 +1,18 @@
+[
+  {
+    "sites": 32,
+    "ranks": 1,
+    "threads": 16,
+    "steps": 20,
+    "exact_rng_and_control": true,
+    "output_max_abs_observed": 0.0
+  },
+  {
+    "sites": 64,
+    "ranks": 1,
+    "threads": 16,
+    "steps": 20,
+    "exact_rng_and_control": true,
+    "output_max_abs_observed": 0.0
+  }
+]

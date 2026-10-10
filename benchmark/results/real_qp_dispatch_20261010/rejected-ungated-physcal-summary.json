@@ -1,0 +1,57 @@
+{
+  "cases": [
+    {
+      "sites": 32,
+      "ranks": 1,
+      "threads": 16,
+      "groups": 100,
+      "total_samples": 320,
+      "times": {
+        "baseline": {
+          "1": 4.707533475,
+          "2": 4.614994768,
+          "3": 4.653816512
+        },
+        "candidate": {
+          "1": 5.819112045,
+          "2": 5.833662812,
+          "3": 5.844479663
+        }
+      },
+      "medians": {
+        "baseline": 4.653816512,
+        "candidate": 5.833662812
+      },
+      "candidate_percent_change": 25.35223073272728,
+      "pair_wins": 0,
+      "output_max_abs_observed": 0.0
+    },
+    {
+      "sites": 64,
+      "ranks": 1,
+      "threads": 16,
+      "groups": 100,
+      "total_samples": 320,
+      "times": {
+        "baseline": {
+          "1": 22.393873856,
+          "2": 22.553428298,
+          "3": 22.286297994
+        },
+        "candidate": {
+          "1": 16.977692359,
+          "2": 17.099121237,
+          "3": 16.839844981
+        }
+      },
+      "medians": {
+        "baseline": 22.393873856,
+        "candidate": 16.977692359
+      },
+      "candidate_percent_change": -24.18599627660598,
+      "pair_wins": 3,
+      "output_max_abs_observed": 0.0
+    }
+  ],
+  "complete": true
+}

@@ -1,0 +1,110 @@
+[
+  {
+    "n": 24,
+    "gap_ns": 0,
+    "serial_ns": 34395.61,
+    "parallel_ns": 20812.27
+  },
+  {
+    "n": 32,
+    "gap_ns": 0,
+    "serial_ns": 56069.16,
+    "parallel_ns": 27970.09
+  },
+  {
+    "n": 40,
+    "gap_ns": 0,
+    "serial_ns": 87547.32,
+    "parallel_ns": 34075.88
+  },
+  {
+    "n": 48,
+    "gap_ns": 0,
+    "serial_ns": 126868.07,
+    "parallel_ns": 49867.4
+  },
+  {
+    "n": 64,
+    "gap_ns": 0,
+    "serial_ns": 241632.39,
+    "parallel_ns": 78463.57
+  },
+  {
+    "n": 96,
+    "gap_ns": 0,
+    "serial_ns": 675039.42,
+    "parallel_ns": 173229.57
+  },
+  {
+    "n": 24,
+    "gap_ns": 100000,
+    "serial_ns": 33723.75,
+    "parallel_ns": 31345.6
+  },
+  {
+    "n": 32,
+    "gap_ns": 100000,
+    "serial_ns": 54824.26,
+    "parallel_ns": 31200.76
+  },
+  {
+    "n": 40,
+    "gap_ns": 100000,
+    "serial_ns": 86223.6,
+    "parallel_ns": 41654.06
+  },
+  {
+    "n": 48,
+    "gap_ns": 100000,
+    "serial_ns": 126657.7,
+    "parallel_ns": 47429.19
+  },
+  {
+    "n": 64,
+    "gap_ns": 100000,
+    "serial_ns": 242953.25,
+    "parallel_ns": 76034.49
+  },
+  {
+    "n": 96,
+    "gap_ns": 100000,
+    "serial_ns": 692234.78,
+    "parallel_ns": 167789.48
+  },
+  {
+    "n": 24,
+    "gap_ns": 1000000,
+    "serial_ns": 33667.14,
+    "parallel_ns": 129413.4
+  },
+  {
+    "n": 32,
+    "gap_ns": 1000000,
+    "serial_ns": 54641.29,
+    "parallel_ns": 64709.73
+  },
+  {
+    "n": 40,
+    "gap_ns": 1000000,
+    "serial_ns": 86254.79,
+    "parallel_ns": 167829.26
+  },
+  {
+    "n": 48,
+    "gap_ns": 1000000,
+    "serial_ns": 129009.74,
+    "parallel_ns": 100588.3
+  },
+  {
+    "n": 64,
+    "gap_ns": 1000000,
+    "serial_ns": 241455.89,
+    "parallel_ns": 153171.96
+  },
+  {
+    "n": 96,
+    "gap_ns": 1000000,
+    "serial_ns": 676070.12,
+    "parallel_ns": 176868.21
+  }
+]

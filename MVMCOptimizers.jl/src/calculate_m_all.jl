@@ -844,7 +844,15 @@ function calculate_m_all_real!(
     # Fall back to sequential execution if only 1 thread or workload is small
     # This avoids @threads overhead when parallelization won't help
     n_threads = nthreads()
-    if n_threads == 1 || qp_num < n_threads || threadid() != 1 ||
+    # QP planes and worker scratch are independent. A pool larger than the
+    # QP range still has useful workers; static scheduling leaves the rest idle.
+    # A partial pool still schedules all static tasks. Require enough matrix
+    # work to amortize dispatch after serial sampling/measurement gaps. The
+    # 8-QP/16-thread crossover lies between n=40 and n=48; n=32 regressed in
+    # whole PhysCal even though back-to-back kernel calls improved.
+    partial_pool_too_small = qp_num < n_threads &&
+                             qp_num * n_size^3 < 32_768 * n_threads
+    if n_threads == 1 || qp_num < 2 || partial_pool_too_small || threadid() != 1 ||
        ccall(:jl_in_threaded_region, Cint, ()) != 0
         # Static scheduling requires the primary thread outside a threaded region.
         # Nested/worker callers retain a serial path with their own scratch.
