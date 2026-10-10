@@ -3510,7 +3510,7 @@ function calculate_oo_store!(
     sqrtw = sqrt(w)
     size_2 = 2 * sr_opt_size
 
-    if vmc_inner_threading_enabled(size_2, threaded)
+    if vmc_sr_store_threading_enabled(size_2, threaded, ComplexF64)
         Base.Threads.@threads :static for i = 0:(size_2-1)
             @inbounds begin
                 # Store sqrt(w) * O for later matrix multiplication
@@ -3549,7 +3549,7 @@ function calculate_oo_store_real!(
     we = w * e
     sqrtw = sqrt(w)
 
-    if vmc_inner_threading_enabled(sr_opt_size, threaded)
+    if vmc_sr_store_threading_enabled(sr_opt_size, threaded, Float64)
         Base.Threads.@threads :static for i = 1:sr_opt_size
             @inbounds begin
                 sr_opt_o_store[i+sample*sr_opt_size] = sqrtw * sr_opt_o[i]

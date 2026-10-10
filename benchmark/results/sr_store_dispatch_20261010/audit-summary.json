@@ -1,0 +1,71 @@
+{
+  "success": true,
+  "cases": [
+    {
+      "sites": 32,
+      "ranks": 1,
+      "threads": 16,
+      "steps": 20,
+      "exact_rng_and_integer_state": true,
+      "output_max_abs_observed": 0.0
+    },
+    {
+      "sites": 32,
+      "ranks": 1,
+      "threads": 16,
+      "steps": 300,
+      "exact_rng_and_integer_state": true,
+      "output_max_abs_observed": 0.0
+    },
+    {
+      "sites": 64,
+      "ranks": 1,
+      "threads": 16,
+      "steps": 20,
+      "exact_rng_and_integer_state": true,
+      "output_max_abs_observed": 0.0
+    },
+    {
+      "sites": 64,
+      "ranks": 1,
+      "threads": 16,
+      "steps": 300,
+      "exact_rng_and_integer_state": true,
+      "output_max_abs_observed": 0.0
+    },
+    {
+      "sites": 32,
+      "ranks": 4,
+      "threads": 4,
+      "steps": 20,
+      "exact_rng_and_integer_state": true,
+      "output_max_abs_observed": 0.0
+    },
+    {
+      "sites": 32,
+      "ranks": 4,
+      "threads": 4,
+      "steps": 300,
+      "exact_rng_and_integer_state": true,
+      "output_max_abs_observed": 0.0
+    },
+    {
+      "sites": 64,
+      "ranks": 4,
+      "threads": 4,
+      "steps": 20,
+      "exact_rng_and_integer_state": true,
+      "output_max_abs_observed": 0.0
+    },
+    {
+      "sites": 64,
+      "ranks": 4,
+      "threads": 4,
+      "steps": 300,
+      "exact_rng_and_integer_state": true,
+      "output_max_abs_observed": 0.0
+    }
+  ],
+  "exact_rank_pairs": 20,
+  "evidence": "Native SFMT 624 words, index, draw count, reseeds; saved electron configurations, burn-in/temp configurations and acceptance/rejection counters. Floating output difference is an observation, not a bitwise assertion."
+}

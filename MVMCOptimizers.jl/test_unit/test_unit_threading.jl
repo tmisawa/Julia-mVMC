@@ -445,3 +445,57 @@ end
     @test length(detached_geometry.sr_opt.sr_opt_o_real) == length(state.sr_opt.sr_opt_o_real)
     @test all(iszero, detached_geometry.sr_opt.sr_opt_oo_real)
 end
+
+@testset "unit/threading: SR sample-store dispatch and C storage contract" begin
+    old = get(ENV, "JULIA_MVMC_INNER_THREADS", nothing)
+    try
+        ENV["JULIA_MVMC_INNER_THREADS"] = "1"
+        expected = Threads.nthreads() > 1
+        @test !MO.vmc_sr_store_threading_enabled(65535, true, Float64)
+        @test MO.vmc_sr_store_threading_enabled(65536, true, Float64) == expected
+        @test !MO.vmc_sr_store_threading_enabled(32767, true, ComplexF64)
+        @test MO.vmc_sr_store_threading_enabled(32768, true, ComplexF64) == expected
+        @test !MO.vmc_sr_store_threading_enabled(131072, false, Float64)
+        @test !MO.vmc_sr_store_threading_enabled(131072, false, ComplexF64)
+        for (T,n) in ((Float64,0), (Float64,197), (Float64,65535),
+                      (Float64,65536), (Float64,65537), (ComplexF64,197),
+                      (ComplexF64,16383), (ComplexF64,16384), (ComplexF64,16385))
+            len = T <: Complex ? 2n : n
+            values = T <: Complex ? ComplexF64[sin(i/17)+cos(i/13)*im for i in 1:len] :
+                                     Float64[sin(i/17) for i in 1:len]
+            initial = T <: Complex ? T(0.125,-0.25) : T(0.125)
+            untouched = T <: Complex ? T(-9,7) : T(-9)
+            ho = fill(initial,len+2)
+            store = fill(untouched,2len+2)
+            reference_ho = copy(ho)
+            reference_store = copy(store)
+            for w in (0.0,0.75,1.125)
+                energy = T <: Complex ? T(-0.625,0.125) : T(-0.625)
+                # C VMCMainCal stores sqrt(w)*O at sample*size+i and adds
+                # (w*e)*O to HO. Independent expectations also catch a missed
+                # element or incorrect sample offset at either gate boundary.
+                for i in 1:len
+                    reference_store[len+i] = sqrt(w)*values[i]
+                    reference_ho[i] += (w*energy)*values[i]
+                end
+                if T <: Complex
+                    MO.calculate_oo_store!(ComplexF64[],ho,store,values,w,energy,1,n; threaded=true)
+                else
+                    MO.calculate_oo_store_real!(ho,store,values,w,energy,1,n; threaded=true)
+                end
+            end
+            # Three updates with complex products: 32 eps bounds the small
+            # operation count, including SIMD lowering, at O(1) input scale.
+            @test isapprox(ho,reference_ho;atol=32eps(Float64),rtol=32eps(Float64))
+            @test isapprox(store,reference_store;atol=32eps(Float64),rtol=32eps(Float64))
+            @test ho[(len+1):end] == fill(initial,2)
+            @test store[1:len] == fill(untouched,len)
+            @test store[(2len+1):end] == fill(untouched,2)
+        end
+        ENV["JULIA_MVMC_INNER_THREADS"] = "0"
+        @test !MO.vmc_sr_store_threading_enabled(131072,true,Float64)
+        @test !MO.vmc_sr_store_threading_enabled(131072,true,ComplexF64)
+    finally
+        old === nothing ? delete!(ENV,"JULIA_MVMC_INNER_THREADS") : (ENV["JULIA_MVMC_INNER_THREADS"] = old)
+    end
+end

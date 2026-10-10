@@ -66,6 +66,22 @@ const VMC_COPY_MIN_WORK_ITEMS = 65536
     )
 end
 
+# SR sample storage is two independent vector updates, not a matrix kernel.
+# On the reference Ryzen host, launching static tasks for a few hundred values
+# costs several microseconds while the serial SIMD loop takes under one.
+# The standalone SR-store probe records profitable large-vector crossovers.
+const VMC_SR_STORE_MIN_REAL_ITEMS = 65536
+const VMC_SR_STORE_MIN_COMPLEX_ITEMS = 32768
+
+@inline function vmc_sr_store_threading_enabled(
+    work_items::Integer, threaded::Bool, ::Type{T},
+) where {T}
+    threshold = T <: Complex ? VMC_SR_STORE_MIN_COMPLEX_ITEMS : VMC_SR_STORE_MIN_REAL_ITEMS
+    return vmc_inner_threading_enabled(
+        work_items, threaded; min_work_per_thread = threshold,
+    )
+end
+
 function copy_real_to_complex!(
     dst::AbstractVector{ComplexF64},
     src::AbstractVector{Float64},
