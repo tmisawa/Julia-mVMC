@@ -68,6 +68,7 @@ end
     include("../test_unit/test_unit_exchange_counter_behavior.jl")
     include("../test_unit/test_unit_vmc_sampling_proj.jl")
     include("../test_unit/test_unit_vmc_sampling_misc.jl")
+    include("../test_unit/test_unit_hopping_retry_cap.jl")
     include("../test_unit/test_unit_vmc_sampling_qp_split.jl")
     include("../test_unit/test_unit_slater_update.jl")
     include("../test_unit/test_unit_slater_checked_kernel.jl")

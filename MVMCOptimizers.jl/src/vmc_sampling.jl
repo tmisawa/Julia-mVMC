@@ -1074,16 +1074,27 @@ function make_candidate_hopping(
 
     # Select random electron (do-while loop to match C implementation)
     # C: do { mi = gen_rand32() % Ne; r = genrand_real2(); s = (r<0.5) ? 0 : 1; ri = eleIdx[mi+s*Ne]; } while (LocSpn[ri] == 1);
-    # Note: Added icnt check to prevent infinite loop when all electrons are on local spin sites
+    # C has no cap here, so every finite C trajectory keeps drawing. Only when no
+    # itinerant electron exists (C never terminates) is the candidate rejected,
+    # after Nsite^2 + 1 draws.
     mi_val = 0
     s_val = 0
     ri_val = 0
     icnt_electron = 0
     while true
-        # Check for infinite loop (all electrons on local spin sites)
-        if icnt_electron > icnt_max
-            reject_flag = 1  # TRUE - reject this candidate
-            return (mi_val, ri_val, 0, s_val, reject_flag)
+        # Checked once: reject only the unsupported all-local-spin input.
+        if icnt_electron == icnt_max + 1
+            has_itinerant = false
+            for k in 1:(2*n_elec)
+                if loc_spn[ele_idx[k]+1] != 1
+                    has_itinerant = true
+                    break
+                end
+            end
+            if !has_itinerant
+                reject_flag = 1  # TRUE - reject this candidate
+                return (mi_val, ri_val, 0, s_val, reject_flag)
+            end
         end
         icnt_electron += 1
 
@@ -1100,16 +1111,22 @@ function make_candidate_hopping(
         end
     end
 
-    # Select random destination site
+    # Select random destination site.
+    # C: do { rj = gen_rand32()%Nsite; if(icnt> icnt_max){ flag = 1; break; } icnt+=1; }
+    #    while (eleCfg[rj+s*Nsite] != -1 || LocSpn[rj]==1);
+    # The draw made after the cap is rejected even when it names an empty site.
     icnt = 0
-    rj_val = rng_mod(rng, n_site)
-    while ele_cfg[rj_val+s_val*n_site+1] != -1 || loc_spn[rj_val+1] == 1
+    rj_val = 0
+    while true
+        rj_val = rng_mod(rng, n_site)
         if icnt > icnt_max
             reject_flag = 1  # TRUE
             break
         end
-        rj_val = rng_mod(rng, n_site)
         icnt += 1
+        if ele_cfg[rj_val+s_val*n_site+1] == -1 && loc_spn[rj_val+1] != 1
+            break
+        end
     end
 
     return (mi_val, ri_val, rj_val, s_val, reject_flag)
