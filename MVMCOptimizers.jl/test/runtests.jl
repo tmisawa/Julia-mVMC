@@ -87,6 +87,7 @@ end
     include("../test_unit/test_unit_weight_average.jl")
     include("../test_unit/test_unit_unsupported_inputs.jl")
     include("../test_unit/test_unit_physcal_factored_green.jl")
+    include("../test_unit/test_unit_lanczos_pfaffians.jl")
     include("../test_unit/test_unit_fsz_native_contract.jl")
     include("../test_unit/test_unit_ordinary_real_rank2.jl")
     include("../test_unit/test_unit_ordinary_real_inverse.jl")

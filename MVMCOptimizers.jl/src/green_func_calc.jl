@@ -374,11 +374,12 @@ function _lanczos_overlap_ratio!(
         info == 0 || return 0.0 + 0.0im
         calculate_ip_fcmp(state.slater_matrix.pf_m, 1, n_qp_full + 1, data; reduce = :none)
     else
-        info = calculate_m_all_real!(cfg.ele_idx, 1, n_qp_full + 1, data, state; threaded = false)
+        pf_new = state.workspace.pf_m_real_temp
+        info = _lanczos_updated_pfaffians_real!(cfg.ele_idx, original.ele_idx, data, state, pf_new)
         info == 0 || return 0.0 + 0.0im
         ComplexF64(
             calculate_ip_real(
-                state.slater_matrix.pf_m_real,
+                pf_new,
                 1,
                 n_qp_full + 1,
                 data;
@@ -391,15 +392,84 @@ function _lanczos_overlap_ratio!(
     return conj(z * ip_new / ip)
 end
 
-function _lanczos_scale_terms(terms, scale::ComplexF64)
-    scaled = Vector{Tuple{ComplexF64,LanczosElectronConfig}}()
-    for (coef, cfg) in terms
-        new_coef = scale * coef
-        if abs(new_coef) > 0
-            push!(scaled, (new_coef, cfg))
+function _lanczos_updated_pfaffians_real!(ele_idx, original_idx, data, state, pf_new)
+    ne = data.modpara.nelec
+    first_move = 0
+    second_move = 0
+    for i in eachindex(ele_idx)
+        if ele_idx[i] != original_idx[i]
+            if first_move == 0
+                first_move = i
+            elseif second_move == 0
+                second_move = i
+            else
+                return _lanczos_pfaffians_real!(ele_idx, data, state, pf_new)
+            end
         end
     end
-    return scaled
+    nqp = length(state.slater_matrix.pf_m_real)
+    if first_move == 0
+        copyto!(pf_new, state.slater_matrix.pf_m_real)
+    elseif second_move == 0
+        s = (first_move - 1) ÷ ne
+        m = (first_move - 1) % ne
+        calculate_new_pf_m2_real!(m, s, pf_new, ele_idx, 1, nqp + 1, data, state)
+    else
+        s = (first_move - 1) ÷ ne
+        t = (second_move - 1) ÷ ne
+        ma = (first_move - 1) % ne
+        mb = (second_move - 1) % ne
+        calculate_new_pf_m_two2_real!(ma, s, mb, t, pf_new, ele_idx, 1, nqp + 1, data, state)
+    end
+    # Near a node, recompute to retain the full factorization's singularity
+    # behavior and avoid cancellation in the low-rank update.
+    for q in 1:nqp
+        if !isfinite(pf_new[q]) || abs(pf_new[q]) <= 1e-10 * abs(state.slater_matrix.pf_m_real[q])
+            return _lanczos_pfaffians_real!(ele_idx, data, state, pf_new)
+        end
+    end
+    return 0
+end
+
+# Lanczos overlap ratios only use Pfaffians. Factoring each intermediate
+# Slater matrix is necessary, but forming its inverse is not. Use the same
+# C-order factorization and singularity checks as calculate_m_all_real!.
+function _lanczos_pfaffians_real!(ele_idx, data::ExpertModeData, state::VMCOptimizationState, pf_new)
+    n_site = data.modpara.nsite
+    ne = data.modpara.nelec
+    n = 2 * ne
+    nsite2 = 2 * n_site
+    sm = state.slater_matrix
+    ws = state.workspace
+    piv = ws.pfapack_workspace.workspaces[1].iwork
+    mat = ws.pfapack_workspace.workspaces[1].buf_m_real
+    for q in eachindex(sm.pf_m_real)
+        offset = (q - 1) * nsite2 * nsite2
+        max_abs2 = 0.0
+        @inbounds for i in 1:n
+            ri = ele_idx[i] + (i > ne ? n_site : 0)
+            for j in 1:n
+                rj = ele_idx[j] + (j > ne ? n_site : 0)
+                x = -sm.slater_elm_real[offset + ri * nsite2 + rj + 1]
+                mat[j, i] = x
+                max_abs2 = max(max_abs2, abs2(x))
+            end
+        end
+        max_abs2 < 1e-14 ^ 2 && return 2
+        info = _ordinary_dsktf2_c_order!(mat, piv)
+        info == 0 || return info
+        pf = utu2pfa(n, mat, n, piv)
+        isfinite(pf) || return 1
+        pf_new[q] = pf
+    end
+    return 0
+end
+
+function _lanczos_scale_terms(terms, scale::ComplexF64)
+    isempty(terms) && return ()
+    coef, cfg = only(terms)
+    new_coef = scale * coef
+    return iszero(new_coef) ? () : ((new_coef, cfg),)
 end
 
 function _lanczos_apply_one_body(
@@ -416,16 +486,16 @@ function _lanczos_apply_one_body(
 
     if ri == rj
         if cfg.ele_num[rsi+1] == 1
-            return [(1.0 + 0.0im, _copy_lanczos_config(cfg))]
+            return ((1.0 + 0.0im, cfg),)
         end
-        return Tuple{ComplexF64,LanczosElectronConfig}[]
+        return ()
     end
     if cfg.ele_num[rsi+1] == 1 || cfg.ele_num[rsj+1] == 0
-        return Tuple{ComplexF64,LanczosElectronConfig}[]
+        return ()
     end
 
     mj = cfg.ele_cfg[rsj+1]
-    mj < 0 && return Tuple{ComplexF64,LanczosElectronConfig}[]
+    mj < 0 && return ()
     moved = _copy_lanczos_config(cfg)
     moved.ele_idx[mj+s*n_elec+1] = ri
     moved.ele_cfg[rsj+1] = -1
@@ -433,12 +503,12 @@ function _lanczos_apply_one_body(
     moved.ele_num[rsj+1] = 0
     moved.ele_num[rsi+1] = 1
     _lanczos_recompute_proj_cnt!(moved, data)
-    return [(1.0 + 0.0im, moved)]
+    return ((1.0 + 0.0im, moved),)
 end
 
 function _lanczos_diagonal_term(coef::Integer, cfg::LanczosElectronConfig)
-    coef == 0 && return Tuple{ComplexF64,LanczosElectronConfig}[]
-    return [(ComplexF64(coef, 0.0), _copy_lanczos_config(cfg))]
+    coef == 0 && return ()
+    return ((ComplexF64(coef, 0.0), cfg),)
 end
 
 function _lanczos_apply_two_body(
@@ -459,13 +529,13 @@ function _lanczos_apply_two_body(
 
     if s == t
         if rk == rl
-            cfg.ele_num[rtk+1] == 0 && return Tuple{ComplexF64,LanczosElectronConfig}[]
+            cfg.ele_num[rtk+1] == 0 && return ()
             return _lanczos_apply_one_body(cfg, ri, rj, s, data)
         elseif rj == rl
-            return Tuple{ComplexF64,LanczosElectronConfig}[]
+            return ()
         elseif ri == rl
             if cfg.ele_num[rsi+1] == 0
-                return Tuple{ComplexF64,LanczosElectronConfig}[]
+                return ()
             elseif rj == rk
                 return _lanczos_diagonal_term(1 - cfg.ele_num[rsj+1], cfg)
             else
@@ -473,29 +543,29 @@ function _lanczos_apply_two_body(
             end
         elseif rj == rk
             if cfg.ele_num[rsj+1] == 1
-                return Tuple{ComplexF64,LanczosElectronConfig}[]
+                return ()
             elseif ri == rl
                 return _lanczos_diagonal_term(cfg.ele_num[rsi+1], cfg)
             else
                 return _lanczos_apply_one_body(cfg, ri, rl, s, data)
             end
         elseif ri == rk
-            return Tuple{ComplexF64,LanczosElectronConfig}[]
+            return ()
         elseif ri == rj
-            cfg.ele_num[rsi+1] == 0 && return Tuple{ComplexF64,LanczosElectronConfig}[]
+            cfg.ele_num[rsi+1] == 0 && return ()
             return _lanczos_apply_one_body(cfg, rk, rl, s, data)
         end
     else
         if rk == rl
             if cfg.ele_num[rtk+1] == 0
-                return Tuple{ComplexF64,LanczosElectronConfig}[]
+                return ()
             elseif ri == rj
                 return _lanczos_diagonal_term(cfg.ele_num[rsi+1], cfg)
             else
                 return _lanczos_apply_one_body(cfg, ri, rj, s, data)
             end
         elseif ri == rj
-            cfg.ele_num[rsi+1] == 0 && return Tuple{ComplexF64,LanczosElectronConfig}[]
+            cfg.ele_num[rsi+1] == 0 && return ()
             return _lanczos_apply_one_body(cfg, rk, rl, t, data)
         end
     end
@@ -504,16 +574,16 @@ function _lanczos_apply_two_body(
        cfg.ele_num[rsj+1] == 0 ||
        cfg.ele_num[rtk+1] == 1 ||
        cfg.ele_num[rtl+1] == 0
-        return Tuple{ComplexF64,LanczosElectronConfig}[]
+        return ()
     end
 
-    results = Vector{Tuple{ComplexF64,LanczosElectronConfig}}()
-    for (coef1, cfg1) in _lanczos_apply_one_body(cfg, rk, rl, t, data)
-        for (coef2, cfg2) in _lanczos_apply_one_body(cfg1, ri, rj, s, data)
-            push!(results, (coef1 * coef2, cfg2))
-        end
-    end
-    return results
+    first = _lanczos_apply_one_body(cfg, rk, rl, t, data)
+    isempty(first) && return ()
+    coef1, cfg1 = only(first)
+    second = _lanczos_apply_one_body(cfg1, ri, rj, s, data)
+    isempty(second) && return ()
+    coef2, cfg2 = only(second)
+    return ((coef1 * coef2, cfg2),)
 end
 
 function _lanczos_transfer_spins(term)
