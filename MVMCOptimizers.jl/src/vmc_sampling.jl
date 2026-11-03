@@ -5017,7 +5017,8 @@ function calculate_m_all_real!(
             qp_num + 1,  # qp_end (1-based, exclusive, relative to subset)
             n_site,
             n_size,  # Pass n_size (2*Ne) instead of n_elec (Ne)
-            pfapack_workspace,  # Pre-allocated workspace
+            pfapack_workspace;  # Pre-allocated workspace
+            team = ws.hop_team,
         )
     end
 
@@ -5634,10 +5635,11 @@ function update_m_all_real!(
     length(vec1) == n_size || resize!(vec1, n_size)
     length(vec2) == n_size || resize!(vec2, n_size)
 
-    # Process each QP index
-    for qpidx = qp_start:(qp_end-1)
+    # The RNG/proposal/decision remains serial. Only disjoint accepted-hop
+    # matrix planes run concurrently, retaining every plane's arithmetic order.
+    function update_plane!(qpidx, vec1, vec2)
         if qpidx < 1 || qpidx > length(pf_m_real)
-            continue
+            return nothing
         end
 
         # C: sltE = SlaterElm_real + (qpidx+qpStart)*Nsite2*Nsite2
@@ -5699,6 +5701,24 @@ function update_m_all_real!(
             inv_m_real[inv_offset+msa*n_size+msj+1] += vec2[msj+1]
         end
     end
+
+    team = state.workspace.hop_team
+    if team !== nothing
+        vmc_hop_dispatch!(team) do slot
+            tid = Threads.threadid()
+            first_qp = qp_start + (slot * (qp_end - qp_start)) ÷ (team.workers + 1)
+            last_qp = qp_start + ((slot + 1) * (qp_end - qp_start)) ÷ (team.workers + 1) - 1
+            for qpidx in first_qp:last_qp
+                update_plane!(qpidx, state.workspace.hop_thread_vec1_real[tid],
+                              state.workspace.hop_thread_vec2_real[tid])
+            end
+        end
+    else
+        for qpidx = qp_start:(qp_end-1)
+            update_plane!(qpidx, vec1, vec2)
+        end
+    end
+    return nothing
 end
 
 """

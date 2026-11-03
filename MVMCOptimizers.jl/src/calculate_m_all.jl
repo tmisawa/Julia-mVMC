@@ -674,7 +674,8 @@ function calculate_m_all_real!(
     qp_end::Int,
     n_site::Int,
     n_elec::Int,
-    workspace::PfaPackWorkspace
+    workspace::PfaPackWorkspace;
+    team = nothing,
 )::Int
     qp_num = qp_end - qp_start
     n_size = n_elec
@@ -835,7 +836,8 @@ function calculate_m_all_real!(
     qp_end::Int,
     n_site::Int,
     n_elec::Int,
-    threaded_workspace::ThreadedPfaPackWorkspace
+    threaded_workspace::ThreadedPfaPackWorkspace;
+    team = nothing,
 )::Int
     qp_num = qp_end - qp_start
     n_size = n_elec
@@ -852,8 +854,8 @@ function calculate_m_all_real!(
     # whole PhysCal even though back-to-back kernel calls improved.
     partial_pool_too_small = qp_num < n_threads &&
                              qp_num * n_size^3 < 32_768 * n_threads
-    if n_threads == 1 || qp_num < 2 || partial_pool_too_small || threadid() != 1 ||
-       ccall(:jl_in_threaded_region, Cint, ()) != 0
+    if team === nothing && (n_threads == 1 || qp_num < 2 || partial_pool_too_small || threadid() != 1 ||
+       ccall(:jl_in_threaded_region, Cint, ()) != 0)
         # Static scheduling requires the primary thread outside a threaded region.
         # Nested/worker callers retain a serial path with their own scratch.
         serial_workspace = get_thread_workspace(threaded_workspace)
@@ -870,10 +872,10 @@ function calculate_m_all_real!(
     info = Atomic{Int}(0)
 
     # Process each QP index in parallel
-    @threads :static for qpidx in 1:qp_num
+    function process_qp!(qpidx)
         # Skip if error already occurred
         if info[] != 0
-            continue
+            return nothing
         end
 
         # Get thread-local workspace
@@ -915,6 +917,20 @@ function calculate_m_all_real!(
 
         # Update pf_m_array (thread-safe since each thread writes to different index)
         pf_m_array[qpidx] = pf_m[]
+    end
+
+    if team === nothing
+        @threads :static for qpidx in 1:qp_num
+            process_qp!(qpidx)
+        end
+    else
+        vmc_hop_dispatch!(team) do slot
+            first_qp = 1 + (slot * qp_num) ÷ (team.workers + 1)
+            last_qp = ((slot + 1) * qp_num) ÷ (team.workers + 1)
+            for qpidx in first_qp:last_qp
+                process_qp!(qpidx)
+            end
+        end
     end
 
     return info[]

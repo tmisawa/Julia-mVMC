@@ -1,0 +1,130 @@
+julia_version = "1.13.3"
+
+[[cases]]
+workload = "opt"
+speedup = 1.0051655815913787
+threads = 1
+
+    [cases.after]
+    median = 77.077927617
+    seconds = [77.077927617, 77.074883715, 77.460758561]
+    min = 77.074883715
+    max = 77.460758561
+
+    [cases.before]
+    median = 77.476079941
+    seconds = [77.476079941, 76.56609532, 80.783636576]
+    min = 76.56609532
+    max = 80.783636576
+[[cases]]
+workload = "phys"
+speedup = 1.058324975539303
+threads = 1
+
+    [cases.after]
+    median = 4.384062533
+    seconds = [4.575849881, 4.384062533, 4.35188313]
+    min = 4.35188313
+    max = 4.575849881
+
+    [cases.before]
+    median = 4.639762873
+    seconds = [4.639762873, 4.606100761, 4.645875426]
+    min = 4.606100761
+    max = 4.645875426
+[[cases]]
+workload = "opt"
+speedup = 1.8574331122347063
+threads = 4
+
+    [cases.after]
+    median = 39.793445869
+    seconds = [39.793445869, 39.143399983, 40.129327024]
+    min = 39.143399983
+    max = 40.129327024
+
+    [cases.before]
+    median = 73.913664007
+    seconds = [74.342447399, 73.913664007, 73.746372751]
+    min = 73.746372751
+    max = 74.342447399
+[[cases]]
+workload = "phys"
+speedup = 1.7035054294193686
+threads = 4
+
+    [cases.after]
+    median = 2.618094134
+    seconds = [2.618094134, 2.619346067, 2.606245835]
+    min = 2.606245835
+    max = 2.619346067
+
+    [cases.before]
+    median = 4.459937572
+    seconds = [4.496802354, 4.459937572, 4.432894917]
+    min = 4.432894917
+    max = 4.496802354
+[[cases]]
+workload = "opt"
+speedup = 1.8259879527891587
+threads = 8
+
+    [cases.after]
+    median = 33.701597602
+    seconds = [33.475512102, 34.404361928, 33.701597602]
+    min = 33.475512102
+    max = 34.404361928
+
+    [cases.before]
+    median = 61.538711211
+    seconds = [61.538711211, 61.495633507, 62.279412508]
+    min = 61.495633507
+    max = 62.279412508
+[[cases]]
+workload = "phys"
+speedup = 1.6692165198973739
+threads = 8
+
+    [cases.after]
+    median = 2.262345507
+    seconds = [2.262345507, 2.28879932, 2.210531214]
+    min = 2.210531214
+    max = 2.28879932
+
+    [cases.before]
+    median = 3.776344494
+    seconds = [3.784893528, 3.776344494, 3.773833994]
+    min = 3.773833994
+    max = 3.784893528
+[[cases]]
+workload = "opt"
+speedup = 2.1832974001998218
+threads = 16
+
+    [cases.after]
+    median = 28.504248027
+    seconds = [28.968099262, 28.504248027, 28.14771905]
+    min = 28.14771905
+    max = 28.968099262
+
+    [cases.before]
+    median = 62.233250612
+    seconds = [62.646729399, 62.154725323, 62.233250612]
+    min = 62.154725323
+    max = 62.646729399
+[[cases]]
+workload = "phys"
+speedup = 2.0110270914273287
+threads = 16
+
+    [cases.after]
+    median = 1.900054891
+    seconds = [1.900054891, 1.910900999, 1.848698846]
+    min = 1.848698846
+    max = 1.910900999
+
+    [cases.before]
+    median = 3.821061861
+    seconds = [3.821061861, 3.823857277, 3.731503894]
+    min = 3.731503894
+    max = 3.823857277

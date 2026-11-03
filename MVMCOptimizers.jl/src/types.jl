@@ -239,6 +239,10 @@ mutable struct SamplingWorkspace
     # vectors for every Sherman–Morrison update.
     hop_vec1_real::Vector{Float64}
     hop_vec2_real::Vector{Float64}
+    # Independent QP planes can update concurrently without sharing hop scratch.
+    hop_thread_vec1_real::Vector{Vector{Float64}}
+    hop_thread_vec2_real::Vector{Vector{Float64}}
+    hop_team::Any
 
     # Cached arrays (computed once)
     loc_spn::Vector{Int}
@@ -262,6 +266,9 @@ mutable struct SamplingWorkspace
             zeros(ComplexF64, n_qp_full),
             zeros(Float64, n_size),
             zeros(Float64, n_size),
+            [zeros(Float64, n_size) for _ in 1:Threads.maxthreadid()],
+            [zeros(Float64, n_size) for _ in 1:Threads.maxthreadid()],
+            nothing,
             zeros(Int, n_site),  # loc_spn will be initialized later
             ThreadedPfaPackWorkspace(n_size),  # Thread-local workspaces for parallel Pfaffian calculations
             nothing,
