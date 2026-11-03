@@ -104,7 +104,10 @@ function with_vmc_real_sampler_team(f, data::ExpertModeData,
     n_size = 2data.modpara.nelec
     first_qp,last_qp = qp_split_range(length(state.slater_matrix.pf_m_real),ctx)
     n_qp = last_qp-first_qp
-    if vmc_inner_threading_requested(true) && n_qp>=2 && n_qp*n_size^2>=65536 &&
+    # Other proposal families retain their existing scheduling until their
+    # accepted updates have a measured parallel route of their own.
+    if data.modpara.nex_update_path == 0 && vmc_inner_threading_requested(true) &&
+       n_qp>=2 && n_qp*n_size^2>=65536 &&
        Threads.threadid()==1 && ccall(:jl_in_threaded_region,Cint,())==0
         return with_vmc_hop_team(f,state.workspace;qp_count=n_qp)
     end

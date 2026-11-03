@@ -1,6 +1,6 @@
 # CPU L128 threading (#92)
 
-The CPU sampler formerly updated accepted-hop inverse matrices serially even
+The ordinary real hopping-only CPU sampler formerly updated accepted-hop inverse matrices serially even
 with inner threading enabled. Launching static Julia tasks for every hop is
 slower than the serial update on this input. A sampling-call-scoped team now
 reuses at most `min(QPs, Julia threads) - 1` workers while the caller owns all
