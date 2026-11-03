@@ -65,4 +65,27 @@ Green integer columns exactly. The supplied-word-tape regression checks exact
 draw count, the configuration/counter history at every draw, all saved
 configuration arrays, and that no worker consumes RNG. Independent inverse
 residuals, unchanged C fixtures, mixed kernel statuses, batch tails and repeated
-reuse are separate checks. Performance tables are recorded after final validation.
+reuse are separate checks. The final results and validation evidence are linked below.
+
+## Full-workload results
+
+[2026-11-03 report and raw evidence](results/20261103/report.md): Julia 1.13.3,
+16 physical cores, Opt **62.233 → 28.504 s** and PhysCal **3.821 → 1.900 s**.
+All 1/4/8/16-core before/after output pairs pass with maximum numerical difference 0;
+full Opt/PhysCal RNG primitive traces and next 624 words agree exactly. The report
+records the remaining C/Rust gap and the different timing scopes.
+
+To regenerate the untimed full RNG diagnostics, run in each isolated checkout:
+
+```bash
+JULIA_MVMC_INNER_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+  julia +1.13 --threads=8 --project=. benchmark/cpu_l128/audit.jl \
+  "$bench_inputs" /tmp/julia-l128-rng-opt opt
+JULIA_MVMC_INNER_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+  julia +1.13 --threads=8 --project=. benchmark/cpu_l128/audit.jl \
+  "$bench_inputs" /tmp/julia-l128-rng-phys phys
+```
+
+For the before checkout use the current checkout's driver path with the before
+checkout's `--project`. Compare `rng.bin` as raw words and `rng.toml` as integer
+RNG metadata; compare numerical outputs separately with the abs/rel verifier.
