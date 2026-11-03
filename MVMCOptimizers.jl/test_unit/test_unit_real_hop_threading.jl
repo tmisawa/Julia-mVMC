@@ -142,3 +142,17 @@ end
         @test state.workspace.hop_team === nothing
     end
 end
+
+@testset "Persistent worker admission preserves other proposal families" begin
+    M=MVMCOptimizers
+    state=M.VMCOptimizationState(128,64,0,0,8,1,false,false)
+    withenv("JULIA_MVMC_INNER_THREADS"=>"1") do
+        for path in (1,2,3)
+            data=ExpertModeData()
+            data.modpara=ModParaParameters(nsite=128,nelec=64,nex_update_path=path)
+            M.with_vmc_real_sampler_team(data,state,M.serial_context()) do
+                @test state.workspace.hop_team === nothing
+            end
+        end
+    end
+end
