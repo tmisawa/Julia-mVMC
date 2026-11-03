@@ -29,6 +29,113 @@ end
 
 const PFAPACK_CALL_LOCK = ReentrantLock()
 
+# Accepted hops are short and frequent: creating static tasks for every hop
+# costs more than the rank-2 update. Keep N-1 workers for one sampling call;
+# the calling thread performs the remaining partition and owns the RNG.
+mutable struct VMCHopTeam
+    epoch::Threads.Atomic{Int}
+    completed::Threads.Atomic{Int}
+    started::Threads.Atomic{Int}
+    stop::Threads.Atomic{Bool}
+    job::Any
+    tasks::Vector{Task}
+    errors::Vector{Any}
+    workers::Int
+end
+
+@inline function _vmc_spin_pause()
+    ccall(:jl_cpu_pause, Cvoid, ())
+    GC.safepoint()
+end
+
+function _vmc_hop_worker!(team::VMCHopTeam, slot::Int)
+    # A spinning worker cannot migrate; keep it sticky for its whole lifetime.
+    current_task().sticky = true
+    epoch = 0
+    Threads.atomic_add!(team.started, 1)
+    while !team.stop[]
+        next_epoch = team.epoch[]
+        if next_epoch == epoch
+            _vmc_spin_pause()
+            continue
+        end
+        epoch = next_epoch
+        try
+            team.job(slot)
+        catch err
+            team.errors[slot] = CapturedException(err, catch_backtrace())
+        finally
+            Threads.atomic_add!(team.completed, 1)
+        end
+    end
+    return nothing
+end
+
+function with_vmc_hop_team(f, workspace::SamplingWorkspace; qp_count=length(workspace.pf_m_real_temp))
+    workspace.hop_team === nothing || return f()
+    workers = min(Threads.nthreads(),qp_count) - 1
+    workers > 0 || return f()
+    team = VMCHopTeam(Threads.Atomic{Int}(0), Threads.Atomic{Int}(0),
+                      Threads.Atomic{Int}(0), Threads.Atomic{Bool}(false),
+                      nothing, Task[], Any[nothing for _ in 1:workers], workers)
+    storage = task_local_storage()
+    previous = get(storage,:mvmc_hop_team_active,false)
+    try
+        for slot in 1:workers
+            push!(team.tasks, Threads.@spawn _vmc_hop_worker!(team, slot))
+        end
+        # Do not yield the caller onto a spinning task on its own thread.
+        while team.started[] != workers
+            _vmc_spin_pause()
+        end
+        workspace.hop_team = team
+        storage[:mvmc_hop_team_active] = true
+        return f()
+    finally
+        workspace.hop_team = nothing
+        storage[:mvmc_hop_team_active] = previous
+        team.stop[] = true
+        foreach(wait, team.tasks)
+    end
+end
+
+function with_vmc_real_sampler_team(f, data::ExpertModeData,
+                                    state::VMCOptimizationState, ctx::ParallelContext)
+    n_size = 2data.modpara.nelec
+    first_qp,last_qp = qp_split_range(length(state.slater_matrix.pf_m_real),ctx)
+    n_qp = last_qp-first_qp
+    if vmc_inner_threading_requested(true) && n_qp>=2 && n_qp*n_size^2>=65536 &&
+       Threads.threadid()==1 && ccall(:jl_in_threaded_region,Cint,())==0
+        return with_vmc_hop_team(f,state.workspace;qp_count=n_qp)
+    end
+    return f()
+end
+
+function vmc_hop_dispatch!(job, team::VMCHopTeam)
+    team.completed[] = 0
+    fill!(team.errors, nothing)
+    team.job = job
+    # Sequentially consistent atomic publication also publishes the closure
+    # and all matrix/configuration writes before workers read them.
+    Threads.atomic_add!(team.epoch, 1)
+    caller_error = nothing
+    try
+        job(0)
+    catch err
+        caller_error = CapturedException(err, catch_backtrace())
+    finally
+        while team.completed[] != team.workers
+            _vmc_spin_pause()
+        end
+        team.job = nothing
+    end
+    caller_error === nothing || throw(caller_error)
+    for err in team.errors
+        err === nothing || throw(err)
+    end
+    return nothing
+end
+
 function with_pfapack_call_lock(f)
     if get(ENV, "JULIA_MVMC_PFAPACK_LOCK", "1") == "0"
         return f()
@@ -61,6 +168,9 @@ end
 const VMC_COPY_MIN_WORK_ITEMS = 65536
 
 @inline function vmc_copy_threading_enabled(work_items::Integer, threaded::Bool)
+    # Persistent sampling workers own their threads until the sampling call
+    # returns. Its few bulk copies stay serial instead of spawning other tasks.
+    get(task_local_storage(),:mvmc_hop_team_active,false) && return false
     return vmc_inner_threading_enabled(
         work_items, threaded; min_work_per_thread = VMC_COPY_MIN_WORK_ITEMS,
     )
@@ -394,6 +504,18 @@ function merge_counter_accumulators!(dst::Vector{Int}, locals)
     return dst
 end
 
+struct VMCRealMainCalBatch
+    indices::Vector{Vector{Int}}
+    inverse::Array{Float64,4}
+    pfaffian::Matrix{Float64}
+    status::Matrix{Int}
+end
+
+function VMCRealMainCalBatch(n_size::Int, n_qp::Int, capacity::Int)
+    VMCRealMainCalBatch([zeros(Int,n_size) for _ in 1:capacity],
+        zeros(n_size,n_size,n_qp,capacity),zeros(n_qp,capacity),zeros(Int,n_qp,capacity))
+end
+
 mutable struct VMCMainCalScratch
     proj_cnt_new::Vector{Int}
     pf_m_new_real::Vector{Float64}
@@ -421,6 +543,7 @@ mutable struct VMCMainCalScratch
     calh1_thread_proj_cnt_new::Vector{Vector{Int}}
     calh1_thread_pf_m_new_real::Vector{Vector{Float64}}
     calh1_thread_acc::Vector{Float64}
+    real_batch::Union{Nothing,VMCRealMainCalBatch}
 end
 
 function VMCMainCalScratch(state::VMCOptimizationState)
@@ -451,6 +574,7 @@ function VMCMainCalScratch(state::VMCOptimizationState)
         Vector{Int}[],
         Vector{Float64}[],
         Float64[],
+        nothing,
     )
 end
 

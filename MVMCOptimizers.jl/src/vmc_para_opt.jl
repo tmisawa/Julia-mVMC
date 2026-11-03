@@ -231,7 +231,9 @@ function vmc_para_opt!(
 
             if i_flg_orbital_general == 0
                 if n_proj_bf == 0
-                    vmc_make_sample_real!(data, state, rng, timer; ctx = ctx)
+                    with_vmc_real_sampler_team(data,state,ctx) do
+                        vmc_make_sample_real!(data, state, rng, timer; ctx = ctx)
+                    end
                 else
                     vmc_bf_make_sample_real!(data, state, rng)
                 end

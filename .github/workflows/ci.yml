@@ -94,6 +94,15 @@ jobs:
           OMP_NUM_THREADS=1 JULIA_NUM_THREADS=2,0 julia --project=@. test/integration/ctest_equivalent.jl
           OMP_NUM_THREADS=1 JULIA_NUM_THREADS=2,0 julia --project=@. test/integration/phys_cal_equivalent.jl
 
+      - name: Run CPU worker and batching regressions
+        if: ${{ matrix.julia-version == '1.13' }}
+        shell: bash
+        run: |
+          OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 JULIA_NUM_THREADS=4,0 julia --project=@. -e '
+            include("MVMCOptimizers.jl/test_unit/test_unit_real_hop_threading.jl")
+            include("MVMCOptimizers.jl/test_unit/test_unit_real_maincal_batch.jl")
+            include("MVMCOptimizers.jl/test_unit/test_unit_green_threading.jl")'
+
       - name: Run examples (smoke test, JULIA_MVMC_EXAMPLE_STEPS=5)
         run: |
           for f in examples/*.jl; do

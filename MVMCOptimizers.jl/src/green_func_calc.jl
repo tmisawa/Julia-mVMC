@@ -1158,8 +1158,11 @@ function calculate_green_func_into!(
         accumulate_phys_cis_ajs!(dst, phys, idx, w, local_val)
     end
 
-    # 2-body Green's function (direct): <c†_i c_j c†_k c_l>
-    for (idx, term) in enumerate(data.green_two_terms)
+    # Each observable owns its slot; the sample loop and its accumulation
+    # order remain serial. Cyclic assignment balances expensive off-diagonal
+    # operators against cheap density operators in the same input list.
+    function direct_green!(idx)
+        term = data.green_two_terms[idx]
         ri = term.site1
         rj = term.site2
         rk = term.site3
@@ -1186,6 +1189,23 @@ function calculate_green_func_into!(
         )
 
         accumulate_phys_cis_ajs_ckt_alt_dc!(dst, phys, idx, w, local_val)
+    end
+
+    n_terms = length(data.green_two_terms)
+    parallel = vmc_inner_threading_requested(true) &&
+        n_terms * (2data.modpara.nelec) * get_n_qp_full(data) >= 65536 &&
+        Threads.threadid() == 1 && ccall(:jl_in_threaded_region, Cint, ()) == 0
+    if parallel
+        workers = Threads.nthreads()
+        Threads.@threads :static for slot in 1:workers
+            for idx in slot:workers:n_terms
+                direct_green!(idx)
+            end
+        end
+    else
+        for idx in 1:n_terms
+            direct_green!(idx)
+        end
     end
 
     # 2-body Green's function (product): <c†_i c_j> × conj(<c†_k c_l>)

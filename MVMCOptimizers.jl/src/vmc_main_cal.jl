@@ -3719,6 +3719,46 @@ end
 # Main Calculation Functions
 # ============================================================================
 
+function _prepare_real_maincal_batch!(
+    batch::VMCRealMainCalBatch, first_sample::Int, count::Int,
+    data::ExpertModeData, state::VMCOptimizationState,
+)
+    n_size, _, n_qp, _ = size(batch.inverse)
+    n_site = data.modpara.nsite
+    plane_size = (2n_site)^2
+    for sample in 1:count
+        copyto!(batch.indices[sample],1,state.electron_config.ele_idx,
+                (first_sample+sample-1)*n_size+1,n_size)
+    end
+    with_pfapack_call_lock() do
+        Threads.@threads :static for item in 0:count*n_qp-1
+            qp = item % n_qp + 1
+            sample = item ÷ n_qp + 1
+            ws = get_thread_workspace(state.workspace.pfapack_workspace)
+            pf = Ref(0.0)
+            batch.status[qp,sample] = calculate_m_all_child_real!(
+                batch.indices[sample],
+                @view(state.slater_matrix.slater_elm_real[(qp-1)*plane_size+1:qp*plane_size]),
+                @view(batch.inverse[:,:,qp,sample]),pf,ws.buf_m_real,ws.iwork,
+                ws.v_t_real,ws.m_work_real,n_site,n_size)
+            batch.pfaffian[qp,sample] = pf[]
+        end
+    end
+    return nothing
+end
+
+function _publish_real_maincal_batch!(batch::VMCRealMainCalBatch, slot::Int,
+                                     state::VMCOptimizationState)
+    n_size, _, n_qp, _ = size(batch.inverse)
+    for qp in 1:n_qp
+        batch.status[qp,slot] == 0 || return batch.status[qp,slot]
+    end
+    count = n_size^2*n_qp
+    copyto!(state.slater_matrix.inv_m_real,1,batch.inverse,(slot-1)*count+1,count)
+    copyto!(state.slater_matrix.pf_m_real,1,batch.pfaffian,(slot-1)*n_qp+1,n_qp)
+    return 0
+end
+
 """
     vmc_main_cal!(data::ExpertModeData, state::VMCOptimizationState)
 
@@ -3788,6 +3828,25 @@ function vmc_main_cal!(
         allow_inner_threads::Bool,
     )
         @debug "VMCMainCal worker sample range" sample_range length_ele_idx=length(worker_state.electron_config.ele_idx) length_ele_cfg=length(worker_state.electron_config.ele_cfg) length_ele_num=length(worker_state.electron_config.ele_num) length_ele_proj_cnt=length(worker_state.electron_config.ele_proj_cnt)
+
+        # Factor a bounded group of saved samples, then consume it in the
+        # original sample order. This fills a 16-worker pool with eight QPs
+        # without parallelizing the sample reductions or copying whole states.
+        batch = nothing
+        batch_first = -1
+        batch_count = 0
+        if !all_complex && allow_inner_threads && vmc_inner_threading_requested(true) &&
+           n_size >= 64 && n_qp_full >= 2 && Threads.threadid()==1 &&
+           ccall(:jl_in_threaded_region,Cint,())==0 &&
+           length(worker_state.electron_config.ele_idx)>=n_vmc_sample*n_size
+            capacity = max(2,min(8,cld(Threads.nthreads(),n_qp_full)))
+            cached = local_acc.main_cal_scratch.real_batch
+            if cached === nothing || size(cached.inverse)!=(n_size,n_size,n_qp_full,capacity)
+                cached = VMCRealMainCalBatch(n_size,n_qp_full,capacity)
+                local_acc.main_cal_scratch.real_batch = cached
+            end
+            batch = cached
+        end
 
         # Sample loop
         for sample_value in sample_range
@@ -3901,7 +3960,14 @@ function vmc_main_cal!(
             ctimer_start!(c_timer, 40)
             info = 0
             if !all_complex
-                if allow_inner_threads
+                if batch !== nothing
+                    if sample < batch_first || sample >= batch_first+batch_count
+                        batch_first = sample
+                        batch_count = min(length(batch.indices),last(sample_range)-sample+1)
+                        _prepare_real_maincal_batch!(batch,sample,batch_count,data,worker_state)
+                    end
+                    info = _publish_real_maincal_batch!(batch,sample-batch_first+1,worker_state)
+                elseif allow_inner_threads
                     info = calculate_m_all_real!(
                         ele_idx,
                         1,
@@ -4672,7 +4738,7 @@ function _accumulate_slater_buffer_fcmp_fast!(
     n_slater::Int,
 )
     workers = Threads.nthreads()
-    parallel = vmc_inner_threading_requested(true) && n_qp_full >= workers &&
+    parallel = vmc_inner_threading_requested(true) && n_qp_full >= 2 &&
         n_qp_full * n_size_sq >= 32768 && Threads.threadid() == 1 &&
         ccall(:jl_in_threaded_region, Cint, ()) == 0
     if parallel
