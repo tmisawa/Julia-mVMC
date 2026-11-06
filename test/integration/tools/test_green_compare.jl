@@ -117,3 +117,17 @@ end
         @test occursin("missing", compare_green_one(joinpath(dir, "nope.dat"), a).detail)
     end
 end
+
+@testset "green_compare: real/imag columns are compared as one complex value" begin
+    mktempdir() do dir
+        # |z| = 5.5e-3 with a cancelling Im = -1.5e-4: an Im error of 1.2e-12
+        # is 2e-10 of |z| (passes rtol 1e-9) although it exceeds rtol*|Im| + atol.
+        a = _wf(dir, "a.dat", "0 0 4 0 4 1 0 1 -5.5e-03 -1.545030421e-04\n")
+        b = _wf(dir, "b.dat", "0 0 4 0 4 1 0 1 -5.5e-03 -1.545030409e-04\n")
+        @test compare_green_two_dc(b, a).ok
+        # A 1e-11 change is 1.8e-9 of |z|: fails.
+        c = _wf(dir, "c.dat", "0 0 4 0 4 1 0 1 -5.5e-03 -1.545030321e-04\n")
+        r = compare_green_two_dc(c, a)
+        @test !r.ok && occursin("out of tolerance", r.detail)
+    end
+end

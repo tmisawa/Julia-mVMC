@@ -10,7 +10,8 @@
 #      the indexed files) is part of the bit-for-bit completion condition, and
 #      the existing harnesses' strip()+split() would silently mask a regression.
 #   2. Numeric fallback when bytes differ: integer index columns must still match
-#      exactly; float values compared with `isapprox(rtol, atol)`.
+#      exactly; each `real imag` pair is compared as one complex value with
+#      `isapprox(rtol, atol)` (|Δz| <= max(atol, rtol*|z|)).
 #
 # Per-quantity tolerances mirror test/integration/runtests.jl's split between
 # linear accumulators and product/squared accumulators (which pick up amplified
@@ -84,20 +85,24 @@ function _compare_columnar(jl_path, c_path, n_int::Int; rtol, atol)
                 )
             end
         end
-        for k = (n_int+1):width
-            a = parse(Float64, jr[k])
-            b = parse(Float64, cr[k])
-            ae = abs(a - b)
-            max_abs = max(max_abs, ae)
-            max_rel = max(max_rel, ae / max(abs(b), atol))
-            nvals += 1
-            if !isapprox(a, b; rtol = rtol, atol = atol)
-                return GreenCompareResult(
-                    false, false, true, nvals, max_abs, max_rel, rtol, atol,
-                    "value out of tolerance at row $r col $k: julia=$a ref=$b " *
-                    "(abs=$ae, rtol=$rtol, atol=$atol)",
-                )
-            end
+        # The two value columns are one complex Green value computed in complex
+        # arithmetic (Pfaffian ratios), so their roundoff mixes: compare the
+        # complex value with `isapprox`, i.e. |Δz| <= max(atol, rtol*|z|). A
+        # per-column relative test would scale the error of a cancelling small
+        # imaginary part by that part alone (Julia-mVMC#95: heisenberg_chain_fsz
+        # direct row 17, Im -1.5e-4 of |z| 5.5e-3).
+        za = complex(parse(Float64, jr[n_int+1]), parse(Float64, jr[n_int+2]))
+        zb = complex(parse(Float64, cr[n_int+1]), parse(Float64, cr[n_int+2]))
+        ae = abs(za - zb)
+        max_abs = max(max_abs, ae)
+        max_rel = max(max_rel, ae / max(abs(zb), atol))
+        nvals += 2
+        if !isapprox(za, zb; rtol = rtol, atol = atol)
+            return GreenCompareResult(
+                false, false, true, nvals, max_abs, max_rel, rtol, atol,
+                "value out of tolerance at row $r: julia=$za ref=$zb " *
+                "(abs=$ae, rtol=$rtol, atol=$atol)",
+            )
         end
     end
     return GreenCompareResult(
