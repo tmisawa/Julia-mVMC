@@ -8,7 +8,7 @@ using Printf
 # test/integration/test_run_phys_cal_contract.jl.
 
 # Independent copy of C's OutputTimerPhysCal label/id layout
-# (extern/mVMC-1.3.0/src/mVMC/vmcclock.c). If the writer reuses the ParaOpt
+# (mVMC 1.4.0 src/mVMC/vmcclock.c `OutputTimerPhysCal`, line 140). If the writer reuses the ParaOpt
 # labels here, or drops/reorders a line, this list will not match.
 const C_PHYS_CAL_TIMER_LINES = [
     "All                         [0] ",
@@ -49,6 +49,7 @@ const C_PHYS_CAL_TIMER_LINES = [
     "      GreenFunc2           [51] ",
     "      addPhysCA            [52] ",
     "      addPhysCACA          [53] ",
+    "      addPhysTwist         [54] ",
     "    Lanczos1               [43] ",
     "    Lanczos2               [44] ",
     "  UpdateSlaterElm          [20] ",

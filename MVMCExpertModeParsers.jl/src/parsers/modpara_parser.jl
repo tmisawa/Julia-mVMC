@@ -62,6 +62,7 @@ function parse_modpara_content(content::String)::ParseResult{ModParaParameters}
     end
 
     success = length(context.errors) == 0
+    success && normalize_sr_cg_modpara!(params)
     return ParseResult{ModParaParameters}(
         success,
         success ? params : nothing,
@@ -161,11 +162,20 @@ function parse_modpara_parameter!(
         # NSRCG: 0 = direct solver (LAPACK), !=0 = CG solver
         params.nsrcg = safe_parse_int(value, 0)  # Default is 0 (from C SetDefaultValuesModPara)
     elseif name == "useDiagScale"
-        # C CG option: diagonal scaling / preconditioned CG
+        # C CG option: DiagScale-preconditioned CG
         params.use_diag_scale = safe_parse_int(value, 0)
     elseif name == "RescaleSmat"
-        # C CG option: S-matrix rescaling
+        # C CG option: Slater-block S-matrix rescaling before SR-CG
         params.rescale_smat = safe_parse_int(value, 0)
+    elseif name == "NSRCGFallback"
+        # C 1.4.0: retry a failed SR-CG solve with the other CG variant
+        params.nsrcg_fallback = safe_parse_int(value, 0)
+    elseif name == "NSRCGAbortOnFail"
+        # C 1.4.0: abort on a failed SR-CG solve (default 1)
+        params.nsrcg_abort_on_fail = safe_parse_int(value, 1)
+    elseif name == "reweight"
+        # C 1.4.0 sample reweighting; parsed, rejected by the runtime when 1
+        params.reweight = safe_parse_int(value, 0)
 
     # Complex flag
     elseif name == "ComplexType"
@@ -198,4 +208,31 @@ function parse_modpara_parameter!(
     else
         push!(context.warnings, "Unknown parameter: $name")
     end
+end
+
+"""
+    normalize_sr_cg_modpara!(params::ModParaParameters) -> ModParaParameters
+
+Apply the SR-CG option normalization of C mVMC 1.4.0 `ReadDefFileNInt`
+(`readdef.c:927-944`), in C order:
+
+- `NSRCG 2` selects DiagScale-preconditioned CG: `useDiagScale = 1`, `NSRCG = 1`;
+- `NSRCGFallback` and `NSRCGAbortOnFail` become 0/1 (`x != 0`);
+- `useDiagScale` with `NSRCG != 1` is cleared (C prints "Use direct method instead").
+
+The fatal C checks that follow (`RescaleSmat` without `NSRCG == 1`, SR-CG with a
+negative `DSROptStepDt`, `reweight 1`) belong to the runtime contract in
+`MVMCOptimizers.validate_supported_modpara`.
+"""
+function normalize_sr_cg_modpara!(params::ModParaParameters)
+    if params.nsrcg == 2
+        params.use_diag_scale = 1
+        params.nsrcg = 1
+    end
+    params.nsrcg_fallback = params.nsrcg_fallback != 0 ? 1 : 0
+    params.nsrcg_abort_on_fail = params.nsrcg_abort_on_fail != 0 ? 1 : 0
+    if params.use_diag_scale != 0 && params.nsrcg != 1
+        params.use_diag_scale = 0
+    end
+    return params
 end

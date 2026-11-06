@@ -39,3 +39,10 @@ covers rounding of the real RBM scaled draw (magnitude <= .005, subtract/multipl
 then divide by Nneuron=1); real Slater draws use binary-exact subtract/scale.
 This small local operation bound is not a tolerance for sampling drift.
 The Manifest is not part of this patch. No Rust-generated expected values.
+## mVMC 1.4.0 re-verification (Julia-mVMC#95, 2026-11-06)
+
+The C reference moved to mVMC 1.4.0 (`v1.4.0`, `e83aa6cb`). `InitParameter` is
+byte-identical in 1.4.0 `src/mVMC/parameter.c` (still lines 35–92; whole-file
+SHA256 `801273e47a6f7b3390244a6bdcb74fa09825791e8b8283d2d6d7e36d25470cad`, changed
+only in the DH offsets for spin Jastrow, `NSpinJastrowIdx = 0` here), so the probe
+and fixture are unchanged and are valid 1.4.0 references.

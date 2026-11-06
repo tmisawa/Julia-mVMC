@@ -1,4 +1,4 @@
-/* Unchanged mVMC1.3.0 StochasticOptCG_Main definition.
+/* Unchanged mVMC 1.4.0 StochasticOptCG_Main definition (stcopt_cg_impl.c:484-591).
  * Copyright (C) 2016 University of Tokyo; GPL-3.0-or-later.
  * Origin https://github.com/issp-center-dev/mVMC ; see c_cg_small_spd.md.
  */
@@ -21,6 +21,7 @@ int fn_StochasticOptCG_Main(const int nSmat, double *VecCG, MPI_Comm comm) {
   int max_iter = (NSROptCGMaxIter > 0 ? NSROptCGMaxIter : nSmat);
   double delta, beta;
   double alpha;
+  double delta_new, dq;
   double cg_thresh = DSROptCGTol*DSROptCGTol * (double)nSmat * (double)nSmat;
   //double cg_thresh = DSROptRedCut;
 
@@ -55,6 +56,7 @@ int fn_StochasticOptCG_Main(const int nSmat, double *VecCG, MPI_Comm comm) {
   }
 
   delta = xdot(nSmat, r, r);
+  if (!isfinite(delta)) return -(0+1);
 
   for(iter=0; iter < max_iter; iter++){
     //check convergence 
@@ -62,11 +64,15 @@ int fn_StochasticOptCG_Main(const int nSmat, double *VecCG, MPI_Comm comm) {
 #ifdef _DEBUG_STCOPT_CG
     fprintf(stderr, "delta = %lg, cg_thresh = %lg\n", delta, cg_thresh);
 #endif
-    if (delta < cg_thresh) break;
+    if (!isfinite(delta)) return -(iter+1);
+    if (fabs(delta) < cg_thresh) break;
 
     // compute vector q=S*d
     fn_operate_by_S(nSmat, d, q, VecCG, comm);
-    alpha = delta/xdot(nSmat,d,q);
+    dq = xdot(nSmat,d,q);
+    if (!isfinite(dq) || fabs(dq) < 1.0e-20) return -(iter+1);
+    alpha = delta/dq;
+    if (!isfinite(alpha)) return -(iter+1);
   
     // update solution vector x=x+alpha*d
     #pragma omp parallel for default(shared) private(si)
@@ -89,9 +95,16 @@ int fn_StochasticOptCG_Main(const int nSmat, double *VecCG, MPI_Comm comm) {
         r[si] = r[si] - alpha*q[si];
       }
     }
-    beta = xdot(nSmat,r,r)/delta;
+    delta_new = xdot(nSmat,r,r);
+    if (!isfinite(delta_new)) return -(iter+1);
+    if (fabs(delta) < 1.0e-20) return -(iter+1);
+    beta = delta_new/delta;
+    if (!isfinite(beta)) return -(iter+1);
 
     //update the norm of residual vector r
+    /* Use delta=beta*delta (mathematically delta_new) to preserve the legacy
+       FP order for SR-CG reference data; the DiagScale branch uses
+       delta=delta_new directly. */
     delta = beta*delta;
     // update direction vector d
     #pragma omp parallel for default(shared) private(si)
@@ -100,6 +113,7 @@ int fn_StochasticOptCG_Main(const int nSmat, double *VecCG, MPI_Comm comm) {
       d[si] = r[si] + beta*d[si];
     }
   }
+  if (iter == max_iter && fabs(delta) >= cg_thresh) return -(max_iter+1);
 
 #ifdef _DEBUG_STCOPT_CG
   fprintf(stderr, "DEBUG in %s (%d): iter = %d\n", __FILE__, __LINE__, iter);

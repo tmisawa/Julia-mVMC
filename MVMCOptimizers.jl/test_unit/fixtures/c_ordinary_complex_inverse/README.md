@@ -52,3 +52,11 @@ that all supported finite models fail. Script/log/status retained externally
 Focused test requires Julia1.13.1 and existing Manifest09ebd06d, actual BLAS1.
 No SR fixture adoption, full sampling/MPI/wholeworkspace or nativeMac claim.
 Candidate publication and full regression require parent source review.
+
+## mVMC 1.4.0 re-verification (Julia-mVMC#95, 2026-11-06)
+
+The C reference moved to mVMC 1.4.0 (`v1.4.0`, `e83aa6cb`). `ltl2inv/invert.tcc`
+(SHA256 `d477c7d2bb6d2b0c29872d06ec75fd7e804e1e30ace00888b77d31d2c74b821c`),
+`ilaenv_lauum.cc`, `ilaenv_wrap.f90` and `ltl2inv.cc` are byte-identical in 1.4.0;
+the fixture is unchanged and is a valid 1.4.0 reference. `extern/mVMC-1.3.0` paths
+in the original acquisition notes are historical.

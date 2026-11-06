@@ -475,7 +475,8 @@ end
 Set OptFlag for orbital parameters in data.optimization_flags.
 C implementation: normalized orbital header sum, independent of AllComplexFlag.
 AP copies real flags when complex; P writes the normalized header flag.
-Noncomplex AP imaginary false is a safe extension, not native malloc zero.
+Noncomplex AP imaginary flags are false: mVMC 1.4.0 `GetInfoOpt`
+(`readdef.c:2432-2447`) writes 0 (1.3.0 left the slot unwritten).
 where fidx = NProj + FlagRBM * NRBM + orbital_idx.
 """
 function set_orbital_opt_flags!(data::ExpertModeData, opt_flags::Dict{Int,Int}; orbital_complex::Bool)
@@ -513,8 +514,8 @@ function set_orbital_opt_flags!(data::ExpertModeData, opt_flags::Dict{Int,Int}; 
                           idx >= data.n_orbital_anti_parallel
             # GetInfoOptOrbitalParalell writes the normalized header flag even
             # when the parallel real flag is zero. GetInfoOpt copies real flags.
-            # For noncomplex AP, C leaves this malloc-backed slot unwritten;
-            # false is a deterministic safe-port extension, not native C zero.
+            # For noncomplex AP, mVMC 1.4.0 GetInfoOpt writes 0 (readdef.c:2439-2441);
+            # 1.3.0 left this malloc-backed slot unwritten.
             data.optimization_flags[2*fidx+2] =
                 is_complex && (is_parallel || opt_flag != 0)
         end

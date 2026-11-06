@@ -1,4 +1,4 @@
-/* Verbatim: extern/mVMC-1.3.0/src/mVMC/vmcmake.c lines 515-545 (GPLv3, see that file). */
+/* Verbatim: mVMC 1.4.0 (e83aa6cb) src/mVMC/vmcmake.c lines 620-650 (GPLv3, see that file). */
 void makeCandidate_hopping(int *mi_, int *ri_, int *rj_, int *s_, int *rejectFlag_,
                            const int *eleIdx, const int *eleCfg) {
   const int icnt_max = Nsite*Nsite;

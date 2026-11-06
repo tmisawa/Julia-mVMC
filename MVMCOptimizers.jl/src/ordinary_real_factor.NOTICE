@@ -1,5 +1,5 @@
 ordinary_real_factor.jl is a modified Julia translation of Michael Wimmer's
-PFAPACK DSKTF2 (upper/normal) and DSKR2, distributed with mVMC1.3.0.
+PFAPACK DSKTF2 (upper/normal) and DSKR2, distributed with mVMC 1.4.0 (unchanged since 1.3.0).
 Authoritative source: src/pfapack/fortran/dsktf2.f lines208-260 and
 dskr2.f lines162-178. The source-adjacent ordinary_real_factor.LICENSE
 reproduces upstream LapackLicence copyright notices, conditions and disclaimer.

@@ -48,3 +48,10 @@ pivots[1,2,1,4] (genuine net swap). The literal dyadic inverse is checked by
 S*X=I and the ordinary child's row-major storage. All arithmetic is exactly
 representable; no N6 forward budget or new tolerance follows. Existing native
 N6 first-walker diagnostics are separate evidence, not imported golden values.
+
+## mVMC 1.4.0 re-verification (Julia-mVMC#95, 2026-11-06)
+
+The C reference moved to mVMC 1.4.0 (`v1.4.0`, `e83aa6cb`). `ltl2inv/invert.tcc`
+and the rest of `ltl2inv` are byte-identical in 1.4.0; the fixture is unchanged
+and is a valid 1.4.0 reference. `extern/mVMC-1.3.0` paths in the original
+acquisition notes are historical.

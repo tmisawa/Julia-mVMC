@@ -1,6 +1,8 @@
-/* Optional fixed-input oracle: verbatim C CG Main/operator, serial only.
- * See ctest_cg_refresh.md. No Cargo/build-script dependency. */
+/* Optional fixed-input oracle: verbatim C 1.4.0 CG Mains/operator, serial only.
+ * See ctest_cg_refresh.md. No Cargo/build-script dependency.
+ * Usage: probe <input> <output> [diag]   (diag: DiagScale-preconditioned Main) */
 #include <inttypes.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -53,7 +55,9 @@ static void write_bits(FILE *f, const double *v, size_t n) {
     fputc('\n', f);
 }
 int main(int argc, char **argv) {
-    if (argc != 3) return 2;
+    if (argc != 3 && argc != 4) return 2;
+    int precon = argc == 4 && strcmp(argv[3], "diag") == 0;
+    if (argc == 4 && !precon) return 2;
     FILE *input = fopen(argv[1], "r");
     if (!input) return 3;
     int ch;
@@ -79,7 +83,8 @@ int main(int argc, char **argv) {
     fclose(input); /* Only independently archived input records are consumed. */
     FILE *out = fopen(argv[2], "w");
     if (!out) return 6;
-    fprintf(out, "# C Main/operator verbatim; serial LP64 OpenBLAS; tol=0 shift=1e-5\n");
+    fprintf(out, "# C 1.4.0 %s/operator verbatim; serial LP64 OpenBLAS; tol=0 shift=1e-5\n",
+            precon ? "StochasticOptPreconCG_DiagScale_Main" : "StochasticOptCG_Main");
     fprintf(out, "%d %d %d\n", n, NVMCSample, complex);
     write_bits(out, mean, n); write_bits(out, diag, n);
     write_bits(out, real, (size_t)n*NVMCSample);
@@ -93,7 +98,8 @@ int main(int argc, char **argv) {
     for (int limit = 1; limit <= 41; ++limit) {
         memcpy(trial, base, count*sizeof(*base));
         NSROptCGMaxIter = limit;
-        int iterations = fn_StochasticOptCG_Main(n, trial, 0);
+        int iterations = precon ? fn_StochasticOptPreconCG_DiagScale_Main(n, trial, 0)
+                              : fn_StochasticOptCG_Main(n, trial, 0);
         fprintf(out, "%d %d ", limit, iterations);
         write_bits(out, trial, n);
         write_bits(out, trial + d_offset + n, n);

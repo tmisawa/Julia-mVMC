@@ -298,3 +298,70 @@ function build_jastrow_idx_matrix(filepath::String, nsite::Int)::Tuple{Matrix{In
 
     return (jastrow_idx, n_jastrow_idx)
 end
+
+"""
+    jastrow_idx_matrix_c_contract(content::AbstractString, nsite::Int, n_jastrow_idx::Int)
+        -> Matrix{Int}
+
+Strict reader of the jastrowidx.def body, C mVMC 1.4.0 `GetInfoJastrow`
+(`readdef.c:2477-2587`). After the five header lines C reads exactly
+`Nsite*(Nsite-1)` integer triples `i j n` and then the `idx flag` pairs:
+
+- `i != j`, `0 <= i, j < Nsite` and `0 <= n < NJastrowIdx`;
+- every directed pair `(i, j)` exactly once (no duplicates, none missing);
+- `(i, j)` and `(j, i)` carry the same class;
+- exactly `NJastrowIdx` opt-flag rows follow (`GetInfoOpt` count).
+
+Returns the symmetric table (`-1` on the diagonal, 0-based classes); throws an
+`ErrorException` naming the first violation, where C reports `ReadDefFileError`.
+1.3.0 accepted inconsistent, duplicated or incomplete tables silently.
+"""
+function jastrow_idx_matrix_c_contract(
+    content::AbstractString,
+    nsite::Int,
+    n_jastrow_idx::Int,
+)::Matrix{Int}
+    nsite > 0 || error("Jastrow: Nsite must be positive before reading jastrowidx.def")
+    table = fill(-1, nsite, nsite)
+    n_jastrow_idx > 0 || return table
+    lines = split(content, '\n')
+    IGNORE_LINES_IN_DEF = 5
+    length(lines) >= IGNORE_LINES_IN_DEF || error("Jastrow: missing header lines")
+    tokens = String[]
+    for line in lines[(IGNORE_LINES_IN_DEF+1):end]
+        append!(tokens, split(line))
+    end
+    expected = nsite * (nsite - 1)
+    UNREAD = -2
+    directed = [i == j ? -1 : UNREAD for i = 1:nsite, j = 1:nsite]
+    for row = 1:expected
+        k = 3 * (row - 1)
+        vals = k + 3 <= length(tokens) ? tryparse.(Int, tokens[(k+1):(k+3)]) : nothing
+        (vals === nothing || any(isnothing, vals)) &&
+            error("Jastrow: failed to read Jastrow row $row")
+        i, j, n = vals
+        i == j && error("Jastrow: [Condition] i neq j at row $row")
+        (0 <= i < nsite && 0 <= j < nsite) ||
+            error("Jastrow: Site index is incorrect at row $row")
+        0 <= n < n_jastrow_idx ||
+            error("Jastrow: class index $n out of range [0, $n_jastrow_idx) at row $row")
+        directed[i+1, j+1] == UNREAD || error("Jastrow: duplicated pair ($i,$j) at row $row")
+        directed[i+1, j+1] = n
+        a, b = minmax(i, j)
+        if table[a+1, b+1] == -1
+            table[a+1, b+1] = n
+            table[b+1, a+1] = n
+        elseif table[a+1, b+1] != n
+            error("Jastrow: inconsistent class for pair ($a,$b) at row $row")
+        end
+    end
+    # Nsite*(Nsite-1) distinct directed pairs cover every off-diagonal cell, so
+    # C's explicit missing-pair checks cannot fire after the loop above.
+    remaining = length(tokens) - 3 * expected
+    n_opt = cld(remaining, 2)  # C GetInfoOpt counts each `%d ` read until EOF
+    n_opt == n_jastrow_idx ||
+        error("Jastrow: $n_opt opt-flag rows, expected NJastrowIdx = $n_jastrow_idx")
+    all(t -> tryparse(Int, t) !== nothing, tokens[(3*expected+1):end]) ||
+        error("Jastrow: invalid opt-flag row")
+    return table
+end

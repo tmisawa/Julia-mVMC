@@ -55,3 +55,9 @@ Rust result or fixture regeneration dependency. C authority above is source
 and LAPACK control-flow evidence, not a full native C/MPI execution claim.
 The focused test contains 59 assertions. Broader MPI/runner recovery is not
 established by this regression.
+
+## mVMC 1.4.0 re-verification (Julia-mVMC#95, 2026-11-06)
+
+The C reference moved to mVMC 1.4.0 (`v1.4.0`, `e83aa6cb`).
+`src/mVMC/stcopt_dposv.c` and `src/mVMC/stcopt.c` are byte-identical in 1.4.0
+(same SHA256 as above, same line numbers), so this contract is unchanged.

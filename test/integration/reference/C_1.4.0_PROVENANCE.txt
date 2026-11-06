@@ -1,0 +1,12 @@
+generator=test/integration/tools/regenerate_c_reference.sh
+generated_utc=2026-11-06T08:48:20Z
+source=mVMC v1.4.0 e83aa6cb (unmodified copy of AtelierArith/mvmc-rs extern/mVMC-1.4.0, nested StdFace 6fa4ef1f / blis a32257ee / pfapack ebaa11b7)
+vmc_out_sha256=8db8b86480ee9513f39ed0ecce63735bcba784d279f10de4347ccc1ea5cac71a
+arch=x86_64 kernel=Linux 6.8.0-147-generic
+gcc=gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+gfortran=GNU Fortran (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+mpich=MPICH Version: 4.2.0
+openblas=0.3.26+ds-1ubuntu0.1
+cmake_flags=-DCMAKE_BUILD_TYPE=Release -DGIT_SUBMODULE_UPDATE=OFF -DTesting=OFF -DMPI_C_COMPILER=/opt/mpich/bin/mpicc (C_FLAGS -O3 -DNDEBUG -fopenmp: OpenMP SIMD pragmas active, OMP_NUM_THREADS=1; USE_GEMMT=ON, bundled BLIS, OpenBLAS BLAS/LAPACK, no ScaLAPACK)
+threads=OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1, mpiexec -n 1 (nsrcg MPI files: -n 2)
+image=AtelierArith/mvmc-rs .devcontainer image sha256:b34e1fed725f (Ubuntu 24.04)

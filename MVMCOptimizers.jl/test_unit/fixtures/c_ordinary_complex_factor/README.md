@@ -17,3 +17,11 @@ distinguishes historical right-grouped Julia update (INFO1). Exact status/pivots
 are discrete controls; PF uses4EPS scalar budget, not computed-bit comparisons.
 Factor scalar checks concern this retained well-scaled/non-cancelling native6
 factor only; no512EPS unit floor, generic inverse bound or CG forward allowance.
+
+## mVMC 1.4.0 re-verification (Julia-mVMC#95, 2026-11-06)
+
+The C reference moved to mVMC 1.4.0 (`v1.4.0`, `e83aa6cb`). `src/mVMC/matrix.c`
+(SHA256 `849488176375102fbc3bab7001e0dc27dfa7c8e049fd90ee1d6248ebfba10764`), the
+nested PFAPACK (`ebaa11b7`) and `ltl2inv` sources are byte-identical in 1.4.0, so
+this fixture is unchanged and is a valid 1.4.0 reference. The commits above are
+the historical acquisition revision.

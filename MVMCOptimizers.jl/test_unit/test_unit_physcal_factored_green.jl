@@ -391,7 +391,7 @@ end
     # Regression guard for the C parity fix: every per-sampling file uses the
     # C-visible index `ismp + NDataIdxStart`, and each `zvo_out_XXX.dat` /
     # `zvo_var_XXX.dat` is truncated per sample (C InitFilePhysCal opens each
-    # sample with "w" — extern/mVMC-1.3.0/src/mVMC/initfile.c:79-90), so a file
+    # sample with "w" — mVMC 1.4.0 src/mVMC/initfile.c:77-95), so a file
     # never accumulates lines from earlier samples or runs.
     data = ExpertModeData()
     data.modpara.nsite = 2

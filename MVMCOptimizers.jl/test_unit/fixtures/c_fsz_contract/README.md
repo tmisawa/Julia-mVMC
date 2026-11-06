@@ -264,3 +264,30 @@ Before this addition, the untouched root tests had SHA256
 The authorized execution must record source closure before/after, Julia
 1.13.1, actual loaded package paths, actual BLAS provider and thread count.
 Manifest and generated runtime/cache artifacts must not be committed.
+## mVMC 1.4.0 re-verification (Julia-mVMC#95, 2026-11-06)
+
+The C reference moved to mVMC 1.4.0 (`v1.4.0`, `e83aa6cb`). Re-run on Linux
+x86_64, GNU 13.3.0, `-O0 -ffp-contract=off`, LP64 OpenBLAS 0.3.26 (pthread,
+library SHA256 `bfc7492a…5308e`), one thread:
+
+- `rows.txt` / `sum-overflow.txt`: `bash generate_rows.sh <mVMC-1.4.0>/src` exits 0;
+  `matrix.c`, PFAPACK and `ltl2inv` are byte-identical in 1.4.0 and both outputs
+  compare equal (`cmp`).
+- `complex-initializer-101.txt`: 1.4.0 changed `vmcmake_fsz.c`
+  (SHA256 `f6322ed48eb186c097074ea9287906fcf58129a44d91b932d0a6750ea9daba66`) and
+  `projection.c` (`9459b9819d08bd67dc40bc9a2103a43851667af3775e4a32752f1f7f559e5794`):
+  `makeInitialSample_fsz` moved to lines 461–556 and gained a t-J branch for
+  `NExUpdatePath` 4/5, and `MakeProjCnt` (58–166) a spin-Jastrow block. The 1.4.0
+  extraction (`sed -n '1,21p;461,556p'`, `'1,21p;58,166p'`, `matrix.c`
+  `'1,21p;77,179p'`) with `complex_probe.c` plus the 1.4.0 globals
+  `int NExUpdatePath=0,NSpinJastrowIdx=0,**SpinJastrowIdx;` reproduces
+  `complex-initializer-101.txt` byte for byte (SHA256 `b2a98556…8482c`).
+- `real-initializer-101.txt`: its acquisition input is not bundled, so it was not
+  re-run; in 1.4.0 `makeInitialSample_fsz_real` (`vmcmake_fsz_real.c` 447–541)
+  keeps the 1.3.0 loop verbatim in the branch taken for `NExUpdatePath` other than
+  4/5, so the recorded checkpoint is unchanged. It equals the re-run complex
+  record as before.
+
+The `generate_*.sh` scripts still check the 1.3.0 hashes they were written for;
+they document the historical acquisition.
+

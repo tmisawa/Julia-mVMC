@@ -44,7 +44,7 @@ With `file_index === nothing` (optimization) this writes the single
 With `file_index::Int` (PhysCal) it writes the C-indexed per-sample pair
 `zvo_out_<file_index:03d>.dat` / `zvo_var_<file_index:03d>.dat` and always
 truncates, matching C `InitFilePhysCal`, which opens each sample's file with
-`"w"` (`extern/mVMC-1.3.0/src/mVMC/initfile.c:79-90`).
+`"w"` (mVMC 1.4.0 `src/mVMC/initfile.c:77-95`).
 If `output_dir` is set, files are written under that directory (directory is created if needed).
 """
 function output_data!(data::ExpertModeData, state::VMCOptimizationState, step::Int; output_dir::Union{String,Nothing}=nothing, file_index::Union{Nothing,Int}=nothing)

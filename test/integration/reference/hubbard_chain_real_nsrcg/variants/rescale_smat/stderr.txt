@@ -1,0 +1,3 @@
+remark: FlagShift ( GJ ) is turned on.
+warning: SR-CG did not converge at iter=19 (max_iter=19).
+warning: SR-CG fallback is disabled. Continue with the approximate solution.

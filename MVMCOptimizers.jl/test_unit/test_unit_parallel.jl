@@ -213,7 +213,8 @@ using MVMCExpertModeParsers
     @test err isa ErrorException
     @test occursin("NSplitSize > 1 with SR-CG", sprint(showerror, err))
 
-    modpara.nsrcg = 2
+    modpara.nsrcg = 0
+    modpara.rescale_smat = 1
     err = try
         MVMCOptimizers.validate_supported_modpara(modpara)
         nothing
@@ -221,7 +222,7 @@ using MVMCExpertModeParsers
         e
     end
     @test err isa ErrorException
-    @test occursin("NSRCG >= 2", sprint(showerror, err))
+    @test occursin("RescaleSmat=1 requires NSRCG==1", sprint(showerror, err))
 end
 
 @testset "ModPara rnd_seed default matches C readdef.c:1967 (review F2)" begin

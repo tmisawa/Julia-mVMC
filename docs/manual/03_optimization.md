@@ -47,8 +47,11 @@ That path broadcasts the rank0 search vector and allreduces the sampled
 matrix-vector product inside `operate_by_s`, matching C's collective structure
 for `NSplitSize = 1`.
 
-Additional C CG modes are not ported yet: `NSRCG >= 2`, `useDiagScale != 0`,
-and `RescaleSmat != 0` are rejected with clear errors. `NSplitSize > 1` with
+The C mVMC 1.4.0 SR-CG modes are ported: `NSRCG = 2` / `useDiagScale`
+(DiagScale-preconditioned CG), `RescaleSmat`, `NSRCGFallback` and
+`NSRCGAbortOnFail` (default 1: a failed CG solve aborts). `RescaleSmat` without
+`NSRCG = 1`, SR-CG with `DSROptStepDt < 0` and `reweight = 1` are rejected, as in
+C 1.4.0 (reweighting is not ported). `NSplitSize > 1` with
 SR-CG is also rejected because the comm1-aware CG path is not implemented.
 OptTrans-derived QP sectors (`NQPOptTrans > 1` or active `OptTrans`) remain
 unsupported with `NSplitSize > 1`; use `NSplitSize = 1` for those inputs.
@@ -58,8 +61,8 @@ FSZ standard-projection `NQPFull > 1` (`NSPGaussLeg > 1` or
 The CI MPI smoke gate runs under `mpiexec` and checks rank0-only output,
 comm0 reductions, `VMCPhysCal` Green reductions, and failure-mode regressions:
 SR-CG `operate_by_s` collectives and a one-step `NSRCG = 1` C-reference
-comparison are exercised under `mpiexec -n 2`, while `NSRCG >= 2` and
-`NSplitSize > 1` with SR-CG or active OptTrans are rejected before MPI context
+comparison are exercised under `mpiexec -n 2`, while `RescaleSmat` without
+`NSRCG = 1` and `NSplitSize > 1` with SR-CG or active OptTrans are rejected before MPI context
 construction. This is a correctness smoke gate, not a performance or
 site-compatibility benchmark.
 

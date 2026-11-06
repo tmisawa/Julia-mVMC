@@ -1,5 +1,5 @@
 ordinary_complex_inverse.jl is a modified complex-only Julia translation of
-RuQing Xu's xrq-phys/Pfaffine invert.tcc, bundled by mVMC1.3.0, and the
+RuQing Xu's xrq-phys/Pfaffine invert.tcc, bundled by mVMC 1.4.0 (unchanged since 1.3.0), and the
 MPL-2.0 Julia port PfaPack.jl/src/utu2.jl by Terasaki/Misawa.
 Original invert.tcc SHAd477c7d2bb6d2b0c29872d06ec75fd7e804e1e30ace00888b77d31d2c74b821c;
 sktdsmx lines11-28; upper/full pipeline76-118. Full MPL license is adjacent.

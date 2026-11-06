@@ -1,5 +1,5 @@
 # Resident Slater assembly follows the C four-spin-block expressions directly,
-# avoiding basis GEMV reassociation. Source: mVMC-1.3.0/src/mVMC/slater.c:38-91;
+# avoiding basis GEMV reassociation. Source: mVMC 1.4.0 src/mVMC/slater.c:38-91 (unchanged from 1.3.0);
 # CPU counterpart: slater_update.jl:_update_slater_elm_fcmp_kernel!.
 struct SlaterAssembly
     parameter_a::CuArray{Int32,3}
