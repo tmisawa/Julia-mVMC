@@ -1,31 +1,38 @@
 using Test, LinearAlgebra
 using MVMCOptimizers
 
-@testset "C CG solves defined small SPD without an absolute denominator cutoff" begin
+@testset "C 1.4.0 CG stops a tiny SPD system at the absolute 1e-20 guard" begin
     fields = split(read(joinpath(@__DIR__, "fixtures", "c_cg_small_spd.txt"), String))
-    iterations = parse(Int, fields[1])
+    status = parse(Int, fields[1])
     solution, residual, direction = parse.(Float64, fields[2:4])
     # Binary-exact one-dimensional SPD: O=2^-54, S=2^-108, g=2^-54.
-    # Condition number=1, delta=2^-108, d*S*d=2^-216 (nonzero, below 1e-30).
-    # Exact analytical x=2^54. C's unchanged Main agrees; no sampling involved.
+    # delta=2^-108 is above the threshold 1e-60, but d*S*d=2^-216 < 1e-20, so the
+    # C 1.4.0 Main returns -(0+1) before updating x (1.3.0 returned x=2^54).
+    @test status == -1
     for complex in (false, true)
-        ws = MVMCOptimizers.CGWorkspace(1, 1, complex)
-        ws.stcOs_real[1,1] = ldexp(1.0, -54)
-        ws.g[1] = ldexp(1.0, -54)
-        result = MVMCOptimizers.stochastic_opt_cg_main!(ws, 1, 1, 1.0, 0.0, 1e-30, 1, complex)
-        @test result == iterations
-        # One scalar update; one ulp at 2^54 allows portable computed arithmetic, not
-        # the old zero solution. The observed C-Julia difference is recorded.
-        @test ws.x[1] ≈ solution atol=4.0 rtol=0
-        @test abs(ws.r[1] - residual) <= eps(Float64) * ldexp(1.0, -54)
-        @test abs(ws.d[1] - direction) <= eps(Float64) * ldexp(1.0, -54)
-        @info "C small-SPD CG first difference" complex solution_difference=ws.x[1]-solution residual_difference=ws.r[1]-residual
+        for diag_scale in (false, true)
+            ws = MVMCOptimizers.CGWorkspace(1, 1, complex)
+            ws.stcOs_real[1,1] = ldexp(1.0, -54)
+            ws.g[1] = ldexp(1.0, -54)
+            ws.sdiag[1] = 1.0  # only read by DiagScale; keeps d = r there
+            main! = diag_scale ? MVMCOptimizers.stochastic_opt_precon_cg_diag_scale_main! :
+                                 MVMCOptimizers.stochastic_opt_cg_main!
+            result = main!(ws, 1, 1, 1.0, 0.0, 1e-30, 1, complex)
+            @test result == status
+            @test ws.x[1] == solution  # untouched initial zero
+            @test abs(ws.r[1] - residual) <= eps(Float64) * ldexp(1.0, -54)
+            diag_scale || @test abs(ws.d[1] - direction) <= eps(Float64) * ldexp(1.0, -54)
+        end
     end
 end
 
-@testset "C sampled operator and CG residuals across limits 1 through 41" begin
+@testset "C 1.4.0 sampled operator and CG residuals across limits 1 through 41" begin
     decode(line) = [reinterpret(Float64, parse(UInt64, word; base=16)) for word in split(line)]
-    for name in ("real", "complex", "sampled_complex")
+    for name in ("real", "complex", "sampled_complex",
+                 "real_diag_scale", "complex_diag_scale", "sampled_complex_diag_scale")
+        diag_scale = endswith(name, "_diag_scale")
+        main! = diag_scale ? MVMCOptimizers.stochastic_opt_precon_cg_diag_scale_main! :
+                             MVMCOptimizers.stochastic_opt_cg_main!
         lines = filter(line -> !startswith(line, "#"), readlines(joinpath(@__DIR__, "fixtures", "c_cg_refresh", name * ".txt")))
         @test length(lines) == 7 + 3*41
         n, samples, complex_int = parse.(Int, split(lines[1]))
@@ -66,25 +73,36 @@ end
             base = 8 + 3*(limit-1)
             words = split(lines[base]; limit=3)
             @test parse(Int,words[1]) == limit
-            expected_iter = parse(Int,words[2])
-            @test 0 <= expected_iter <= limit
+            # C 1.4.0 status: tolerance 0 never converges, so every limit is
+            # -(limit+1), or -(iter+1) at an earlier breakdown guard.
+            expected_status = parse(Int,words[2])
+            @test -(limit+1) <= expected_status < 0
             expected = (decode(words[3]), decode(lines[base+1]), decode(lines[base+2]))
             @test all(length(vector) == n for vector in expected)
             ws = workspace()
-            iterations = MVMCOptimizers.stochastic_opt_cg_main!(ws,n,samples,1.0/samples,1e-5,0.0,limit,complex)
-            @test iterations == expected_iter
+            status = main!(ws,n,samples,1.0/samples,1e-5,0.0,limit,complex)
+            @test status == expected_status
             # These archived problems have condition numbers of 1e7--1e9.
             # Later truncated iterates are sensitive to BLAS reduction order;
             # iteration * eps is not a cross-platform forward-error bound.
             # Keep the C first-step comparison and validate BOTH trajectories
             # against the independent covariance at every later limit.
             budget = 8*(n+samples)*eps(Float64)
-            for (actual,target) in zip((ws.x,ws.r,ws.d),expected)
+            # DiagScale: r_new = r - alpha*q cancels (rounding ~ eps*(|g|+|r_new|)),
+            # and d_new = M^-1 r_new + beta*d divides it by M = (1+shift)*sdiag,
+            # which is as small as 1e-12. Bound those components by the operand
+            # scales they are computed from instead of by their own magnitude.
+            precon = [abs(MVMCOptimizers._cg_diag_scale(diagonal[i], 1 + 1e-5)) for i in 1:n]
+            scale_r = diag_scale ? abs.(gradient) .+ abs.(expected[2]) : zeros(n)
+            scale_d = diag_scale ? (2 .* abs.(gradient) .+ abs.(expected[2])) ./ precon : zeros(n)
+            for (k, (actual,target)) in enumerate(zip((ws.x,ws.r,ws.d),expected))
                 @test length(actual) == length(target)
                 @test all(isfinite, actual)
                 @test all(isfinite, target)
                 if limit == 1
-                    @test all(abs(a-b) <= budget*(1+abs(b)) for (a,b) in zip(actual,target))
+                    extra = k == 2 ? scale_r : k == 3 ? scale_d : zeros(n)
+                    @test all(abs(actual[i]-target[i]) <= budget*(1+abs(target[i])+extra[i])
+                              for i in 1:n)
                 end
             end
             for (solution, residual) in ((ws.x, ws.r), (expected[1], expected[2]))
@@ -98,7 +116,7 @@ end
                     @test abs(residual[row]-(gradient[row]-ax)) <= residual_budget
                 end
             end
-            if limit % 20 == 0
+            if limit % 20 == 0 && status == -(limit+1)
                 # A refresh must replace the accumulated residual with g-S*x.
                 # Identical inputs on the same backend are deterministic; this
                 # is not a bitwise comparison against a different C provider.
@@ -121,8 +139,12 @@ end
     shift = 0.125
     mean = [(-1.0)^i / 64 for i in 1:n]
     a = collect(1:n) ./ 8
-    exact = [(-1.0)^i / (i+1) for i in 1:n]
-    for complex in (false, true)
+    # C 1.4.0 stops at the absolute guards |d.q| < 1e-20 and old |delta| < 1e-20.
+    # Scaling the exact solution by 2^27 keeps the relative stop threshold
+    # (rtol*|g|)^2 ~ 1e-15 and every d.q above them, so the relative convergence
+    # gate is reached before any absolute guard.
+    exact = [ldexp((-1.0)^i / (i+1), 27) for i in 1:n]
+    for complex in (false, true), diag_scale in (false, true)
         b = complex ? a ./ 2 : zeros(n)
         diagonal = (a.^2 + b.^2) ./ n
         eigenvalues = (1 + shift) .* diagonal
@@ -141,9 +163,15 @@ end
         end
         rtol = 1e-14
         tolerance = rtol * norm(ws.g) / n
-        iterations = MVMCOptimizers.stochastic_opt_cg_main!(
-            ws,n,samples,1.0/samples,shift,tolerance,10n,complex)
-        @test 40 < iterations < 10n # Both residual refresh boundaries are crossed.
+        main! = diag_scale ? MVMCOptimizers.stochastic_opt_precon_cg_diag_scale_main! :
+                             MVMCOptimizers.stochastic_opt_cg_main!
+        iterations = main!(ws,n,samples,1.0/samples,shift,tolerance,10n,complex)
+        if diag_scale
+            # The Jacobi preconditioner (1+shift)*sdiag equals this diagonal S.
+            @test 0 <= iterations <= 2
+        else
+            @test 40 < iterations < 10n # Both residual refresh boundaries are crossed.
+        end
         @test norm(ws.r) < rtol * norm(ws.g)
         condition = maximum(eigenvalues) / minimum(eigenvalues)
         @test condition == 4096

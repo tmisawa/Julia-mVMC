@@ -142,6 +142,7 @@ end
         "      GreenFunc2           [51] ",
         "      addPhysCA            [52] ",
         "      addPhysCACA          [53] ",
+        "      addPhysTwist         [54] ",
         "    Lanczos1               [43] ",
         "    Lanczos2               [44] ",
         "  UpdateSlaterElm          [20] ",

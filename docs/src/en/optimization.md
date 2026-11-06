@@ -64,9 +64,8 @@ one-step `NSRCG = 1` C-reference behavior under `mpiexec`.
 The following combinations are intentionally rejected in this release:
 
 - `NSplitSize > 1` with SR-CG;
-- `NSRCG >= 2`;
-- `useDiagScale != 0`;
-- `RescaleSmat != 0`;
+- `RescaleSmat != 0` without `NSRCG = 1`, and SR-CG with `DSROptStepDt < 0` (C 1.4.0);
+- `reweight = 1`;
 - `NSplitSize > 1` with OptTrans-derived QP sectors;
 - FSZ standard projection with `NQPFull > 1`.
 

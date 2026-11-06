@@ -161,9 +161,9 @@ are treated as C-compatible.
   `NSplitSize > 1` for sz-conserved normal-Green runs (`NLanczosMode = 0`).
   FSZ/general-orbital PhysCal split, PhysCal Lanczos split, and
   OptTrans-derived QP sectors with split remain unsupported.
-- **Additional CG modes** (`NSRCG >= 2`, `useDiagScale != 0`, and
-  `RescaleSmat != 0` raise unsupported-feature errors). Standard SR-CG
-  (`NSRCG = 1`) is supported for serial and MPI `NSplitSize = 1` runs, but
+- **C 1.4.0 reweighting** (`reweight = 1` raises an unsupported-feature error).
+  SR-CG (`NSRCG = 1`, DiagScale `NSRCG = 2`, `RescaleSmat`, `NSRCGFallback`,
+  `NSRCGAbortOnFail`) follows C mVMC 1.4.0 and is supported for serial and MPI `NSplitSize = 1` runs, but
   remains unsupported with `NSplitSize > 1`.
 - **Full Lanczos split and FSZ/general-orbital Lanczos** — `VMCPhysCal`
   supports `NLanczosMode = 1/2` output on the sz-conserved `NSplitSize = 1`

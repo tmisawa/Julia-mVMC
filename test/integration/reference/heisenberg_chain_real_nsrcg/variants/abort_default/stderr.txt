@@ -1,0 +1,2 @@
+warning: SR-CG became numerically unstable at iter=2 (max_iter=10).
+error: SR-CG fallback is disabled. Abort.

@@ -1,4 +1,4 @@
-/* Verbatim: extern/mVMC-1.3.0/src/mVMC/vmcmake_fsz.c lines 594-664 (GPLv3, see that file). */
+/* Verbatim: mVMC 1.4.0 (e83aa6cb) src/mVMC/vmcmake_fsz.c lines 633-703 (GPLv3, see that file). */
 void makeCandidate_hopping_fsz(int *mi_, int *ri_, int *rj_, int *s_,int *t_, int *rejectFlag_,
                            const int *eleIdx, const int *eleCfg,const int *eleNum,const int *eleSpn) {
   const int icnt_max = Nsite*Nsite;
@@ -70,7 +70,7 @@ void makeCandidate_hopping_csz(int *mi_, int *ri_, int *rj_, int *s_,int *t_, in
 
   return;
 }
-/* Verbatim: extern/mVMC-1.3.0/src/mVMC/vmcmake_fsz.c lines 756-788 (GPLv3, see that file). */
+/* Verbatim: mVMC 1.4.0 (e83aa6cb) src/mVMC/vmcmake_fsz.c lines 866-898 (GPLv3, see that file). */
 void makeCandidate_LocalSpinFlip_conduction(int *mi_, int *ri_, int *rj_, int *s_,int *t_, int *rejectFlag_,
                            const int *eleIdx, const int *eleCfg,const int *eleNum,const int *eleSpn) {
   const int icnt_max = Nsite*Nsite;

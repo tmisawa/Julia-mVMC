@@ -4,8 +4,9 @@ using MVMCExpertModeParsers
 # Independent C GetInfoTransSym input contract. Actual native observation:
 # 0 1.00000 0.50000 -> 1+0.5im under both APFlag values. Other dyadic
 # coefficients are literal input controls, not generated Julia expectations.
-# C authority: mVMC1.3.0 readdef.c2232–2265, source SHA256
-# 6c53cb832f93d6cbfd7cea955fbb693738af5536b913d36af32b98eed38c32d9;
+# C authority: mVMC 1.4.0 readdef.c 2646–2679 (GetInfoTransSym, byte-identical
+# to the original 1.3.0 acquisition at readdef.c 2232–2265, source SHA256
+# 6c53cb832f93d6cbfd7cea955fbb693738af5536b913d36af32b98eed38c32d9);
 # expert.rst TransSym specifies idx/real/imag. Standalone GCC13.3.0
 # -std=c11 -O0 -ffp-contract=off acquired STATUS0 and WEIGHT
 # 0x1p+0 0x1p-1 for both AP0/AP1; BLAS/RNG/MPI not used.

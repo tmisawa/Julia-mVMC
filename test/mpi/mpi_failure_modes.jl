@@ -3,7 +3,8 @@
 #   julia --project=<workspace> test/mpi/mpi_failure_modes.jl <mode> <output_dir>
 #
 # Modes:
-#   nsrcg2 - NSRCG >= 2 must be rejected before MPI.Init().
+#   rescale_direct - RescaleSmat without NSRCG = 1 (C 1.4.0 abort) must be
+#                    rejected before MPI.Init().
 #   nsplit_srcg - NSplitSize > 1 with SR-CG must be rejected before MPI.Init().
 #   nsplit_opttrans - NSplitSize > 1 with OptTrans must be rejected before MPI.Init().
 #   nsplit_fsz_projection - FSZ standard-projection NQPFull > 1 must be rejected before MPI.Init().
@@ -12,7 +13,7 @@ using MVMCExpertModeParsers
 using MPI
 
 length(ARGS) == 2 ||
-    error("usage: mpi_failure_modes.jl <nsrcg2|nsplit_srcg|nsplit_opttrans|nsplit_fsz_projection> <output_dir>")
+    error("usage: mpi_failure_modes.jl <rescale_direct|nsplit_srcg|nsplit_opttrans|nsplit_fsz_projection> <output_dir>")
 
 const mode = ARGS[1]
 const outdir = ARGS[2]
@@ -32,16 +33,17 @@ function expect_error_contains(f, pieces)
     error("expected an error containing $(join(pieces, ", "))")
 end
 
-function run_nsrcg2_rejection()
+function run_rescale_direct_rejection()
     data = MVMCExpertModeParsers.parse_expert_mode_files(fixture)
-    data.modpara.nsrcg = 2
+    data.modpara.nsrcg = 0
+    data.modpara.rescale_smat = 1
 
     expect_error_contains(
         () -> MVMCOptimizers.validate_supported_modpara(data.modpara),
-        ("NSRCG >= 2", "standard SR-CG solver"),
+        ("RescaleSmat=1 requires NSRCG==1", "NSRCG=0"),
     )
-    MPI.Initialized() && error("NSRCG >= 2 rejection should happen before MPI.Init()")
-    println("failure-mode worker: nsrcg2 expected rejection ok")
+    MPI.Initialized() && error("RescaleSmat rejection should happen before MPI.Init()")
+    println("failure-mode worker: rescale_direct expected rejection ok")
 end
 
 function run_nsplit_srcg_rejection()
@@ -89,8 +91,8 @@ function run_nsplit_fsz_projection_rejection()
 end
 
 try
-    if mode == "nsrcg2"
-        run_nsrcg2_rejection()
+    if mode == "rescale_direct"
+        run_rescale_direct_rejection()
     elseif mode == "nsplit_srcg"
         run_nsplit_srcg_rejection()
     elseif mode == "nsplit_opttrans"
@@ -98,7 +100,7 @@ try
     elseif mode == "nsplit_fsz_projection"
         run_nsplit_fsz_projection_rejection()
     else
-        error("unknown mode '$mode'; expected nsrcg2, nsplit_srcg, nsplit_opttrans, or nsplit_fsz_projection")
+        error("unknown mode '$mode'; expected rescale_direct, nsplit_srcg, nsplit_opttrans, or nsplit_fsz_projection")
     end
 catch err
     @error "mpi_failure_modes worker failed" exception = (err, catch_backtrace())

@@ -31,3 +31,12 @@ they do not compile or invoke this probe. No floating-point tolerance is used.
 This patch preserves existing term traversal and incremental hopping updates;
 it changes only full-counter bias/coupling grouping. It does not by itself
 establish full-model sampling parity or justify any numerical-budget change.
+
+## mVMC 1.4.0 re-verification (Julia-mVMC#95, 2026-11-06)
+
+The C reference moved to mVMC 1.4.0 (`v1.4.0`, `e83aa6cb`). `MakeRBMCnt` is
+byte-identical and still at `rbm.c` lines 187–288 (1.4.0 whole-file SHA256
+`bbe4a1ab7d6f3ab0cbaa41d6ffabe10f729ce5bc560a22802a6939e287fbd870`; the only
+change elsewhere in `rbm.c` is `logSqPfFullSlater += 2*creal(x)` instead of
+`2*cabs(x)`, used only by 1.4.0 reweighting, which Julia does not port). The probe
+and its expectations are unchanged.

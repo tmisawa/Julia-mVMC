@@ -607,7 +607,7 @@ end
 
 function _write_cg_srinfo!(
     data::ExpertModeData,
-    n_para_full::Int,
+    n_para::Int,
     n_smat::Int,
     opt_num::Int,
     cut_num::Int,
@@ -615,7 +615,7 @@ function _write_cg_srinfo!(
     s_diag_min::Float64,
     smat_to_para_idx::Vector{Int},
     x::Vector{Float64},
-    iter::Int,
+    info::Int,
     output_dir::Union{String,Nothing},
 )
     output_dir === nothing && return nothing
@@ -639,12 +639,14 @@ function _write_cg_srinfo!(
 
     open(srinfo_file, write_header ? "w" : "a") do f
         if write_header
-            println(f, "#Npara Msize optCut diagCut sDiagMax  sDiagMin    absRmax       imax")
+            # C 1.4.0 initfile.c:47-54: SR-CG runs (NSRCG != 0) add the " info" title.
+            println(f, "#Npara Msize optCut diagCut sDiagMax  sDiagMin    absRmax       imax info")
         end
         @printf(
             f,
-            "%5d %5d %5d %5d % .5e % .5e % .5e %5d, %d\n",
-            n_para_full,
+            # C 1.4.0 stcopt_cg_impl.c:285 (1.3.0 wrote "%5d, %d").
+            "%5d %5d %5d %5d % .5e % .5e % .5e %5d %d\n",
+            n_para,  # C prints the global NPara (not OFFSET*NPara)
             n_smat,
             opt_num,
             cut_num,
@@ -652,7 +654,7 @@ function _write_cg_srinfo!(
             s_diag_min,
             rmax,
             smat_to_para_idx[simax],
-            iter,
+            info,
         )
     end
     return nothing
@@ -843,6 +845,20 @@ function operate_by_s!(
     end
 end
 
+# C 1.4.0 breakdown guard for `d.q` and the old `delta`
+# (stcopt_cg_impl.c:421,458,540,567).
+const CG_TINY = 1.0e-20
+# C 1.4.0 `precon_diag_eps` of the DiagScale preconditioner (stcopt_cg_impl.c:362).
+const CG_PRECON_DIAG_EPS = 1.0e-12
+
+@inline function _cg_diag_scale(sdiag_i::Float64, precon_factor::Float64)
+    dq = precon_factor * sdiag_i
+    if !isfinite(dq) || abs(dq) < CG_PRECON_DIAG_EPS
+        dq = dq < 0.0 ? -CG_PRECON_DIAG_EPS : CG_PRECON_DIAG_EPS
+    end
+    return dq
+end
+
 """
     stochastic_opt_cg_main!(
         ws::CGWorkspace,
@@ -856,11 +872,15 @@ end
         ctx::ParallelContext = serial_context()
     ) -> Int
 
-Main CG iteration loop.
-Equivalent to C's `StochasticOptCG_Main()`.
+Main CG iteration loop, C mVMC 1.4.0 `StochasticOptCG_Main`
+(`stcopt_cg_impl.c:484-591`), in C operation order. `ws.x` must be zero.
 
 # Returns
-- Number of iterations performed
+The C 1.4.0 status: the iteration count `iter` on convergence, `-(iter+1)` when
+iteration `iter` breaks down (non-finite `delta`, `d.q`, `alpha` or `beta`, or
+`|d.q|` / the old `|delta|` below `1e-20`), and `-(max_iter+1)` when the limit is
+reached without meeting the threshold. The workspace keeps the iterate at the
+point where C returns.
 """
 function stochastic_opt_cg_main!(
     ws::CGWorkspace,
@@ -873,100 +893,241 @@ function stochastic_opt_cg_main!(
     all_complex::Bool,
     ctx::ParallelContext = serial_context(),
 )::Int
-    # Convergence threshold
-    cg_thresh = dsr_opt_cg_tol^2 * Float64(n_smat)^2
+    return _stochastic_opt_cg_solve!(
+        ws, n_smat, n_vmc_sample, inv_w, dsr_opt_sta_del, dsr_opt_cg_tol,
+        max_iter, all_complex, ctx, false,
+    )
+end
 
-    # Initialize: d = r = g
-    copyto!(ws.d, ws.g)
-    copyto!(ws.r, ws.g)
+"""
+    stochastic_opt_precon_cg_diag_scale_main!(ws, n_smat, n_vmc_sample, inv_w,
+        dsr_opt_sta_del, dsr_opt_cg_tol, max_iter, all_complex,
+        ctx = serial_context()) -> Int
 
-    # delta = r^T * r
-    delta = xdot(ws.r, ws.r)
+Jacobi (DiagScale) preconditioned CG, C mVMC 1.4.0
+`StochasticOptPreconCG_DiagScale_Main` (`stcopt_cg_impl.c:352-480`), selected by
+`NSRCG 2` or `useDiagScale` with `NSRCG 1`. The preconditioner is
+`(1 + DSROptStaDel) * sdiag`, clamped to `±1e-12`; `r = g - S x` is formed with an
+operator call and `delta = delta_new` is assigned directly. Same status contract as
+[`stochastic_opt_cg_main!`](@ref).
+"""
+function stochastic_opt_precon_cg_diag_scale_main!(
+    ws::CGWorkspace,
+    n_smat::Int,
+    n_vmc_sample::Int,
+    inv_w::Float64,
+    dsr_opt_sta_del::Float64,
+    dsr_opt_cg_tol::Float64,
+    max_iter::Int,
+    all_complex::Bool,
+    ctx::ParallelContext = serial_context(),
+)::Int
+    return _stochastic_opt_cg_solve!(
+        ws, n_smat, n_vmc_sample, inv_w, dsr_opt_sta_del, dsr_opt_cg_tol,
+        max_iter, all_complex, ctx, true,
+    )
+end
+
+function _stochastic_opt_cg_solve!(
+    ws::CGWorkspace,
+    n_smat::Int,
+    n_vmc_sample::Int,
+    inv_w::Float64,
+    dsr_opt_sta_del::Float64,
+    dsr_opt_cg_tol::Float64,
+    max_iter::Int,
+    all_complex::Bool,
+    ctx::ParallelContext,
+    diag_scale::Bool,
+)::Int
+    # C: cg_thresh = DSROptCGTol*DSROptCGTol * (double)nSmat * (double)nSmat
+    cg_thresh = dsr_opt_cg_tol * dsr_opt_cg_tol * Float64(n_smat) * Float64(n_smat)
+    precon_factor = 1.0 + dsr_opt_sta_del
+
+    if diag_scale
+        # r = g - S*x; d = M^-1 r; delta = r.d  (stcopt_cg_impl.c:376-392)
+        operate_by_s!(ws.r, ws.x, ws, n_smat, n_vmc_sample, inv_w, dsr_opt_sta_del,
+                      all_complex, ctx)
+        for si = 1:n_smat
+            ws.r[si] = ws.g[si] - ws.r[si]
+        end
+        for si = 1:n_smat
+            ws.d[si] = ws.r[si] / _cg_diag_scale(ws.sdiag[si], precon_factor)
+        end
+        delta = xdot(ws.r, ws.d)
+    else
+        # d = r = g; delta = r.r  (stcopt_cg_impl.c:518-525)
+        copyto!(ws.d, ws.g)
+        copyto!(ws.r, ws.g)
+        delta = xdot(ws.r, ws.r)
+    end
+    isfinite(delta) || return -(0 + 1)
 
     iter = 0
-    for iter_idx = 1:max_iter
-        iter = iter_idx
+    while iter < max_iter
+        failed = -(iter + 1)
+        isfinite(delta) || return failed
+        abs(delta) < cg_thresh && break
 
-        # Check convergence
-        if delta < cg_thresh
-            iter = iter_idx - 1
-            break
-        end
-
-        # Compute q = S * d
-        operate_by_s!(
-            ws.q,
-            ws.d,
-            ws,
-            n_smat,
-            n_vmc_sample,
-            inv_w,
-            dsr_opt_sta_del,
-            all_complex,
-            ctx,
-        )
-
-        # alpha = delta / (d^T * q)
+        # q = S*d
+        operate_by_s!(ws.q, ws.d, ws, n_smat, n_vmc_sample, inv_w, dsr_opt_sta_del,
+                      all_complex, ctx)
         dq = xdot(ws.d, ws.q)
-        # C stcopt_cg_impl.c:310 divides every nonzero denominator, even for
-        # well-conditioned scaled SPD systems below an absolute cutoff.
+        (!isfinite(dq) || abs(dq) < CG_TINY) && return failed
         alpha = delta / dq
+        isfinite(alpha) || return failed
 
-        # Update solution: x = x + alpha * d
+        # x = x + alpha*d
         for si = 1:n_smat
-            ws.x[si] += alpha * ws.d[si]
+            ws.x[si] = ws.x[si] + alpha * ws.d[si]
         end
-
-        # Update residual: r = r - alpha * q
-        # (Every 20 iterations, recompute r = g - S*x for numerical stability)
-        if iter_idx % 20 == 0
-            operate_by_s!(
-                ws.r,
-                ws.x,
-                ws,
-                n_smat,
-                n_vmc_sample,
-                inv_w,
-                dsr_opt_sta_del,
-                all_complex,
-                ctx,
-            )
+        # r = r - alpha*q, or r = g - S*x every 20 iterations
+        if (iter + 1) % 20 == 0
+            operate_by_s!(ws.r, ws.x, ws, n_smat, n_vmc_sample, inv_w,
+                          dsr_opt_sta_del, all_complex, ctx)
             for si = 1:n_smat
                 ws.r[si] = ws.g[si] - ws.r[si]
             end
         else
             for si = 1:n_smat
-                ws.r[si] -= alpha * ws.q[si]
+                ws.r[si] = ws.r[si] - alpha * ws.q[si]
             end
         end
 
-        # beta = (r_new^T * r_new) / delta
-        beta = xdot(ws.r, ws.r) / delta
-
-        # Update delta
-        # Preserve C:336 multiply-back recurrence (not direct norm assignment).
-        delta = beta * delta
-
-        # Update search direction: d = r + beta * d
-        for si = 1:n_smat
-            ws.d[si] = ws.r[si] + beta * ws.d[si]
+        if diag_scale
+            # q is reused for M^-1 r (stcopt_cg_impl.c:450-457)
+            for si = 1:n_smat
+                ws.q[si] = ws.r[si] / _cg_diag_scale(ws.sdiag[si], precon_factor)
+            end
+            delta_new = xdot(ws.r, ws.q)
+        else
+            delta_new = xdot(ws.r, ws.r)
         end
-    end
+        isfinite(delta_new) || return failed
+        abs(delta) < CG_TINY && return failed
+        beta = delta_new / delta
+        isfinite(beta) || return failed
 
+        if diag_scale
+            delta = delta_new
+            for si = 1:n_smat
+                ws.d[si] = ws.q[si] + beta * ws.d[si]
+            end
+        else
+            # C:575 keeps delta = beta*delta (mathematically delta_new) to
+            # preserve the legacy FP order of the plain CG.
+            delta = beta * delta
+            for si = 1:n_smat
+                ws.d[si] = ws.r[si] + beta * ws.d[si]
+            end
+        end
+        iter += 1
+    end
+    # stcopt_cg_impl.c:469,583
+    if iter == max_iter && abs(delta) >= cg_thresh
+        return -(max_iter + 1)
+    end
     return iter
 end
 
 """
+    _rescale_4_srcg!(data, sr_opt_oo, sr_opt_ho, sr_opt_o_store, sr_opt_size,
+                     n_para, offset_factor) -> Union{Float64,Nothing}
+
+C mVMC 1.4.0 `Rescale4SRCG` (`stcopt_cg_impl.c:772-875`, called by
+`StochasticOptCG` when `RescaleSmat != 0`): rescale the Slater-block components of
+the averaged SR operands (`<OO>` diagonal by `ratio`, `<O>`, `<HO>` and the stored
+samples by `sqrt(ratio)`) in place, and divide the Slater parameters by
+`sqrt(ratio)`, where `ratio = max|S_proj diag| / max|S_slater diag|`. Returns
+`sqrt(ratio)`, or `nothing` where C returns without rescaling.
+"""
+function _rescale_4_srcg!(
+    data::ExpertModeData,
+    sr_opt_oo::AbstractVector,
+    sr_opt_ho::AbstractVector,
+    sr_opt_o_store::AbstractVector,
+    sr_opt_size::Int,
+    n_para::Int,
+    offset_factor::Int,
+)
+    counts = _parameter_count_breakdown(data)
+    n_proj = counts.n_proj
+    n_slater = counts.n_orbital_idx
+    # Para = Proj | RBM | ProjBF (always empty in Julia) | Slater | OptTrans.
+    slt_start = n_proj + counts.n_rbm
+    slt_end = slt_start + n_slater
+    (n_proj <= 0 || n_proj >= n_para || n_slater <= 0) && return nothing
+    off = offset_factor
+    diag_base = off * sr_opt_size  # C srOptOO = SROptOO(_real) + OFFSET*srOptSize
+    # r[pi] = OO[pi+OFFSET] - O[pi+OFFSET]^2 (0-based C indices; +1 for Julia)
+    r = Vector{Float64}(undef, off * n_para)
+    for pi = 0:(off*n_para-1)
+        o = real(sr_opt_oo[pi+off+1])
+        r[pi+1] = real(sr_opt_oo[diag_base+pi+off+1]) - o * o
+    end
+    # C get_absmax (stcopt_cg.c:36-46): keeps the earlier value on NaN compares.
+    absmax(lo, hi) = begin
+        hi <= lo && return 0.0
+        m = abs(r[lo+1])
+        for i = (lo+1):(hi-1)
+            m < abs(r[i+1]) && (m = abs(r[i+1]))
+        end
+        m
+    end
+    proj_max = absmax(0, off * n_proj)
+    slater_max = absmax(off * slt_start, off * slt_end)
+    proj_max < 1e-10 && return nothing
+    slater_max < 1e-10 && (slater_max = 1e-10)
+    oo_ratio = proj_max / slater_max
+    o_ratio = sqrt(oo_ratio)
+    for i = (off*slt_start):(off*slt_end-1)
+        sr_opt_oo[diag_base+i+off+1] *= oo_ratio
+        sr_opt_oo[i+off+1] *= o_ratio
+        sr_opt_ho[i+off+1] *= o_ratio
+    end
+    for ismp = 0:(data.modpara.nvmc_sample-1)
+        for i = (off*slt_start):(off*slt_end-1)
+            idx = i + off + ismp * off * sr_opt_size + 1
+            idx <= length(sr_opt_o_store) && (sr_opt_o_store[idx] *= o_ratio)
+        end
+    end
+    for i = 1:n_slater
+        para_idx = slt_start + i
+        _set_parameter_value_direct!(data, para_idx, get_parameter_value(data, para_idx) / o_ratio)
+    end
+    return o_ratio
+end
+
+# C's function-static `fallback_info_printed` (stcopt_cg_impl.c:117).
+const _SRCG_FALLBACK_INFO_PRINTED = Ref(false)
+
+_srcg_failure_words(abort::Bool, continued::String) =
+    abort ? ("error", "Abort") : ("warning", continued)
+
+"""
     stochastic_opt_cg!(data::ExpertModeData, state::VMCOptimizationState) -> Int
 
-Stochastic optimization using Conjugate Gradient method.
-Equivalent to C's `StochasticOptCG()`.
+Stochastic optimization using Conjugate Gradient method, C mVMC 1.4.0
+`StochasticOptCG` (`stcopt_cg.c:55-67`, `stcopt_cg_impl.c:81-341`).
 
 Uses the CG method to solve S*x = g without explicitly building the S matrix,
-which is more memory-efficient for large parameter spaces.
+which is more memory-efficient for large parameter spaces. With `RescaleSmat`
+the Slater block is rescaled first (`Rescale4SRCG`). `useDiagScale` (set by
+`NSRCG 2`) selects the DiagScale-preconditioned CG. A failed solve (negative C
+status) is retried with the other CG variant from `x = 0` when `NSRCGFallback`
+is set; a remaining failure throws (C `MPI_Abort`) when `NSRCGAbortOnFail` is
+set (the default), and otherwise continues with the approximate solution. The
+`zqp_SRinfo.dat` row records the C status (`-(iter+1)` of the first solver after
+a failure).
 
 # Returns
-- `info::Int`: 0 = success, non-zero = error (number of CG iterations if successful)
+- `info::Int`: 0 after a finite update; 1 when the increment is not finite and
+  `NSRCGAbortOnFail = 0` (the update is skipped, as in C). A non-finite increment
+  throws when `NSRCGAbortOnFail` is set.
+
+Deviation from C 1.4.0: an SR-CG step with no active parameter (`nSmat = 0`)
+stays a no-op returning 0. C runs the solver on the empty system, gets
+`-(0+1)`, aborts by default and reads `r[0]` out of bounds for `zqp_SRinfo.dat`.
 """
 function stochastic_opt_cg!(
     data::ExpertModeData,
@@ -986,6 +1147,9 @@ function stochastic_opt_cg!(
     all_complex = get_all_complex_flag(data)
     offset_factor = all_complex ? 2 : 1
     n_para_full = offset_factor * n_para
+    modpara = data.modpara
+    abort_on_fail = modpara.nsrcg_abort_on_fail != 0
+    root = is_output_rank(ctx)
 
     # Initialize optimization flags if empty (same as vmc_para_opt!)
     if isempty(data.optimization_flags)
@@ -1000,6 +1164,14 @@ function stochastic_opt_cg!(
         all_complex ? state.sr_opt.sr_opt_ho : state.sr_opt.sr_opt_ho_real
     sr_opt_o_store =
         all_complex ? state.sr_opt.sr_opt_o_store : state.sr_opt.sr_opt_o_store_real
+
+    # stcopt_cg.c:59-63: RescaleSmat rescales the averaged operands, the stored
+    # samples and the Slater parameters before StochasticOptCG (every rank).
+    if modpara.rescale_smat != 0
+        _rescale_4_srcg!(
+            data, sr_opt_oo, sr_opt_ho, sr_opt_o_store, sr_opt_size, n_para, offset_factor,
+        )
+    end
 
     # For CG, we need sr_opt_o (first row of sr_opt_oo) and sr_opt_oo_diag
     # C: srOptO = SROptOO (or SROptOO_real)
@@ -1058,7 +1230,7 @@ function stochastic_opt_cg!(
 
     n_smat = length(smat_to_para_idx)
 
-    # If no parameters to optimize, return success
+    # Documented deviation (see docstring): an empty active set is a no-op.
     if n_smat == 0
         @warn "StochasticOptCG: No parameters to optimize (all fixed or cut)"
         return 0
@@ -1066,8 +1238,7 @@ function stochastic_opt_cg!(
 
     # Phase 2: Create CG workspace and initialize
     ws = CGWorkspace(n_smat, n_vmc_sample, all_complex)
-
-    stochastic_opt_cg_init!(
+    init! = () -> stochastic_opt_cg_init!(
         ws,
         smat_to_para_idx,
         sr_opt_o,
@@ -1079,6 +1250,7 @@ function stochastic_opt_cg!(
         data.modpara.dsr_opt_step_dt,
         all_complex,
     )
+    init!()
 
     # Phase 3: Run CG iteration
     # C stcopt_cg_impl.c:487 uses invW = 1.0 / Wc. `weight_average_we!`
@@ -1087,8 +1259,10 @@ function stochastic_opt_cg!(
 
     max_iter =
         data.modpara.nsr_opt_cg_max_iter > 0 ? data.modpara.nsr_opt_cg_max_iter : n_smat
-
-    iter = stochastic_opt_cg_main!(
+    use_diag_scale = modpara.use_diag_scale != 0
+    solver_name(diag) = diag ? "CG-diag" : "CG"
+    run_solver(diag) = (diag ? stochastic_opt_precon_cg_diag_scale_main! :
+                        stochastic_opt_cg_main!)(
         ws,
         n_smat,
         n_vmc_sample,
@@ -1099,22 +1273,64 @@ function stochastic_opt_cg!(
         all_complex,
         ctx,
     )
+    failure_reason(it) = it >= max_iter ? "did not converge" : "became numerically unstable"
 
-    # Phase 4: Check for inf/nan in solution
-    info = 0
-    for si = 1:n_smat
-        if !isfinite(ws.x[si])
-            @error "StochasticOptCG: x[$si] = $(ws.x[si]) is not finite"
-            info = 1
-            break
+    info = run_solver(use_diag_scale)
+    # stcopt_cg_impl.c:203-264: failure report, optional fallback and abort.
+    if info < 0
+        fallback_iter = max(-info - 1, 0)
+        root && println(
+            stderr,
+            "warning: SR-$(solver_name(use_diag_scale)) $(failure_reason(fallback_iter)) " *
+            "at iter=$fallback_iter (max_iter=$max_iter).",
+        )
+        if modpara.nsrcg_fallback != 0
+            alt = !use_diag_scale
+            if root
+                if !_SRCG_FALLBACK_INFO_PRINTED[]
+                    println(
+                        stderr,
+                        "remark: in zqp_SRinfo.dat, negative info means " *
+                        "SR-CG fallback at iteration (info=-(iter+1)).",
+                    )
+                    _SRCG_FALLBACK_INFO_PRINTED[] = true
+                end
+                println(
+                    stderr,
+                    "warning: fallback from SR-$(solver_name(use_diag_scale)) to " *
+                    "SR-$(solver_name(alt)).",
+                )
+            end
+            init!()  # C re-runs StochasticOptCG_Init: x = 0
+            alt_info = run_solver(alt)
+            root && alt_info >= 0 && println(
+                stderr,
+                "remark: SR-$(solver_name(alt)) after fallback converged at iter=$alt_info.",
+            )
+            info = -(fallback_iter + 1)
+            if alt_info < 0
+                alt_iter = max(-alt_info - 1, 0)
+                level, action = _srcg_failure_words(
+                    abort_on_fail, "Continue with the approximate solution")
+                msg = "$level: fallback SR-$(solver_name(alt)) $(failure_reason(alt_iter)) " *
+                      "at iter=$alt_iter (max_iter=$max_iter). $action."
+                root && println(stderr, msg)
+                abort_on_fail && error(msg)  # C MPI_Abort
+            end
+        else
+            level, action = _srcg_failure_words(
+                abort_on_fail, "Continue with the approximate solution")
+            msg = "$level: SR-CG fallback is disabled. $action."
+            root && println(stderr, msg)
+            abort_on_fail && error(msg)  # C MPI_Abort
+            info = -(fallback_iter + 1)
         end
     end
-    info = Int(bcast_scalar(ctx, info))
 
-    if is_output_rank(ctx)
+    if root
         _write_cg_srinfo!(
             data,
-            n_para_full,
+            n_para,
             n_smat,
             opt_num,
             cut_num,
@@ -1122,13 +1338,29 @@ function stochastic_opt_cg!(
             s_diag_min,
             smat_to_para_idx,
             ws.x,
-            iter,
+            info,
             output_dir,
         )
     end
 
+    # Phase 4: Check for inf/nan in solution (stcopt_cg_impl.c:289-313)
+    info = 0
+    for si = 1:n_smat
+        if !isfinite(ws.x[si])
+            info = 1
+            break
+        end
+    end
+    info = Int(bcast_scalar(ctx, info))
+    if info != 0
+        level, action = _srcg_failure_words(abort_on_fail, "Skip this parameter update")
+        msg = "$level: SR-CG produced non-finite parameter updates. $action."
+        root && println(stderr, msg)
+        abort_on_fail && error(msg)  # C MPI_Abort
+    end
+
     # Phase 5: Update parameters
-    if info == 0 && is_output_rank(ctx)
+    if info == 0 && root
         for (si, pi) in enumerate(smat_to_para_idx)
             r_val = ws.x[si]  # Solution vector
 
@@ -1147,13 +1379,6 @@ function stochastic_opt_cg!(
                 update_parameter_value(data, para_idx, r_val, 0.0)
             end
         end
-    end
-
-    # Log output
-    if info == 0 && n_smat > 0
-        r_max = maximum(abs, ws.x[1:n_smat])
-        # @info "SR-CG Info: NPara=$n_para, nSmat=$n_smat, iter=$iter, " *
-        #       "sDiagMax=$s_diag_max, sDiagMin=$s_diag_min, rmax=$r_max"
     end
 
     return info

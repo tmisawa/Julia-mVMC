@@ -33,3 +33,4 @@ NStore         1
 NSRCG          1
 DSROptCGTol    1.0e-10
 NSROptCGMaxIter 0
+NSRCGAbortOnFail 0

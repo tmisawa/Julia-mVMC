@@ -62,6 +62,7 @@ export update_qp_weight!
 function _is_required_if_present_file_type(file_type::String)::Bool
     return (
         file_type == "TwoBodyGEx" ||
+        file_type == "Jastrow" ||  # C 1.4.0 strict GetInfoJastrow
         file_type == "DH2" ||
         file_type == "DH4" ||
         file_type == "DoublonHolon2Site" ||
@@ -533,10 +534,10 @@ function parse_file_by_type!(data::ExpertModeData, file_type::String, file_path:
             # Build JastrowIdx matrix for C-compatible projection calculations
             nsite = data.modpara.nsite
             if nsite > 0
-                jastrow_idx_matrix, n_jastrow_idx =
-                    build_jastrow_idx_matrix(file_path, nsite)
-                data.jastrow_idx = jastrow_idx_matrix
-                data.n_jastrow_idx = n_jastrow_idx
+                # C 1.4.0 GetInfoJastrow: strict, symmetric table (throws).
+                data.jastrow_idx = jastrow_idx_matrix_c_contract(
+                    content, nsite, extended_result.n_jastrow_idx)
+                data.n_jastrow_idx = extended_result.n_jastrow_idx
             end
             set_projection_opt_flags!(
                 data,

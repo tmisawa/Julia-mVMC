@@ -11,7 +11,7 @@ Julia port of the [mVMC](https://github.com/issp-center-dev/mVMC) (many-variable
 | Shared-memory threading | 🚧 Experimental | Conservative inner-loop opt-ins only; sample-level `VMCMainCal` threading is intentionally disabled for C-parity. |
 | Lanczos | ✅ Verified for supported PhysCal paths | `VMCPhysCal` supports C-referenced `NLanczosMode = 1/2` output on the sz-conserved `NSplitSize = 1` path. Lanczos with `NSplitSize > 1`, FSZ/general-orbital Lanczos, and ParaOpt Lanczos remain unsupported. |
 | BackFlow | ❌ Not supported | Planned for a future release. |
-| MPI parallelization | 🧪 Partially verified / smoke-tested | `VMCParaOpt` supports direct SR (`NSRCG = 0`) with `NSplitSize >= 1` for `NQPFull = 1` and for sz-conserved standard-projection `NQPFull > 1` when `NQPOptTrans = 1` (`NSPGaussLeg > 1` and/or `NMPTrans > 1`), plus standard SR-CG (`NSRCG = 1`) with `NSplitSize = 1`; rank0 output/readback, comm0 reductions, `NSplitSize/NStore`, and standard-projection self-consistency paths are smoke-tested under `mpiexec -n 2/-n 4`. `VMCPhysCal` supports `NSplitSize > 1` for sz-conserved normal-Green runs (`NLanczosMode = 0`). `VMCPhysCal` split with Lanczos, FSZ/general-orbital PhysCal split, SR-CG with `NSplitSize > 1`, FSZ standard-projection `NQPFull > 1` (`NSPGaussLeg > 1` or `abs(NMPTrans) > 1`), OptTrans-derived QP sectors (`NQPOptTrans > 1` or active `OptTrans`) with `NSplitSize > 1`, `NSRCG >= 2`, `useDiagScale != 0`, and `RescaleSmat != 0` are still rejected. |
+| MPI parallelization | 🧪 Partially verified / smoke-tested | `VMCParaOpt` supports direct SR (`NSRCG = 0`) with `NSplitSize >= 1` for `NQPFull = 1` and for sz-conserved standard-projection `NQPFull > 1` when `NQPOptTrans = 1` (`NSPGaussLeg > 1` and/or `NMPTrans > 1`), plus standard SR-CG (`NSRCG = 1`) with `NSplitSize = 1`; rank0 output/readback, comm0 reductions, `NSplitSize/NStore`, and standard-projection self-consistency paths are smoke-tested under `mpiexec -n 2/-n 4`. `VMCPhysCal` supports `NSplitSize > 1` for sz-conserved normal-Green runs (`NLanczosMode = 0`). `VMCPhysCal` split with Lanczos, FSZ/general-orbital PhysCal split, SR-CG with `NSplitSize > 1`, FSZ standard-projection `NQPFull > 1` (`NSPGaussLeg > 1` or `abs(NMPTrans) > 1`), OptTrans-derived QP sectors (`NQPOptTrans > 1` or active `OptTrans`) with `NSplitSize > 1`, and `RescaleSmat != 0` without `NSRCG = 1` are still rejected. |
 
 ## Installation
 
@@ -93,7 +93,7 @@ See [CITATION.cff](CITATION.cff). Plain-text:
 
 The [PfaPack.jl](https://github.com/tmisawa/PfaPack.jl) and [SFMT.jl](https://github.com/tmisawa/SFMT.jl) Julia wrappers used here as submodules were primarily authored by **Satoshi Terasaki** ([AtelierArith](https://atelier-arith.jp/)). Their original placement inside Julia-mVMC as `MVMCPfaPack.jl/` and `SFMT19937.jl/` predates the initial v0.1 release; they were extracted to standalone repositories under non-GPL open-source licenses (BSD-3-Clause for SFMT; BSD-3-Clause + MPL-2.0 for PfaPack) with Terasaki's consent.
 
-The mVMC C reference implementation is developed at ISSP, University of Tokyo: <https://github.com/issp-center-dev/mVMC>.
+The mVMC C reference implementation is developed at ISSP, University of Tokyo: <https://github.com/issp-center-dev/mVMC>. Julia-mVMC follows C mVMC 1.4.0 (`v1.4.0`, `e83aa6cb`) as its C reference; see [docs/src/en/compatibility.md](docs/src/en/compatibility.md#c-reference-version) for the adopted 1.4.0 contracts and kept deviations.
 
 ## Contributing
 

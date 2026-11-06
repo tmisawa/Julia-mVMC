@@ -1,0 +1,4 @@
+warning: SR-CG became numerically unstable at iter=2 (max_iter=10).
+remark: in zqp_SRinfo.dat, negative info means SR-CG fallback at iteration (info=-(iter+1)).
+warning: fallback from SR-CG to SR-CG-diag.
+remark: SR-CG-diag after fallback converged at iter=2.

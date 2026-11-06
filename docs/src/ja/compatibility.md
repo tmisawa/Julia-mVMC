@@ -41,6 +41,37 @@ committed reference fixture は `test/integration/reference/` 配下にありま
 fixture では C commit、build flags、regeneration command を metadata に記録しています。
 通常の CI では local C-mVMC build は不要です。
 
+## C reference version
+
+C の authority は mVMC 1.4.0 (`v1.4.0`, `e83aa6cb`; nested StdFace `6fa4ef1f`,
+BLIS `a32257ee`, PFAPACK `ebaa11b7` は 1.3.0 と同じ pin) です。C-native fixture は
+1.4.0 で再検証または再生成しました (`test/integration/reference/README.md` と
+`MVMCOptimizers.jl/test_unit/fixtures/` の各 README)。採用した 1.4.0 の contract:
+
+- SR-CG は C の status を返します: 収束時は iteration 数、breakdown guard
+  (非有限の `delta`, `d.q`, `alpha`, `beta`、`|d.q|` または旧 `|delta|` が `1e-20` 未満)
+  では `-(iter+1)`、上限到達では `-(max_iter+1)`。失敗時は既定で abort します
+  (`NSRCGAbortOnFail 1`、C と同じ message の Julia error)。`NSRCGAbortOnFail 0` は近似解で
+  継続し、`NSRCGFallback 1` はもう一方の CG で `x = 0` から再試行します。
+- `NSRCG 2` (または `NSRCG 1` と `useDiagScale 1`) は DiagScale 前処理付き CG、
+  `RescaleSmat 1` は SR-CG 前に Slater block を rescale します (`NSRCG 1` が必要)。
+  負の `DSROptStepDt` と SR-CG の組合せは reject します。
+- `zvo_SRinfo.dat` の CG 行は `"%5d %d"` (C の status) で終わり、header に ` info` が付きます。
+- Jastrow reader は全ての有向 pair がちょうど一度現れ、`(i,j)` と `(j,i)` が同じ class で
+  あることを要求します。
+- real の 2電子 Pfaffian update は旧 b-site (`rbOld`) を読みます。PhysCal timer report に
+  `addPhysTwist [54]` 行があります。
+- `reweight 1` は reject します (reweighting は未移植)。
+
+既定の CG tolerance では、1.4.0 で上限到達や絶対値 `1e-20` guard により既定 abort する
+通常入力があります。従来の継続動作には `NSRCGAbortOnFail 0` を指定してください。
+
+維持している deviation: real parameter の RBM は正しい RBM factor を保ちます
+(C 1.4.0 は reject、Julia-mVMC#59)。OptTrans flag と real mode の OptTrans derivative slot
+(#94, #55)。active parameter のない SR-CG step は no-op です (C 1.4.0 は abort し `r[0]` を
+範囲外で読みます)。1.4.0 の新機能 (reweighting, twist, spin Jastrow, t-J,
+`NExUpdatePath = 6`, backflow) は未移植です。GPU path は変更なし (direct SR のみ)。
+
 ## Floating-point tolerances
 
 energy / spin accumulator は通常、BLAS summation-order noise の範囲で C reference と
@@ -64,9 +95,7 @@ policy は conservative です。
 - BackFlow;
 - spin Jastrow;
 - `NSplitSize > 1` with SR-CG;
-- `NSRCG >= 2`;
-- `useDiagScale != 0`;
-- `RescaleSmat != 0`;
+- `reweight = 1` (C 1.4.0 reweighting);
 - FSZ/general-orbital PhysCal split;
 - PhysCal Lanczos split;
 - FSZ/general-orbital Lanczos;

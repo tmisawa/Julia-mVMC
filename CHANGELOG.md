@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Moved the C reference from mVMC 1.3.0 to mVMC 1.4.0 (`v1.4.0`, `e83aa6cb`)
+  (#95). C-native fixtures were re-verified or regenerated against 1.4.0 with
+  recorded provenance.
+- SR-CG follows the C 1.4.0 contract: breakdown guards and the iteration-limit
+  status, `NSRCGAbortOnFail` (default 1: a failed solve aborts),
+  `NSRCGFallback`, DiagScale-preconditioned CG (`NSRCG = 2` / `useDiagScale`),
+  `RescaleSmat`, rejection of SR-CG with `DSROptStepDt < 0`, and the
+  `zvo_SRinfo.dat` CG row format `"%5d %d"` with the ` info` header title.
+  With the default tolerance, some inputs now stop with an error; set
+  `NSRCGAbortOnFail 0` to continue with the approximate solution.
+- The Jastrow reader requires the C 1.4.0 complete, symmetric table.
+- The real two-electron Pfaffian update reads the old b-site (`rbOld`, C 1.4.0;
+  roundoff-level change). The PhysCal timer report gains `addPhysTwist [54]`.
+- `reweight = 1` is rejected (C 1.4.0 reweighting is not ported).
+
 ## v0.5.0 - 2026-07-08
 
 This release extends the experimental PhysCal and MPI split coverage after

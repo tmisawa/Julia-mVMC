@@ -210,11 +210,11 @@ end
     @test count("srcg-e2e worker: non-root rank ok", out) == 1
 end
 
-@testset "v0.5 failure mode: NSRCG >= 2 rejects before MPI.Init" begin
+@testset "C 1.4.0 failure mode: RescaleSmat without NSRCG = 1 rejects before MPI.Init" begin
     outdir = mktempdir()
-    out = read(`$(mpiexec()) -n 2 $(Base.julia_cmd()) --project=$project $failure_worker nsrcg2 $outdir`,
+    out = read(`$(mpiexec()) -n 2 $(Base.julia_cmd()) --project=$project $failure_worker rescale_direct $outdir`,
                String)
-    @test count("failure-mode worker: nsrcg2 expected rejection ok", out) == 2
+    @test count("failure-mode worker: rescale_direct expected rejection ok", out) == 2
     @test isempty(readdir(outdir))
 end
 

@@ -18,3 +18,9 @@ Authoritative `vmcmain.c` SHA-256:
 Original standalone formatting driver SHA-256:
 `60fca5b77c96d7e33119a39efbd604a9a4af7e9bf5f28ab5fd2f17d7cbb2eee2`.
 Driver: `AtelierArith/mvmc-rs`'s optional `c_toolbox/physcal_181_format.c`.
+## mVMC 1.4.0 re-verification (Julia-mVMC#95, 2026-11-06)
+
+The C reference moved to mVMC 1.4.0 (`v1.4.0`, `e83aa6cb`). The `zvo_var.dat`
+templates and loop are byte-identical at 1.4.0 `vmcmain.c:657–659` (whole-file
+SHA256 `da14885da14fd5b98feb27f7c53efd6fa229a4a33d27c30fe44848e6514394f0`); the
+fixture is unchanged.

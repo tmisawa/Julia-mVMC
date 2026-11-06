@@ -71,6 +71,7 @@ end
     include("../test_unit/test_unit_hopping_retry_cap.jl")
     include("../test_unit/test_unit_vmc_sampling_qp_split.jl")
     include("../test_unit/test_unit_slater_update.jl")
+    include("../test_unit/test_unit_two_electron_rb_old.jl")
     include("../test_unit/test_unit_slater_checked_kernel.jl")
     include("../test_unit/test_unit_vmc_main_cal_sr.jl")
     include("../test_unit/test_unit_slater_qp_threading.jl")

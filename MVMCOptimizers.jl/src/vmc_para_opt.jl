@@ -83,6 +83,9 @@ function vmc_para_opt!(
     c_timer::Union{CTimer,Nothing} = nothing,
     ctx::ParallelContext = serial_context(),
 )::Int
+    # C 1.4.0 ReadDefFileNInt normalizes the SR-CG options (NSRCG 2 ->
+    # DiagScale CG) before its checks; idempotent for parser-produced data.
+    MVMCExpertModeParsers.normalize_sr_cg_modpara!(data.modpara)
     # Reject unsupported global / para-opt combinations before any work.
     validate_supported_modpara(data.modpara)
     validate_supported_para_opt_parallel_modpara(ctx, data.modpara)

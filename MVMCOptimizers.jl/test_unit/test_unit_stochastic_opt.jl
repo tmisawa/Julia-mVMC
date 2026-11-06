@@ -373,6 +373,121 @@ end
     @test data.orbital_terms[1].value ≈ 9.5 + 0.0im atol = 1e-14
 end
 
+function _one_parameter_cg_case(; ho = 1.0, kwargs...)
+    data = ExpertModeData()
+    data.modpara = ModParaParameters(;
+        nsite = 1, nelec = 1, nvmc_sample = 2, n_orbital_idx = 1, nsrcg = 1,
+        dsr_opt_red_cut = 0.0, dsr_opt_sta_del = 0.0, dsr_opt_step_dt = 0.5,
+        kwargs...,
+    )
+    data.orbital_terms = [OrbitalTerm(0, 0, 0, 10.0 + 0.0im, false, 1)]
+    state = MVMCOptimizers.VMCOptimizationState(1, 1, 0, 1, 1, 2, false, false)
+    state.energy.wc = 4.0 + 0.0im
+    n = state.sr_opt.sr_opt_size
+    state.sr_opt.sr_opt_oo_real[n+2] = 2.0
+    state.sr_opt.sr_opt_ho_real[2] = ho
+    state.sr_opt.sr_opt_o_store_real[2] = 2.0
+    state.sr_opt.sr_opt_o_store_real[n+2] = 2.0
+    return data, state
+end
+
+@testset "unit/stochastic_opt: C 1.4.0 SR-CG status, SRinfo row and abort policy" begin
+    # S = 2, g = -1: one CG step reaches r = 0, so C returns status 1.
+    data, state = _one_parameter_cg_case()
+    mktempdir() do dir
+        @test MVMCOptimizers.stochastic_opt_cg!(
+            data, state, MVMCOptimizers.CTIMER_DISABLED,
+            MVMCOptimizers.serial_context(), dir) == 0
+        # initfile.c:47-54 header with " info"; stcopt_cg_impl.c:285 "%5d %d".
+        @test readlines(joinpath(dir, "zvo_SRinfo.dat")) == [
+            "#Npara Msize optCut diagCut sDiagMax  sDiagMin    absRmax       imax info",
+            "    1     1     0     0  2.00000e+00  2.00000e+00 -5.00000e-01     0 1",
+        ]
+    end
+    @test data.orbital_terms[1].value ≈ 9.5 + 0.0im atol = 1e-14
+
+    # A non-finite gradient gives delta = Inf: status -(0+1) before any update.
+    data, state = _one_parameter_cg_case(ho = Inf)
+    err = try
+        redirect_stderr(devnull) do
+            MVMCOptimizers.stochastic_opt_cg!(data, state)
+        end
+        nothing
+    catch e
+        e
+    end
+    @test err isa ErrorException && err.msg == "error: SR-CG fallback is disabled. Abort."
+    @test data.orbital_terms[1].value == 10.0 + 0.0im
+
+    data, state = _one_parameter_cg_case(ho = Inf, nsrcg_abort_on_fail = 0)
+    mktempdir() do dir
+        info = redirect_stderr(devnull) do
+            MVMCOptimizers.stochastic_opt_cg!(
+                data, state, MVMCOptimizers.CTIMER_DISABLED,
+                MVMCOptimizers.serial_context(), dir)
+        end
+        @test info == 0  # continue with the approximate (zero) solution
+        @test split(readlines(joinpath(dir, "zvo_SRinfo.dat"))[2])[end] == "-1"
+    end
+    @test data.orbital_terms[1].value == 10.0 + 0.0im
+
+    # Fallback to the DiagScale CG reports the first solver's status, then aborts
+    # because the alternative fails as well.
+    data, state = _one_parameter_cg_case(ho = Inf, nsrcg_fallback = 1)
+    err = try
+        redirect_stderr(devnull) do
+            MVMCOptimizers.stochastic_opt_cg!(data, state)
+        end
+        nothing
+    catch e
+        e
+    end
+    @test err isa ErrorException &&
+          err.msg == "error: fallback SR-CG-diag became numerically unstable at iter=0 " *
+                     "(max_iter=1). Abort."
+
+    # Documented deviation: no active component stays a no-op (C 1.4.0 aborts).
+    data, state = _one_parameter_cg_case()
+    data.optimization_flags = fill(false, 2)
+    mktempdir() do dir
+        @test (@test_logs (:warn,) MVMCOptimizers.stochastic_opt_cg!(
+            data, state, MVMCOptimizers.CTIMER_DISABLED,
+            MVMCOptimizers.serial_context(), dir)) == 0
+        @test !isfile(joinpath(dir, "zvo_SRinfo.dat"))
+    end
+end
+
+@testset "unit/stochastic_opt: RescaleSmat rescales the Slater block (C Rescale4SRCG)" begin
+    # Proj (1 Gutzwiller) | Slater (1 orbital), real. S diagonal: proj 4, slater 1
+    # -> ratio 4, sqrt 2: Slater <OO> x4, <O>,<HO>, store x2, Slater parameter / 2.
+    data = ExpertModeData()
+    data.modpara = ModParaParameters(nsite = 1, nelec = 1, nvmc_sample = 1,
+        n_orbital_idx = 1, nsrcg = 1, rescale_smat = 1, dsr_opt_red_cut = 0.0)
+    data.gutzwiller_terms = [GutzwillerTerm(0, 0.0 + 0.0im, false)]
+    data.n_gutzwiller_idx = 1
+    data.orbital_terms = [OrbitalTerm(0, 0, 0, 8.0 + 2.0im, false, 1)]
+    state = MVMCOptimizers.VMCOptimizationState(1, 1, 1, 2, 1, 1, false, false)
+    n = state.sr_opt.sr_opt_size
+    @test n == 3
+    oo = state.sr_opt.sr_opt_oo_real
+    oo[2], oo[3] = 1.0, 0.5            # <O_proj>, <O_slater>
+    oo[n+2], oo[n+3] = 5.0, 1.25       # <O^2>: S_diag 4 and 1
+    ho = state.sr_opt.sr_opt_ho_real
+    ho[2], ho[3] = 0.25, 0.75
+    store = state.sr_opt.sr_opt_o_store_real
+    store[2], store[3] = 1.5, 0.5
+    ratio = MVMCOptimizers._rescale_4_srcg!(
+        data, oo, ho, store, n, MVMCOptimizers._parameter_count_breakdown(data).n_para, 1)
+    @test ratio == 2.0
+    @test (oo[2], oo[3], oo[n+2], oo[n+3]) == (1.0, 1.0, 5.0, 5.0)
+    @test (ho[2], ho[3], store[2], store[3]) == (0.25, 1.5, 1.5, 1.0)
+    @test data.orbital_terms[1].value == 4.0 + 1.0im
+    # No projection variance: C returns without rescaling.
+    oo[n+2] = 1.0
+    @test MVMCOptimizers._rescale_4_srcg!(data, oo, ho, store, n, 2, 1) === nothing
+    @test data.orbital_terms[1].value == 4.0 + 1.0im
+end
+
 @testset "unit/stochastic_opt: update_parameter_value Proj/RBM/Slater mapping" begin
     data = make_mock_data_for_stochastic_opt_tests()
     delta = 0.25 - 0.5im

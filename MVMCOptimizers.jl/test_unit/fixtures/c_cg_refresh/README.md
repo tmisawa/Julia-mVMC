@@ -1,5 +1,57 @@
 # Independent C sampled CG refresh records
 
+## mVMC 1.4.0 records (current)
+
+The six `*.txt` files are C mVMC 1.4.0 (`v1.4.0`, `e83aa6cb`) outputs of the
+optional fixed-input kernel adapter `ctest_cg_refresh.c` (imported unchanged from
+the Rust port's `c_toolbox/ctest_cg_refresh.c`, https://github.com/AtelierArith/mvmc-rs,
+adapter SHA256 `9df41611459585db474b016c5905d753c158194e5516dbf9f1d82baf11d3ea11`).
+`ctest_cg_main_upstream.inc` is the byte-for-byte concatenation of 1.4.0
+`src/mVMC/stcopt_cg_impl.c` lines 1–21 (license) and 350–668
+(`StochasticOptPreconCG_DiagScale_Main`, `StochasticOptCG_Main`, sampled operator);
+upstream SHA256 `84a1bb1867a957f25d8a822f67213ff044bf52448d96263c2efdf085bb815dd5`,
+extraction SHA256 `63d35a521f1b3ddcea93b7009881594fb20f091a2968dc4aecc4709621482cb6`.
+`ctest_cg_dot_upstream.inc` (`stcopt_cg.c:26–34`) is unchanged from 1.3.0
+(extraction SHA256 `f36c3f7d0aa0fc22e7e3cbffde3c95b79808112979e1e0ebc8fdd853d995d214`).
+
+The status column is the C 1.4.0 return value: tolerance zero never converges,
+so every limit records `-(limit+1)`, or `-(iter+1)` at an earlier breakdown guard.
+The `*_diag_scale.txt` files run the DiagScale-preconditioned Main (`diag` argument).
+Inputs are the operand rows of the previous (1.3.0) records, unchanged.
+
+Regenerated 2026-11-06, Linux x86_64, GCC 13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04.1),
+`-O0 -ffp-contract=off`, no OpenMP/SIMD, LP64 OpenBLAS pthread 0.3.26+ds-1ubuntu0.1
+(library SHA256 `bfc7492adbf84a8f567720a9e1fae2afc18f3d817da233e7f4d453683485308e`),
+one thread. The output hashes equal the independent mvmc-rs #682 regeneration:
+
+| File | C 1.4.0 output SHA256 |
+| --- | --- |
+| real.txt | f5b6e8340e886943423f3e9d85d8d3ca298c0c61d4bb6fc3d9fd649c934f3fa2 |
+| complex.txt | 7009acebae2fc64bdfbd58d2b8fd471248c0475ba627f844bf4e80f6f0fc3088 |
+| sampled_complex.txt | eec31746b75c09e58d44a973ee8d1f0dca9e48670ad4e7662c5ccec4f5990091 |
+| real_diag_scale.txt | 3a3a7007db4e4c0830dbbff76ba2e0b06f10398e8a2ee23ba1a649784b2a4e45 |
+| complex_diag_scale.txt | d9f0f158b16d23971ebde5efdb044b6070709a26943f56e47cb4016736f0dd6d |
+| sampled_complex_diag_scale.txt | 5551ab36a2db88ea1a364f5f3b63552949505d261913a02e4d90386ca2755d96 |
+
+Against the 1.3.0 records, the real and complex plain trajectories are
+bit-identical and only the status column changed (1.3.0 returned the iteration
+count). The sampled complex trajectory stops at iteration 5 for every limit above
+5 (status `-6`): its old `delta` falls below the new absolute `1e-20` guard,
+where 1.3.0 continued (108 data rows differ for that reason).
+
+```sh
+cc -O0 -ffp-contract=off -DMVMC_SRCG_REAL ctest_cg_refresh.c -lopenblas -lm -o /tmp/real-cg
+cc -O0 -ffp-contract=off ctest_cg_refresh.c -lopenblas -lm -o /tmp/complex-cg
+OPENBLAS_NUM_THREADS=1 /tmp/real-cg real.txt /tmp/real.txt
+OPENBLAS_NUM_THREADS=1 /tmp/complex-cg complex.txt /tmp/complex.txt
+OPENBLAS_NUM_THREADS=1 /tmp/complex-cg sampled_complex.txt /tmp/sampled_complex.txt
+# DiagScale: append `diag`, e.g. /tmp/real-cg real.txt /tmp/real_diag_scale.txt diag
+```
+
+## Historical mVMC 1.3.0 generation
+
+The text below describes the original 1.3.0 records, which these files replace.
+
 These three files are imported without modification from the Rust port's
 optional C kernel oracle, documented in `c_toolbox/ctest_cg_refresh.md` of
 https://github.com/AtelierArith/mvmc-rs . They are NOT Rust-generated results

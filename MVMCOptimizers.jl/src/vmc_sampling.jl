@@ -2358,8 +2358,8 @@ function update_m_all_two_real!(
     rsa = ele_idx[msa+1] + s * n_site  # 0-based site index (new position)
     rsb = ele_idx[msb+1] + t * n_site  # 0-based site index (new position)
     rsa_old = ra_old + s * n_site  # 0-based site index (old position)
-    # Note: C code has a bug here using raOld for both, but we follow the algorithm
-    rsb_old = ra_old + t * n_site  # 0-based site index (matching C: rsbOld = raOld + t*Nsite)
+    # C 1.4.0 pfupdate_two_real.c:230 uses rbOld (1.3.0 used raOld, upstream #100).
+    rsb_old = rb_old + t * n_site  # 0-based site index (old position)
 
     # Get array references
     slater_elm_real = state.slater_matrix.slater_elm_real
@@ -5830,7 +5830,7 @@ function update_m_all_two_fsz_real!(
     rsa = ele_idx[msa+1] + s * n_site
     rsb = ele_idx[msb+1] + t * n_site
     rsa_old = ra_old + s * n_site
-    rsb_old = ra_old + t * n_site  # match C behavior
+    rsb_old = rb_old + t * n_site  # C 1.4.0 pfupdate_two_fsz_real.c:221 (rbOld)
 
     slater_elm_real = state.slater_matrix.slater_elm_real
     inv_m_real = state.slater_matrix.inv_m_real

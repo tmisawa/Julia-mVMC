@@ -92,8 +92,11 @@ mutable struct ModParaParameters
     # SR solver selection
     nsrcg::Int          # 0: direct solver (LAPACK), !=0: CG solver
     nstore_o::Int       # 0: normal, !=0: store O samples
-    use_diag_scale::Int # C useDiagScale: preconditioned CG, unsupported in Julia
-    rescale_smat::Int   # C RescaleSmat: S-matrix rescale, unsupported in Julia
+    use_diag_scale::Int # C useDiagScale: DiagScale-preconditioned SR-CG (NSRCG 2 sets it)
+    rescale_smat::Int   # C RescaleSmat: Slater-block S-matrix rescale before SR-CG
+    nsrcg_fallback::Int      # C 1.4.0 NSRCGFallback: retry a failed CG with the other variant
+    nsrcg_abort_on_fail::Int # C 1.4.0 NSRCGAbortOnFail: abort on a failed CG (default 1)
+    reweight::Int            # C 1.4.0 reweight: sample reweighting (not ported; 1 is rejected)
 
     # Random number generation
     rnd_seed::Int
@@ -157,6 +160,9 @@ mutable struct ModParaParameters
         nstore_o::Int = 1,
         use_diag_scale::Int = 0,
         rescale_smat::Int = 0,
+        nsrcg_fallback::Int = 0,
+        nsrcg_abort_on_fail::Int = 1,  # C 1.4.0 SetDefaultValuesModPara
+        reweight::Int = 0,
         rnd_seed::Int = 11272,  # C parity: RndSeed 行欠落時の default (readdef.c:1967)
         nsplit_size::Int = 1,
         nsp_gauss_leg::Int = 1,
@@ -203,6 +209,9 @@ mutable struct ModParaParameters
             nstore_o,
             use_diag_scale,
             rescale_smat,
+            nsrcg_fallback,
+            nsrcg_abort_on_fail,
+            reweight,
             rnd_seed,
             nsplit_size,
             nsp_gauss_leg,

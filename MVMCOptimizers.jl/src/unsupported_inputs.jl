@@ -24,13 +24,16 @@ Currently rejected:
   matching the codebase convention for invalid parameter *values*.
 - `NLanczosMode < 0` or `NLanczosMode > 2`: invalid / unknown values. Entry
   point validators below define the currently supported subset.
-- `NSRCG >= 2`: Julia currently supports the direct SR solver (`NSRCG = 0`)
-  and the standard SR-CG solver (`NSRCG = 1`) only.
-- `useDiagScale != 0`: C's preconditioned CG mode is not ported yet.
-- `RescaleSmat != 0`: C's S-matrix rescaling mode is not ported yet.
+- the fatal SR-CG checks of C mVMC 1.4.0 `ReadDefFileNInt`
+  (`readdef.c:946-976`), applied to the normalized options
+  (`MVMCExpertModeParsers.normalize_sr_cg_modpara!`: `NSRCG 2` means
+  `NSRCG 1` + `useDiagScale 1`): `RescaleSmat != 0` requires `NSRCG == 1`, and
+  SR-CG (`NSRCG != 0`) cannot be combined with `DSROptStepDt < 0`;
+- `reweight = 1`: C 1.4.0 sample reweighting is not ported.
 
-`NSplitSize >= 1`, `NLanczosMode = 0/1/2`, and `NSRCG <= 1` are the globally
-valid settings. Entry-point-specific validators below reject combinations that
+`NSplitSize >= 1` and `NLanczosMode = 0/1/2` are the globally valid settings;
+any `NSRCG` value is accepted as in C (`NSRCG != 0` selects SR-CG). Entry-point-
+specific validators below reject combinations that
 are still unsupported for parameter optimization or physical measurement.
 """
 function validate_supported_modpara(modpara::ModParaParameters)
@@ -47,31 +50,26 @@ function validate_supported_modpara(modpara::ModParaParameters)
             "$(modpara.lanczos_mode).",
         )
     end
-    if modpara.nsrcg >= 2
+    # Validate the C-normalized options without mutating the caller's struct.
+    sr = MVMCExpertModeParsers.normalize_sr_cg_modpara!(deepcopy(modpara))
+    if sr.rescale_smat != 0 && sr.nsrcg != 1
         error(
-            "NSRCG >= 2 is not supported: Julia-mVMC currently implements " *
-            "the direct SR solver (NSRCG = 0) and standard SR-CG solver " *
-            "(NSRCG = 1) only (got NSRCG = $(modpara.nsrcg)). " *
-            "Set NSRCG = 0 or 1, or fall back to the C reference at " *
-            "https://github.com/issp-center-dev/mVMC.",
+            "error: invalid RescaleSmat configuration. RescaleSmat=1 requires " *
+            "NSRCG==1, but got NSRCG=$(sr.nsrcg).",
         )
     end
-    if modpara.use_diag_scale != 0
+    if sr.dsr_opt_step_dt < 0 && sr.nsrcg != 0
         error(
-            "useDiagScale != 0 is not supported: C's preconditioned CG " *
-            "mode is not implemented in Julia-mVMC " *
-            "(got useDiagScale = $(modpara.use_diag_scale)). " *
-            "Set useDiagScale = 0, or fall back to the C reference at " *
-            "https://github.com/issp-center-dev/mVMC.",
+            "error: SR-CG (NSRCG=$(sr.nsrcg)) cannot be combined with " *
+            "diagonalization mode (DSROptStepDt < 0). Use either DSROptStepDt > 0 " *
+            "with SR-CG, or DSROptStepDt < 0 with NSRCG=0.",
         )
     end
-    if modpara.rescale_smat != 0
+    if sr.reweight == 1
         error(
-            "RescaleSmat != 0 is not supported: C's S-matrix rescaling " *
-            "mode is not implemented in Julia-mVMC " *
-            "(got RescaleSmat = $(modpara.rescale_smat)). " *
-            "Set RescaleSmat = 0, or fall back to the C reference at " *
-            "https://github.com/issp-center-dev/mVMC.",
+            "reweight = 1 is not supported: the C mVMC 1.4.0 sample reweighting " *
+            "is not implemented in Julia-mVMC. Set reweight = 0, or fall back to " *
+            "the C reference at https://github.com/issp-center-dev/mVMC.",
         )
     end
     return nothing

@@ -30,3 +30,10 @@
   (nearest-neighbour hops). mode=:real, itinerant chain.
 - Julia vs C: one-body max_abs 5.6e-17, direct max_abs 5.6e-17, factored max_abs
   1.2e-16. n_para_consumed=35.
+
+## mVMC 1.4.0 regeneration (Julia-mVMC#95)
+- `expected/` was regenerated on 2026-11-06 from an unmodified C mVMC 1.4.0
+  (`v1.4.0`, `e83aa6cb`) `vmc.out` with the same inputs and `zqp_opt.dat`
+  (`../../C_1.4.0_PROVENANCE.txt`, `../../tools/regenerate_c_reference.sh`).
+  The C binary/commit and Julia-vs-C figures above are the historical 1.3.0-era
+  record; the current gate is the unchanged `green_compare.jl` tolerance.

@@ -225,6 +225,8 @@ const CTIMER_PHYS_CAL_LINES = Tuple{String,Int}[
     ("      GreenFunc2           [51] ", 51),
     ("      addPhysCA            [52] ", 52),
     ("      addPhysCACA          [53] ", 53),
+    # C 1.4.0 vmcclock.c:184 (Twist observables; not ported, so it stays 0).
+    ("      addPhysTwist         [54] ", 54),
     ("    Lanczos1               [43] ", 43),
     ("    Lanczos2               [44] ", 44),
     ("  UpdateSlaterElm          [20] ", 20),

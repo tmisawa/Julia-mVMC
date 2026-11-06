@@ -216,46 +216,57 @@ end
     end
 end
 
-@testset "unit/unsupported_inputs: SR-CG option contract" begin
-    @testset "standard direct and CG solvers are accepted" begin
-        @test MVMCOptimizers.validate_supported_modpara(
+@testset "unit/unsupported_inputs: SR-CG option contract (C 1.4.0)" begin
+    @testset "direct, CG and DiagScale CG solvers are accepted" begin
+        for modpara in (
             ModParaParameters(nsrcg = 0),
-        ) === nothing
-        @test MVMCOptimizers.validate_supported_modpara(
             ModParaParameters(nsrcg = 1),
-        ) === nothing
-    end
-
-    @testset "NSRCG >= 2 is rejected with a clear message" begin
-        modpara = ModParaParameters(nsrcg = 2)
-        threw, msg = capture_error_message(
-            () -> MVMCOptimizers.validate_supported_modpara(modpara),
+            ModParaParameters(nsrcg = 2),                       # DiagScale CG
+            ModParaParameters(nsrcg = 1, use_diag_scale = 1),
+            ModParaParameters(nsrcg = 0, use_diag_scale = 1),   # cleared, direct SR
+            ModParaParameters(nsrcg = 1, rescale_smat = 1),
+            ModParaParameters(nsrcg = 2, rescale_smat = 1),     # NSRCG 2 -> 1
+            ModParaParameters(nsrcg = 1, nsrcg_fallback = 1, nsrcg_abort_on_fail = 0),
+            ModParaParameters(nsrcg = 0, dsr_opt_step_dt = -0.01),
+            ModParaParameters(reweight = 2),                    # only 1 enables C reweighting
         )
-        @test threw
-        @test occursin("NSRCG >= 2", msg)
-        @test occursin("standard SR-CG solver", msg)
+            @test MVMCOptimizers.validate_supported_modpara(modpara) === nothing
+        end
+        # Validation is non-mutating.
+        modpara = ModParaParameters(nsrcg = 2)
+        MVMCOptimizers.validate_supported_modpara(modpara)
+        @test modpara.nsrcg == 2 && modpara.use_diag_scale == 0
     end
 
-    @testset "unported CG submodes are rejected with clear messages" begin
+    @testset "C 1.4.0 ReadDefFileNInt fatal checks" begin
         for (modpara, label) in (
-            (ModParaParameters(use_diag_scale = 1), "useDiagScale != 0"),
-            (ModParaParameters(rescale_smat = 1), "RescaleSmat != 0"),
+            (ModParaParameters(nsrcg = 0, rescale_smat = 1),
+             "RescaleSmat=1 requires NSRCG==1, but got NSRCG=0"),
+            (ModParaParameters(nsrcg = 3, rescale_smat = 1),
+             "RescaleSmat=1 requires NSRCG==1, but got NSRCG=3"),
+            (ModParaParameters(nsrcg = 1, dsr_opt_step_dt = -0.01),
+             "SR-CG (NSRCG=1) cannot be combined with diagonalization mode"),
+            (ModParaParameters(nsrcg = 2, dsr_opt_step_dt = -0.01),
+             "SR-CG (NSRCG=1) cannot be combined with diagonalization mode"),
+            (ModParaParameters(reweight = 1), "reweight = 1 is not supported"),
         )
             threw, msg = capture_error_message(
                 () -> MVMCOptimizers.validate_supported_modpara(modpara),
             )
             @test threw
             @test occursin(label, msg)
-            @test occursin("not supported", msg)
         end
     end
 
-    @testset "entry points enforce the CG option contract" begin
+    @testset "entry points normalize NSRCG 2 and enforce the contract" begin
         data = ExpertModeData()
-        data.modpara.nsrcg = 2
+        data.modpara.nsrcg = 0
+        data.modpara.rescale_smat = 1
         threw, msg = capture_error_message(() -> vmc_para_opt!(data))
         @test threw
-        @test occursin("NSRCG >= 2", msg)
+        @test occursin("RescaleSmat=1 requires NSRCG==1", msg)
+        @test MVMCOptimizers.MVMCExpertModeParsers.normalize_sr_cg_modpara!(
+            ModParaParameters(nsrcg = 2)).use_diag_scale == 1
     end
 end
 

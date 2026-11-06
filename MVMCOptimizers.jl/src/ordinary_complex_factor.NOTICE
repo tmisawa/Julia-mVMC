@@ -1,6 +1,7 @@
 ordinary_complex_factor.jl is a private Julia translation of Michael Wimmer's
 PFAPACK ZSKTF2 upper/normal branch and ZSKR2 upper/unit-stride branch.
-Authoritative mVMC C gitlink d73d06bd529d3b2573f38eb5817c4a5f52971006,
+Authoritative mVMC C 1.4.0 (v1.4.0, e83aa6cb; originally ported from
+d73d06bd529d3b2573f38eb5817c4a5f52971006, identical PFAPACK pin),
 nested PFAPACK ebaa11b722dbb5f1ddc62da607592d2e301c0c4a.
 zsktf2.f lines210-261, SHA256 f418a9c878434d0f441336b2b1b9016a16548fccb20bc924de2f5a15782d0d62;
 zskr2.f lines162-177, SHA256 c1cc1cf9753a2f16d2551cab0e52490ccc873ff26f84727b45a5e51dd9d095d7.

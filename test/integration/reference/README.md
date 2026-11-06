@@ -9,6 +9,44 @@ input fixtures used by Julia-mVMC integration tests.
   criterion: compare the first two final optimisation summary values against
   `ref_mean.dat` / `ref_std.dat` with the same `3 * std` and `1e-8` gates.
 
+## C reference: mVMC 1.4.0 (Julia-mVMC#95)
+
+The C authority is mVMC 1.4.0 (`v1.4.0`, `e83aa6cb`). Every C-native output file
+read by the integration tests (`zvo_out_first10.dat`, `zvo_out_first1.dat`,
+`zqp_opt_1step.dat`, the `mpi2` files, `physcal_ref/expected/*` and the SR-CG
+`variants/`) was regenerated on 2026-11-06 by
+`tools/regenerate_c_reference.sh` from an unmodified 1.4.0 `vmc.out`, with the
+committed inputs. Build and environment: `C_1.4.0_PROVENANCE.txt` (Linux x86_64,
+GCC/GFortran 13.3.0, `-O3 -DNDEBUG -fopenmp` so the 1.4.0 OpenMP SIMD pragmas
+are active with `OMP_NUM_THREADS=1`, `USE_GEMMT=ON` with the bundled BLIS,
+OpenBLAS 0.3.26 pthread, MPICH 4.2.0; one rank unless noted).
+
+Differences from the previous (1.3.0-era, macOS) files, all within the unchanged
+test tolerances: first-10 rows up to `3.4e-10` absolute (`<H^2>`/variance
+columns; `1e-10` relative), first-step PairHop rows `1e-14`, PhysCal Green files
+`<= 6e-13` absolute, Lanczos files up to `3.8e-10` absolute (`1e-8` relative,
+`spin_chain_lanczos` `zvo_ls_out`). A same-environment 1.3.0 build
+(`d73d06bd`) differs from 1.4.0 by the same order (real two-electron `rbOld`
+fix, SIMD reductions), e.g. up to `1.8e-9` on `spin_chain_lanczos/zvo_ls_out`.
+The C ctest references (`ctest_ref/ref_mean.dat`, `ref_std.dat`) are
+byte-identical to 1.4.0 `test/python/data/<Model>/ref/` (26 files).
+
+`heisenberg_chain_real_nsrcg` changed meaning under 1.4.0: with the default
+`NSRCGAbortOnFail 1`, C 1.4.0 aborts its first SR-CG solve ("SR-CG became
+numerically unstable at iter=2", status `-3`: the absolute `1e-20` guard), where
+1.3.0 ran 9 iterations. The fixture modpara therefore appends
+`NSRCGAbortOnFail 0` (continue with the approximate solution); the parameter
+update differs from the 1.3.0 file by up to `0.17` (stopped CG). The
+`zvo_SRinfo.dat` CG row uses `"%5d %d"` and reports `-3`.
+`variants/` holds C 1.4.0 references for the SR-CG options (default abort,
+`NSRCGFallback`, `NSRCG 2` DiagScale, `NSRCG 2` + fallback, `RescaleSmat`),
+and `hubbard_chain_real_nsrcg` is a new hand-authored NSRCG=1 first step of
+`hubbard_chain_real` (plain CG reaches the limit, status `-20`; DiagScale
+converges; `RescaleSmat` acts because the projection S diagonal is nonzero).
+They are checked by `srcg_option_equivalent.jl`.
+
+The sections below record the original 1.3.0-era acquisition.
+
 ## Provenance
 
 - **C source**: [`issp-center-dev/mVMC`](https://github.com/issp-center-dev/mVMC)
@@ -37,6 +75,7 @@ input fixtures used by Julia-mVMC integration tests.
 |--------------|------|-------------------|-----------------|-------------------|
 | `heisenberg_chain_real` | real | `HeisenbergChain` | yes | yes |
 | `heisenberg_chain_real_nsrcg` | real, NSRCG=1 | hand-authored from `HeisenbergChain` | 1-step only | no |
+| `hubbard_chain_real_nsrcg` | real, NSRCG=1 | hand-authored from `HubbardChain` | 1-step SR-CG variants only | no |
 | `hubbard_chain_real` | real | `HubbardChain` | yes | yes |
 | `hubbard_tetragonal_real` | real | `HubbardTetragonal` | no | yes |
 | `hubbard_tetragonal_momentum_projection_real` | real | `HubbardTetragonal_MomentumProjection` | no | yes |
@@ -147,6 +186,7 @@ from `heisenberg_chain_real` with:
 - `DSROptCGTol = 1.0e-10`
 - `NSROptCGMaxIter = 0`
 - `NSplitSize = 1`
+- `NSRCGAbortOnFail = 0` (added for C 1.4.0, see above)
 
 The committed `zvo_out_first1.dat` and `zqp_opt_1step.dat` were generated with
 C-mVMC `mVMC/build-openblas-debug/src/mVMC/vmc.out`, linked against Homebrew

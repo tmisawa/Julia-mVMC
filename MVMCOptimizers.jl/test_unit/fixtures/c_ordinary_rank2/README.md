@@ -54,3 +54,13 @@ After the frozen runs, only the caller's obsolete performance comment and this
 README were corrected. Executable algorithm and test code are unchanged; the
 post-comment package manifest has new hashes, not retroactively assigned to the
 historical frozen-source manifest. No scalar port performance claim is made.
+
+## mVMC 1.4.0 re-verification (Julia-mVMC#95, 2026-11-06)
+
+The C reference moved to mVMC 1.4.0 (`v1.4.0`, `e83aa6cb`). The authoritative
+PFAPACK `dsktf2.f`/`dskr2.f` (nested pin `ebaa11b7`) and `matrix.c` are
+byte-identical in 1.4.0. `vmcmake_fsz_real.c` and `projection.c`, which the
+original acquisition harness also compiled (`source-sha256.txt`, historical 1.3.0
+paths), changed only by guarded t-J/doublon-only/spin-Jastrow branches that are
+inactive for this input (`NExUpdatePath` 0, no spin Jastrow). The fixture is
+unchanged and is a valid 1.4.0 reference.

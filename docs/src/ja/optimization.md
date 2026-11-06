@@ -63,9 +63,8 @@ Smoke gate では rank0-only output、comm0 reduction、direct-SR
 この release では以下を意図的に reject します。
 
 - `NSplitSize > 1` with SR-CG;
-- `NSRCG >= 2`;
-- `useDiagScale != 0`;
-- `RescaleSmat != 0`;
+- `RescaleSmat != 0` without `NSRCG = 1`, and SR-CG with `DSROptStepDt < 0` (C 1.4.0);
+- `reweight = 1`;
 - OptTrans-derived QP sector with `NSplitSize > 1`;
 - FSZ standard projection with `NQPFull > 1`.
 
