@@ -36,6 +36,16 @@ const PHYS_CAL_MODEL_FILTER_ENV = "JULIA_MVMC_PHYS_CAL_MODELS"
 # n_para is the expected read_opt_para_file! consumption
 # (= NProj + NOrbitalIdx for these NRBM=0 fixtures); asserting it catches a
 # silently-truncated zqp_opt.dat. It equals (token_count - 6) / 3.
+# Per-fixture absolute floor for the direct two-body Green file. FSZ
+# `heisenberg_chain_fsz` accumulates sampled FSZ Pfaffian updates whose roundoff
+# differs across platforms: on its row-17 value (-1.545e-4) C 1.4.0 and C 1.3.0
+# built in the same Linux x86_64 environment agree exactly, while C on macOS
+# arm64 (the earlier reference) and C on Linux x86_64 differ by up to 5.8e-13,
+# Julia Linux vs C Linux by 7.3e-13 and Julia macOS arm64 vs C Linux by
+# 1.16e-12 (Julia-mVMC#95 CI). The difference is platform roundoff, not the C
+# version, so this fixture gets 2e-12 (about twice the observed spread).
+const PHYS_CAL_DC_ATOL = Dict("heisenberg_chain_fsz" => 2e-12)
+
 const PHYS_CAL_MODELS = [
     (fixture = "heisenberg_chain_real", c_model = "HeisenbergChain",     mode = :real, n_para = 14),
     (fixture = "heisenberg_chain_cmp",  c_model = "HeisenbergChain_cmp", mode = :cmp,  n_para = 14),
@@ -97,7 +107,8 @@ function run_phys_cal_model(model)
                 find_green_file(expected, "zvo_cisajs"))),
             ("direct zvo_cisajscktalt", compare_green_two_dc(
                 find_green_file(dir, "zvo_cisajscktalt"),
-                find_green_file(expected, "zvo_cisajscktalt"))),
+                find_green_file(expected, "zvo_cisajscktalt");
+                atol = get(PHYS_CAL_DC_ATOL, model.fixture, GREEN_ATOL))),
             ("factored zvo_cisajscktaltex", compare_green_factored(
                 find_green_file(dir, "zvo_cisajscktaltex"),
                 find_green_file(expected, "zvo_cisajscktaltex"))),
