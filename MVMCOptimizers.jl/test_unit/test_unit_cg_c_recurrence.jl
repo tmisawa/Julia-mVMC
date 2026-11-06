@@ -88,12 +88,21 @@ end
             # Keep the C first-step comparison and validate BOTH trajectories
             # against the independent covariance at every later limit.
             budget = 8*(n+samples)*eps(Float64)
-            for (actual,target) in zip((ws.x,ws.r,ws.d),expected)
+            # DiagScale: r_new = r - alpha*q cancels (rounding ~ eps*(|g|+|r_new|)),
+            # and d_new = M^-1 r_new + beta*d divides it by M = (1+shift)*sdiag,
+            # which is as small as 1e-12. Bound those components by the operand
+            # scales they are computed from instead of by their own magnitude.
+            precon = [abs(MVMCOptimizers._cg_diag_scale(diagonal[i], 1 + 1e-5)) for i in 1:n]
+            scale_r = diag_scale ? abs.(gradient) .+ abs.(expected[2]) : zeros(n)
+            scale_d = diag_scale ? (2 .* abs.(gradient) .+ abs.(expected[2])) ./ precon : zeros(n)
+            for (k, (actual,target)) in enumerate(zip((ws.x,ws.r,ws.d),expected))
                 @test length(actual) == length(target)
                 @test all(isfinite, actual)
                 @test all(isfinite, target)
                 if limit == 1
-                    @test all(abs(a-b) <= budget*(1+abs(b)) for (a,b) in zip(actual,target))
+                    extra = k == 2 ? scale_r : k == 3 ? scale_d : zeros(n)
+                    @test all(abs(actual[i]-target[i]) <= budget*(1+abs(target[i])+extra[i])
+                              for i in 1:n)
                 end
             end
             for (solution, residual) in ((ws.x, ws.r), (expected[1], expected[2]))
