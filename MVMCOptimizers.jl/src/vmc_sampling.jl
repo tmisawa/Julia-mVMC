@@ -4992,10 +4992,8 @@ function calculate_m_all_real!(
     inv_m_real_temp = view(ws.inv_m_real_temp,:,:,(1:qp_num))
     pf_m_real_temp = view(ws.pf_m_real_temp, 1:qp_num)
 
-    # Zero out the workspace views before use
-    fill!(inv_m_real_temp, 0.0)
-    fill!(pf_m_real_temp, 0.0)
-
+    # Every selected plane is overwritten by the factorization, so the former
+    # full zero-fill of the 1 MB workspace is dead stores.
     # Call PfaPack's calculate_m_all_real!
     # Note: We use the imported function from PfaPack
     # PfaPack expects n_elec to be total number of electrons (2*Ne), not Ne
@@ -5647,24 +5645,37 @@ function update_m_all_real!(
         # C: invM = InvM_real + qpidx*Nsize*Nsize
         inv_offset = (qpidx - 1) * n_size * n_size
 
-        # Initialize vec1 to zero
-        fill!(vec1, 0.0)
-
-        # Calculate vec1[i] = sum_j (-invM[j][i] * sltE[a][rsj])
-        # Note: invM[i][j] = -invM[j][i] (skew-symmetric)
-        # C: vec1[msi] += -invM_j[msi] * sltE_aj
+        # Gather the Slater row once. `vec2` is reused as the row buffer and
+        # overwritten below, so no extra per-thread allocation is needed.
         @inbounds for msj = 0:(n_size-1)
             # rsj = eleIdx[msj] + (msj/Ne)*Nsite
             rsj = msj < n_elec ? ele_idx[msj+1] : (ele_idx[msj+1] + n_site)
-            slt_e_aj = slater_elm_real[slt_offset+rsa*n_site2+rsj+1]
+            vec2[msj+1] = slater_elm_real[slt_offset+rsa*n_site2+rsj+1]
+        end
 
-            # Scratch vectors and InvM are disjoint workspace allocations.
-            # Vectorize independent i entries while keeping the outer j sum order.
-            @simd ivdep for msi = 0:(n_size-1)
-                # invM_j[msi] = invM[msi][msj] stored at inv_offset + msj*n_size + msi
-                # But C stores row-major: invM[j][i] at invM + j*Nsize + i
-                inv_m_ji = inv_m_real[inv_offset+msj*n_size+msi+1]
-                vec1[msi+1] += -inv_m_ji * slt_e_aj
+        # Calculate vec1[i] = sum_j (-invM[j][i] * sltE[a][rsj]) with 16
+        # independent accumulators held in registers across the inner sum.
+        # The per-element addition order over j is unchanged, so this is the
+        # same arithmetic as the scalar C loop (no FMA).
+        @inbounds begin
+            i0 = 0
+            while i0 + 16 <= n_size
+                Base.Cartesian.@nexprs 16 k -> (a_k = 0.0)
+                for msj = 0:(n_size-1)
+                    slt_e_aj = vec2[msj+1]
+                    base = inv_offset + msj*n_size + i0
+                    Base.Cartesian.@nexprs 16 k -> (a_k += -inv_m_real[base+k] * slt_e_aj)
+                end
+                Base.Cartesian.@nexprs 16 k -> (vec1[i0+k] = a_k)
+                i0 += 16
+            end
+            while i0 < n_size
+                acc = 0.0
+                for msj = 0:(n_size-1)
+                    acc += -inv_m_real[inv_offset+msj*n_size+i0+1] * vec2[msj+1]
+                end
+                vec1[i0+1] = acc
+                i0 += 1
             end
         end
 

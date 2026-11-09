@@ -277,7 +277,7 @@ function parse_doublon_holon_2site_content(
             continue
         end
 
-        tokens = split_def_line(clean_line_str)
+        tokens = split(clean_line_str)
         length(tokens) < 4 && continue
 
         try
@@ -339,7 +339,7 @@ function parse_doublon_holon_4site_content(
             continue
         end
 
-        tokens = split_def_line(clean_line_str)
+        tokens = split(clean_line_str)
         length(tokens) < 5 && continue
 
         try

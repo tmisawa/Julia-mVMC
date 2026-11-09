@@ -1067,6 +1067,41 @@ Equivalent to C's `CalculateGreenFunc()` in calgrn.c.
 - `ip`: Inner product <ψ|x>
 - `ele_idx`, `ele_cfg`, `ele_num`, `ele_proj_cnt`: Electron configuration
 """
+function _ensure_green_thread_scratch!(
+    scratch::VMCMainCalScratch,
+    n_threads::Int,
+    n_size::Int,
+    n_site2::Int,
+    n_proj::Int,
+    n_qp_full::Int,
+)
+    while length(scratch.green_thread_idx) < n_threads
+        push!(scratch.green_thread_idx, Int[])
+        push!(scratch.green_thread_num, Int[])
+        push!(scratch.green_thread_proj, Int[])
+        push!(scratch.green_thread_pf, Float64[])
+    end
+    length(scratch.green_thread_idx) == n_threads ||
+        resize!(scratch.green_thread_idx, n_threads)
+    length(scratch.green_thread_num) == n_threads ||
+        resize!(scratch.green_thread_num, n_threads)
+    length(scratch.green_thread_proj) == n_threads ||
+        resize!(scratch.green_thread_proj, n_threads)
+    length(scratch.green_thread_pf) == n_threads ||
+        resize!(scratch.green_thread_pf, n_threads)
+    @inbounds for t in 1:n_threads
+        length(scratch.green_thread_idx[t]) == n_size ||
+            resize!(scratch.green_thread_idx[t], n_size)
+        length(scratch.green_thread_num[t]) == n_site2 ||
+            resize!(scratch.green_thread_num[t], n_site2)
+        length(scratch.green_thread_proj[t]) == n_proj ||
+            resize!(scratch.green_thread_proj[t], n_proj)
+        length(scratch.green_thread_pf[t]) == n_qp_full ||
+            resize!(scratch.green_thread_pf[t], n_qp_full)
+    end
+    return nothing
+end
+
 function calculate_green_func!(
     data::ExpertModeData,
     state::VMCOptimizationState,
@@ -1075,7 +1110,8 @@ function calculate_green_func!(
     ele_idx::Vector{Int},
     ele_cfg::Vector{Int},
     ele_num::Vector{Int},
-    ele_proj_cnt::Vector{Int},
+    ele_proj_cnt::Vector{Int};
+    scratch::Union{Nothing,VMCMainCalScratch} = nothing,
 )
     return calculate_green_func_into!(
         data,
@@ -1086,7 +1122,8 @@ function calculate_green_func!(
         ele_idx,
         ele_cfg,
         ele_num,
-        ele_proj_cnt,
+        ele_proj_cnt;
+        scratch = scratch,
     )
 end
 
@@ -1099,7 +1136,8 @@ function calculate_green_func!(
     ele_idx::Vector{Int},
     ele_cfg::Vector{Int},
     ele_num::Vector{Int},
-    ele_proj_cnt::Vector{Int},
+    ele_proj_cnt::Vector{Int};
+    scratch::Union{Nothing,VMCMainCalScratch} = nothing,
 )
     return calculate_green_func_into!(
         data,
@@ -1110,7 +1148,8 @@ function calculate_green_func!(
         ele_idx,
         ele_cfg,
         ele_num,
-        ele_proj_cnt,
+        ele_proj_cnt;
+        scratch = scratch,
     )
 end
 
@@ -1123,7 +1162,8 @@ function calculate_green_func_into!(
     ele_idx::Vector{Int},
     ele_cfg::Vector{Int},
     ele_num::Vector{Int},
-    ele_proj_cnt::Vector{Int},
+    ele_proj_cnt::Vector{Int};
+    scratch::Union{Nothing,VMCMainCalScratch} = nothing,
 )
     if state.phys_quantities === nothing
         error("PhysicalQuantities not initialized. Call initialize_phys_quantities! first.")
@@ -1139,23 +1179,82 @@ function calculate_green_func_into!(
     # (which, when TwoBodyGEx is present, includes appended factored
     # constituents in C order). C uses s = CisAjsIdx[idx][3] = sj (annihilation
     # spin); for sz-conserved inputs si == sj.
-    for (idx, (ri, si, rj, sj)) in enumerate(phys.cis_ajs_idx)
-        # Calculate GreenFunc1 with s = sj to match C
-        local_val = green_func1(
-            ri,
-            rj,
-            sj,
-            ip,
-            ele_idx,
-            ele_cfg,
-            ele_num,
-            ele_proj_cnt,
-            data,
-            state;
-            all_complex = all_complex,
-        )
+    n_one_body = length(phys.cis_ajs_idx)
+    one_body_parallel = vmc_inner_threading_requested(true) &&
+        n_one_body >= 2 &&
+        n_one_body * (2data.modpara.nelec) * get_n_qp_full(data) >= 65536 &&
+        Threads.threadid() == 1 && ccall(:jl_in_threaded_region, Cint, ()) == 0
+    if one_body_parallel
+        # `green_func1` copies the active sample buffers before mutating them,
+        # so independent terms can run concurrently; the weighted accumulation
+        # below stays in input order. In real, non-RBM mode use the
+        # allocation-free kernel with one reusable buffer set per thread.
+        one_body_values = Vector{ComplexF64}(undef, n_one_body)
+        use_real_scratch = !all_complex && !has_rbm_terms(data)
+        if use_real_scratch
+            n_qp_full = get_n_qp_full(data)
+            n_threads = Threads.maxthreadid()
+            if scratch !== nothing
+                _ensure_green_thread_scratch!(
+                    scratch, n_threads, length(ele_idx), length(ele_num),
+                    length(ele_proj_cnt), n_qp_full,
+                )
+                scratch_idx = scratch.green_thread_idx
+                scratch_num = scratch.green_thread_num
+                scratch_proj = scratch.green_thread_proj
+                scratch_pf = scratch.green_thread_pf
+                for t in 1:n_threads
+                    copyto!(scratch_idx[t], ele_idx)
+                    copyto!(scratch_num[t], ele_num)
+                end
+            else
+                scratch_idx = [copy(ele_idx) for _ in 1:n_threads]
+                scratch_num = [copy(ele_num) for _ in 1:n_threads]
+                scratch_proj = [zeros(Int, length(ele_proj_cnt)) for _ in 1:n_threads]
+                scratch_pf = [zeros(Float64, n_qp_full) for _ in 1:n_threads]
+            end
+            ip_real = real(ip)
+            Threads.@threads :dynamic for idx in 1:n_one_body
+                (ri, si, rj, sj) = phys.cis_ajs_idx[idx]
+                tid = Threads.threadid()
+                value = green_func1_real_value!(
+                    ri, rj, sj, ip_real,
+                    scratch_idx[tid], ele_cfg, scratch_num[tid], ele_proj_cnt,
+                    data, state, scratch_proj[tid], scratch_pf[tid],
+                )
+                one_body_values[idx] = ComplexF64(value, 0.0)
+            end
+        else
+            Threads.@threads :dynamic for idx in 1:n_one_body
+                (ri, si, rj, sj) = phys.cis_ajs_idx[idx]
+                one_body_values[idx] = green_func1(
+                    ri, rj, sj, ip, ele_idx, ele_cfg, ele_num, ele_proj_cnt,
+                    data, state; all_complex = all_complex,
+                )
+            end
+        end
+        for idx in 1:n_one_body
+            accumulate_phys_cis_ajs!(dst, phys, idx, w, one_body_values[idx])
+        end
+    else
+        for (idx, (ri, si, rj, sj)) in enumerate(phys.cis_ajs_idx)
+            # Calculate GreenFunc1 with s = sj to match C
+            local_val = green_func1(
+                ri,
+                rj,
+                sj,
+                ip,
+                ele_idx,
+                ele_cfg,
+                ele_num,
+                ele_proj_cnt,
+                data,
+                state;
+                all_complex = all_complex,
+            )
 
-        accumulate_phys_cis_ajs!(dst, phys, idx, w, local_val)
+            accumulate_phys_cis_ajs!(dst, phys, idx, w, local_val)
+        end
     end
 
     # Each observable owns its slot; the sample loop and its accumulation
@@ -1197,7 +1296,7 @@ function calculate_green_func_into!(
         Threads.threadid() == 1 && ccall(:jl_in_threaded_region, Cint, ()) == 0
     if parallel
         workers = Threads.nthreads()
-        Threads.@threads :static for slot in 1:workers
+        Threads.@threads :dynamic for slot in 1:workers
             for idx in slot:workers:n_terms
                 direct_green!(idx)
             end

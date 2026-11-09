@@ -15,13 +15,15 @@ Clear all physical quantities for a new calculation.
 Equivalent to C's `clearPhysQuantity()`.
 """
 
-function clear_phys_quantity!(state::VMCOptimizationState)
+function clear_phys_quantity!(state::VMCOptimizationState; clear_sr::Bool = true)
     # Clear energy data
     state.energy.wc = 0.0 + 0.0im
     state.energy.etot = 0.0 + 0.0im
     state.energy.etot2 = 0.0 + 0.0im
     state.energy.sztot = 0.0 + 0.0im
     state.energy.sztot2 = 0.0 + 0.0im
+
+    clear_sr || return nothing
 
     # Clear SR optimization data
     fill!(state.sr_opt.sr_opt_oo, 0.0 + 0.0im)
@@ -33,6 +35,7 @@ function clear_phys_quantity!(state::VMCOptimizationState)
         fill!(state.sr_opt.sr_opt_ho_real, 0.0)
         fill!(state.sr_opt.sr_opt_o_real, 0.0)
     end
+    return nothing
 end
 
 # ============================================================================
@@ -1706,7 +1709,7 @@ function _calculate_hamiltonian1_real_fast_threaded!(
         @inbounds scratch.calh1_thread_acc[tid]-=scratch.calh1_transfer_value[k]*green
     end
     if n_terms*n_qp_full*n_size >= 65536
-        Base.Threads.@threads :static for k = 1:n_terms
+        Base.Threads.@threads :dynamic for k = 1:n_terms
             process_term!(k,Base.Threads.threadid())
         end
     else
@@ -2409,7 +2412,7 @@ end
     return true
 end
 
-function _build_slater_trans_orb_fcmp_fast!(
+function _build_slater_trans_orb_fcmp_range!(
     trans_orb_idx::Vector{Int},
     trans_orb_sgn::Vector{Int},
     ele_idx::Vector{Int},
@@ -2418,10 +2421,11 @@ function _build_slater_trans_orb_fcmp_fast!(
     orbital_sgn::Matrix{Int},
     n_size::Int,
     n_mp_trans::Int,
-    n_trans::Int,
+    qp_first::Int,
+    qp_last::Int,
 )
     n_size_sq = n_size * n_size
-    @inbounds for qpidx = 0:(n_trans-1)
+    @inbounds for qpidx = qp_first:(qp_last-1)
         optidx = qpidx ÷ n_mp_trans
         mpidx = qpidx % n_mp_trans
 
@@ -2452,6 +2456,41 @@ function _build_slater_trans_orb_fcmp_fast!(
                     sgni * sgnj * orbital_sgn[tri+1, trj+1]
             end
         end
+    end
+    return nothing
+end
+
+function _build_slater_trans_orb_fcmp_fast!(
+    trans_orb_idx::Vector{Int},
+    trans_orb_sgn::Vector{Int},
+    ele_idx::Vector{Int},
+    data::ExpertModeData,
+    orbital_idx_matrix::Matrix{Int},
+    orbital_sgn::Matrix{Int},
+    n_size::Int,
+    n_mp_trans::Int,
+    n_trans::Int,
+)
+    n_size_sq = n_size * n_size
+    parallel = vmc_inner_threading_requested(true) && n_trans >= 2 &&
+        n_trans * n_size_sq >= 1_000_000 && Threads.threadid() == 1 &&
+        ccall(:jl_in_threaded_region, Cint, ()) == 0
+    if parallel
+        Threads.@threads :dynamic for slot in 1:Threads.nthreads()
+            first_qp = ((slot - 1) * n_trans) ÷ Threads.nthreads()
+            last_qp = (slot * n_trans) ÷ Threads.nthreads()
+            first_qp < last_qp && _build_slater_trans_orb_fcmp_range!(
+                trans_orb_idx, trans_orb_sgn, ele_idx, data,
+                orbital_idx_matrix, orbital_sgn, n_size, n_mp_trans,
+                first_qp, last_qp,
+            )
+        end
+    else
+        _build_slater_trans_orb_fcmp_range!(
+            trans_orb_idx, trans_orb_sgn, ele_idx, data,
+            orbital_idx_matrix, orbital_sgn, n_size, n_mp_trans,
+            0, n_trans,
+        )
     end
     return nothing
 end
@@ -2521,6 +2560,139 @@ function _accumulate_slater_buffer_fcmp_range!(
                 buffer[buf_base+orbidx+1] -= (ComplexF64(inv_m_flat[inv_i+msj+1]) * cs) * sgn
             end
         end
+    end
+    return nothing
+end
+
+function _accumulate_slater_buffer_real_range!(
+    buffer::Vector{Float64},
+    trans_orb_idx::Vector{Int},
+    trans_orb_sgn::Vector{Int},
+    inv_m_flat::Vector{Float64},
+    pf_m_real::Vector{Float64},
+    sp_gl_cos_sin::Vector{ComplexF64},
+    sp_gl_cos_cos::Vector{ComplexF64},
+    sp_gl_sin_sin::Vector{ComplexF64},
+    n_elec::Int,
+    n_size::Int,
+    n_size_sq::Int,
+    n_qp_full::Int,
+    n_sp_gauss_leg::Int,
+    n_slater::Int,
+    qp_start::Int,
+    qp_end::Int,
+)
+    @inbounds for qpidx = qp_start:(qp_end-1)
+        mpidx = qpidx ÷ n_sp_gauss_leg
+        spidx = qpidx % n_sp_gauss_leg
+        cs = pf_m_real[qpidx+1] * real(sp_gl_cos_sin[spidx+1])
+        cc = pf_m_real[qpidx+1] * real(sp_gl_cos_cos[spidx+1])
+        ss = pf_m_real[qpidx+1] * real(sp_gl_sin_sin[spidx+1])
+
+        inv_m_base = qpidx * n_size_sq
+        t_orb_idx_base = mpidx * n_size_sq
+        t_orb_sgn_base = mpidx * n_size_sq
+        buf_base = qpidx * n_slater
+
+        for msi = 0:(n_elec-1)
+            t_orb_idx_i = t_orb_idx_base + msi * n_size
+            t_orb_sgn_i = t_orb_sgn_base + msi * n_size
+            inv_i = inv_m_base + msi * n_size
+
+            for msj = 0:(n_elec-1)
+                orbidx = trans_orb_idx[t_orb_idx_i+msj+1]
+                sgn = trans_orb_sgn[t_orb_sgn_i+msj+1]
+                buffer[buf_base+orbidx+1] += (inv_m_flat[inv_i+msj+1] * cs) * sgn
+            end
+
+            for msj = n_elec:(n_size-1)
+                orbidx = trans_orb_idx[t_orb_idx_i+msj+1]
+                sgn = trans_orb_sgn[t_orb_sgn_i+msj+1]
+                buffer[buf_base+orbidx+1] -= (inv_m_flat[inv_i+msj+1] * cc) * sgn
+            end
+        end
+
+        for msi = n_elec:(n_size-1)
+            t_orb_idx_i = t_orb_idx_base + msi * n_size
+            t_orb_sgn_i = t_orb_sgn_base + msi * n_size
+            inv_i = inv_m_base + msi * n_size
+
+            for msj = 0:(n_elec-1)
+                orbidx = trans_orb_idx[t_orb_idx_i+msj+1]
+                sgn = trans_orb_sgn[t_orb_sgn_i+msj+1]
+                buffer[buf_base+orbidx+1] += (inv_m_flat[inv_i+msj+1] * ss) * sgn
+            end
+
+            for msj = n_elec:(n_size-1)
+                orbidx = trans_orb_idx[t_orb_idx_i+msj+1]
+                sgn = trans_orb_sgn[t_orb_sgn_i+msj+1]
+                buffer[buf_base+orbidx+1] -= (inv_m_flat[inv_i+msj+1] * cs) * sgn
+            end
+        end
+    end
+    return nothing
+end
+
+function _accumulate_slater_buffer_fcmp_real_fast!(
+    buffer::Vector{Float64},
+    trans_orb_idx::Vector{Int},
+    trans_orb_sgn::Vector{Int},
+    inv_m_flat::Vector{Float64},
+    pf_m_real::Vector{Float64},
+    sp_gl_cos_sin::Vector{ComplexF64},
+    sp_gl_cos_cos::Vector{ComplexF64},
+    sp_gl_sin_sin::Vector{ComplexF64},
+    n_elec::Int,
+    n_size::Int,
+    n_size_sq::Int,
+    n_qp_full::Int,
+    n_sp_gauss_leg::Int,
+    n_slater::Int,
+)
+    workers = Threads.nthreads()
+    parallel = vmc_inner_threading_requested(true) && n_qp_full >= 2 &&
+        n_qp_full * n_size_sq >= 32768 && Threads.threadid() == 1 &&
+        ccall(:jl_in_threaded_region, Cint, ()) == 0
+    if parallel
+        Threads.@threads :dynamic for slot in 1:workers
+            first_qp = ((slot - 1) * n_qp_full) ÷ workers
+            last_qp = (slot * n_qp_full) ÷ workers
+            _accumulate_slater_buffer_real_range!(
+                buffer, trans_orb_idx, trans_orb_sgn, inv_m_flat, pf_m_real,
+                sp_gl_cos_sin, sp_gl_cos_cos, sp_gl_sin_sin,
+                n_elec, n_size, n_size_sq, n_qp_full, n_sp_gauss_leg, n_slater,
+                first_qp, last_qp,
+            )
+        end
+    else
+        _accumulate_slater_buffer_real_range!(
+            buffer, trans_orb_idx, trans_orb_sgn, inv_m_flat, pf_m_real,
+            sp_gl_cos_sin, sp_gl_cos_cos, sp_gl_sin_sin,
+            n_elec, n_size, n_size_sq, n_qp_full, n_sp_gauss_leg, n_slater,
+            0, n_qp_full,
+        )
+    end
+    return nothing
+end
+
+function _store_slater_sr_opt_o_real_fast!(
+    sr_opt_o::AbstractVector{ComplexF64},
+    buffer::Vector{Float64},
+    qp_full_weight::Vector{ComplexF64},
+    inv_ip::ComplexF64,
+    n_qp_full::Int,
+    n_slater::Int,
+)
+    @inbounds for orbidx = 0:(n_slater-1)
+        real_idx = 2 * orbidx + 1
+        imag_idx = real_idx + 1
+        acc = 0.0
+        for qpidx = 0:(n_qp_full-1)
+            acc += real(qp_full_weight[qpidx+1]) * buffer[qpidx*n_slater+orbidx+1]
+        end
+        val = acc * real(inv_ip)
+        sr_opt_o[real_idx] = val
+        sr_opt_o[imag_idx] = val * im
     end
     return nothing
 end
@@ -2608,18 +2780,18 @@ function slater_elm_diff_fcmp!(
     ctimer_start!(diag_timer, 931)
     if scratch === nothing
         buffer = zeros(ComplexF64, buffer_len)
+        buffer_real = zeros(Float64, buffer_len)
         trans_orb_idx = zeros(Int, trans_len)
         trans_orb_sgn = zeros(Int, trans_len)
     else
         buffer = scratch.slater_buffer
+        buffer_real = scratch.slater_buffer_real
         trans_orb_idx = scratch.slater_trans_orb_idx
         trans_orb_sgn = scratch.slater_trans_orb_sgn
         length(buffer) == buffer_len || resize!(buffer, buffer_len)
+        length(buffer_real) == buffer_len || resize!(buffer_real, buffer_len)
         length(trans_orb_idx) == trans_len || resize!(trans_orb_idx, trans_len)
         length(trans_orb_sgn) == trans_len || resize!(trans_orb_sgn, trans_len)
-        fill!(buffer, 0.0 + 0.0im)
-        fill!(trans_orb_idx, 0)
-        fill!(trans_orb_sgn, 0)
     end
     ctimer_stop!(diag_timer, 931)
 
@@ -2648,6 +2820,25 @@ function slater_elm_diff_fcmp!(
         n_trans,
         n_slater,
     )
+
+    # Real inverse/Pfaffian and real projection weights let the derivative
+    # accumulate in Float64 instead of ComplexF64 (half the buffer traffic and
+    # scalar arithmetic), with exactly the same operation order.
+    use_real_buffer = fast_path && real_inverse &&
+        length(state.slater_matrix.pf_m_real) >= n_qp_full &&
+        data.qp_weights !== nothing &&
+        all(z -> imag(z) == 0.0, sp_gl_cos_sin) &&
+        all(z -> imag(z) == 0.0, sp_gl_cos_cos) &&
+        all(z -> imag(z) == 0.0, sp_gl_sin_sin) &&
+        all(z -> imag(z) == 0.0,
+            @view(data.qp_weights.qp_full_weight[1:n_qp_full]))
+    if use_real_buffer
+        fill!(buffer_real, 0.0)
+    else
+        fill!(buffer, 0.0 + 0.0im)
+    end
+    fill!(trans_orb_idx, 0)
+    fill!(trans_orb_sgn, 0)
 
     # Pre-compute transOrbIdx and transOrbSgn
     ctimer_start!(diag_timer, 932)
@@ -2753,22 +2944,41 @@ function slater_elm_diff_fcmp!(
     ctimer_start!(diag_timer, 933)
     # Loop over QP indices and accumulate buffer
     if fast_path
-        _accumulate_slater_buffer_fcmp_fast!(
-            buffer,
-            trans_orb_idx,
-            trans_orb_sgn,
-            inv_m_flat,
-            state.slater_matrix.pf_m,
-            sp_gl_cos_sin,
-            sp_gl_cos_cos,
-            sp_gl_sin_sin,
-            n_elec,
-            n_size,
-            n_size_sq,
-            n_qp_full,
-            n_sp_gauss_leg,
-            n_slater,
-        )
+        if use_real_buffer
+            _accumulate_slater_buffer_fcmp_real_fast!(
+                buffer_real,
+                trans_orb_idx,
+                trans_orb_sgn,
+                inv_m_flat,
+                state.slater_matrix.pf_m_real,
+                sp_gl_cos_sin,
+                sp_gl_cos_cos,
+                sp_gl_sin_sin,
+                n_elec,
+                n_size,
+                n_size_sq,
+                n_qp_full,
+                n_sp_gauss_leg,
+                n_slater,
+            )
+        else
+            _accumulate_slater_buffer_fcmp_fast!(
+                buffer,
+                trans_orb_idx,
+                trans_orb_sgn,
+                inv_m_flat,
+                state.slater_matrix.pf_m,
+                sp_gl_cos_sin,
+                sp_gl_cos_cos,
+                sp_gl_sin_sin,
+                n_elec,
+                n_size,
+                n_size_sq,
+                n_qp_full,
+                n_sp_gauss_leg,
+                n_slater,
+            )
+        end
     else
         for qpidx = 0:(n_qp_full-1)
             mpidx = qpidx ÷ n_sp_gauss_leg
@@ -2858,14 +3068,25 @@ function slater_elm_diff_fcmp!(
     # sr_opt_o[1] here corresponds to the full array's sr_opt_o[2*n_proj + 3] (the first Slater parameter)
 
     if fast_path
-        _store_slater_sr_opt_o_fast!(
-            sr_opt_o,
-            buffer,
-            qp_full_weight,
-            inv_ip,
-            n_qp_full,
-            n_slater,
-        )
+        if use_real_buffer
+            _store_slater_sr_opt_o_real_fast!(
+                sr_opt_o,
+                buffer_real,
+                qp_full_weight,
+                inv_ip,
+                n_qp_full,
+                n_slater,
+            )
+        else
+            _store_slater_sr_opt_o_fast!(
+                sr_opt_o,
+                buffer,
+                qp_full_weight,
+                inv_ip,
+                n_qp_full,
+                n_slater,
+            )
+        end
     else
         for orbidx = 0:(n_slater-1)
             # Index in the view: 2*orbidx + 1 for real part, 2*orbidx + 2 for imaginary part
@@ -3401,7 +3622,7 @@ function calculate_oo!(
 
     # Update <O> and <HO>
     if vmc_inner_threading_enabled(size_2, threaded)
-        Base.Threads.@threads :static for j = 0:(size_2-1)
+        Base.Threads.@threads :dynamic for j = 0:(size_2-1)
             @inbounds begin
                 tmp = w * sr_opt_o[j+1]
                 sr_opt_oo[0*size_2+j+1] += tmp  # First row: <O>
@@ -3418,7 +3639,7 @@ function calculate_oo!(
 
     # Update <O†O>
     if vmc_inner_threading_enabled(size_2 - 2, threaded)
-        Base.Threads.@threads :static for i = 2:(size_2-1)
+        Base.Threads.@threads :dynamic for i = 2:(size_2-1)
             @inbounds for j = 0:(size_2-1)
                 sr_opt_oo[i*size_2+j+1] += w * sr_opt_o[j+1] * conj(sr_opt_o[i+1])
             end
@@ -3457,7 +3678,7 @@ function calculate_oo_real!(
     # So OO[i,j] is at index i + srOptSize*j (0-based) or (i-1) + srOptSize*(j-1) + 1 (1-based)
     lda = sr_opt_size
     if vmc_inner_threading_enabled(sr_opt_size, threaded)
-        Base.Threads.@threads :static for i = 1:sr_opt_size
+        Base.Threads.@threads :dynamic for i = 1:sr_opt_size
             @inbounds for j = 1:sr_opt_size
                 # Column-major indexing: idx = row + lda * column (0-based)
                 idx = (i - 1) + lda * (j - 1) + 1  # 1-based Julia index
@@ -3476,7 +3697,7 @@ function calculate_oo_real!(
 
     # HO[i] += w * e * O[i]
     if vmc_inner_threading_enabled(sr_opt_size, threaded)
-        Base.Threads.@threads :static for i = 1:sr_opt_size
+        Base.Threads.@threads :dynamic for i = 1:sr_opt_size
             @inbounds sr_opt_ho[i] += we * sr_opt_o[i]
         end
     else
@@ -3511,7 +3732,7 @@ function calculate_oo_store!(
     size_2 = 2 * sr_opt_size
 
     if vmc_sr_store_threading_enabled(size_2, threaded, ComplexF64)
-        Base.Threads.@threads :static for i = 0:(size_2-1)
+        Base.Threads.@threads :dynamic for i = 0:(size_2-1)
             @inbounds begin
                 # Store sqrt(w) * O for later matrix multiplication
                 sr_opt_o_store[i+sample*size_2+1] = sqrtw * sr_opt_o[i+1]
@@ -3550,7 +3771,7 @@ function calculate_oo_store_real!(
     sqrtw = sqrt(w)
 
     if vmc_sr_store_threading_enabled(sr_opt_size, threaded, Float64)
-        Base.Threads.@threads :static for i = 1:sr_opt_size
+        Base.Threads.@threads :dynamic for i = 1:sr_opt_size
             @inbounds begin
                 sr_opt_o_store[i+sample*sr_opt_size] = sqrtw * sr_opt_o[i]
                 sr_opt_ho[i] += we * sr_opt_o[i]
@@ -3585,7 +3806,7 @@ function finalize_oo_store!(
 
     if nsrcg
         if vmc_inner_threading_enabled(size_2, threaded)
-            Base.Threads.@threads :static for i = 1:size_2
+            Base.Threads.@threads :dynamic for i = 1:size_2
                 sum_o = 0.0 + 0.0im
                 sum_abs2 = 0.0
                 @inbounds for s = 0:(sample_size-1)
@@ -3625,7 +3846,7 @@ function finalize_oo_store!(
 
     # OO = O * O^H (Hermitian)
     if vmc_inner_threading_enabled(size_2, threaded)
-        Base.Threads.@threads :static for i = 1:size_2
+        Base.Threads.@threads :dynamic for i = 1:size_2
             @inbounds for j = 1:size_2
                 sum_val = 0.0 + 0.0im
                 for s = 1:sample_size
@@ -3666,7 +3887,7 @@ function finalize_oo_store_real!(
 )
     if nsrcg
         if vmc_inner_threading_enabled(sr_opt_size, threaded)
-            Base.Threads.@threads :static for i = 1:sr_opt_size
+            Base.Threads.@threads :dynamic for i = 1:sr_opt_size
                 sum_o = 0.0
                 sum_oo = 0.0
                 @inbounds for s = 0:(sample_size-1)
@@ -3723,25 +3944,55 @@ function _prepare_real_maincal_batch!(
     batch::VMCRealMainCalBatch, first_sample::Int, count::Int,
     data::ExpertModeData, state::VMCOptimizationState,
 )
-    n_size, _, n_qp, _ = size(batch.inverse)
+    n_size = length(batch.indices[1])
+    n_qp = size(batch.pfaffian, 1)
     n_site = data.modpara.nsite
     plane_size = (2n_site)^2
+    plane_len = n_size * n_size
     for sample in 1:count
         copyto!(batch.indices[sample],1,state.electron_config.ele_idx,
                 (first_sample+sample-1)*n_size+1,n_size)
     end
+    total = count * n_qp
+    process_item = function(item)
+        qp = item % n_qp + 1
+        sample = item ÷ n_qp + 1
+        plane_start = (qp-1)*plane_len + 1
+        plane = reshape(@view(batch.inverse[sample][plane_start:plane_start+plane_len-1]),
+                        n_size, n_size)
+        ws = get_thread_workspace(state.workspace.pfapack_workspace)
+        pf = Ref(0.0)
+        batch.status[qp,sample] = calculate_m_all_child_real!(
+            batch.indices[sample],
+            @view(state.slater_matrix.slater_elm_real[(qp-1)*plane_size+1:qp*plane_size]),
+            plane,pf,ws.buf_m_real,ws.iwork,
+            ws.v_t_real,ws.m_work_real,n_site,n_size)
+        batch.pfaffian[qp,sample] = pf[]
+        return nothing
+    end
+    run_items = function(team)
+        if team === nothing
+            for item in 0:(total-1)
+                process_item(item)
+            end
+            return nothing
+        end
+        vmc_hop_dispatch!(team) do slot
+            first_item = (slot * total) ÷ (team.workers + 1)
+            last_item = ((slot + 1) * total) ÷ (team.workers + 1)
+            for item in first_item:(last_item-1)
+                process_item(item)
+            end
+        end
+        return nothing
+    end
     with_pfapack_call_lock() do
-        Threads.@threads :static for item in 0:count*n_qp-1
-            qp = item % n_qp + 1
-            sample = item ÷ n_qp + 1
-            ws = get_thread_workspace(state.workspace.pfapack_workspace)
-            pf = Ref(0.0)
-            batch.status[qp,sample] = calculate_m_all_child_real!(
-                batch.indices[sample],
-                @view(state.slater_matrix.slater_elm_real[(qp-1)*plane_size+1:qp*plane_size]),
-                @view(batch.inverse[:,:,qp,sample]),pf,ws.buf_m_real,ws.iwork,
-                ws.v_t_real,ws.m_work_real,n_site,n_size)
-            batch.pfaffian[qp,sample] = pf[]
+        if state.workspace.hop_team === nothing
+            with_vmc_hop_team(state.workspace; qp_count=total) do
+                run_items(state.workspace.hop_team)
+            end
+        else
+            run_items(state.workspace.hop_team)
         end
     end
     return nothing
@@ -3749,12 +4000,16 @@ end
 
 function _publish_real_maincal_batch!(batch::VMCRealMainCalBatch, slot::Int,
                                      state::VMCOptimizationState)
-    n_size, _, n_qp, _ = size(batch.inverse)
+    n_qp = size(batch.pfaffian, 1)
     for qp in 1:n_qp
         batch.status[qp,slot] == 0 || return batch.status[qp,slot]
     end
-    count = n_size^2*n_qp
-    copyto!(state.slater_matrix.inv_m_real,1,batch.inverse,(slot-1)*count+1,count)
+    # Hand the batch slot to the sample consumer by swapping the vector
+    # reference, as the Rust measurement batch does. The old state vector
+    # becomes the reusable slot; both have identical storage sizes.
+    inverse = batch.inverse[slot]
+    state.slater_matrix.inv_m_real, batch.inverse[slot] =
+        inverse, state.slater_matrix.inv_m_real
     copyto!(state.slater_matrix.pf_m_real,1,batch.pfaffian,(slot-1)*n_qp+1,n_qp)
     return 0
 end
@@ -3807,7 +4062,7 @@ function vmc_main_cal!(
 
     # Clear physical quantities ([24] cal)
     ctimer_start!(c_timer, 24)
-    clear_phys_quantity!(state)
+    clear_phys_quantity!(state; clear_sr = nvmc_cal_mode == 0)
     ctimer_stop!(c_timer, 24)
 
     # Debug: Check slater_elm at start of vmc_main_cal!
@@ -3839,9 +4094,11 @@ function vmc_main_cal!(
            n_size >= 64 && n_qp_full >= 2 && Threads.threadid()==1 &&
            ccall(:jl_in_threaded_region,Cint,())==0 &&
            length(worker_state.electron_config.ele_idx)>=n_vmc_sample*n_size
-            capacity = max(2,min(8,cld(Threads.nthreads(),n_qp_full)))
+            max_planes = max(2, min(256, (64 << 20) ÷ max(1, n_size*n_size*8)))
+            capacity = clamp(max_planes ÷ n_qp_full, 2, 32)
             cached = local_acc.main_cal_scratch.real_batch
-            if cached === nothing || size(cached.inverse)!=(n_size,n_size,n_qp_full,capacity)
+            if cached === nothing || length(cached.inverse) != capacity ||
+               length(cached.inverse[1]) != n_qp_full*(n_size*n_size+1)
                 cached = VMCRealMainCalBatch(n_size,n_qp_full,capacity)
                 local_acc.main_cal_scratch.real_batch = cached
             end
@@ -4195,7 +4452,8 @@ function vmc_main_cal!(
                     ele_idx,
                     ele_cfg,
                     ele_num,
-                    ele_proj_cnt,
+                    ele_proj_cnt;
+                    scratch = sample_scratch,
                 )
                 if data.modpara.lanczos_mode > 1
                     accumulate_lanczos_green!(
@@ -4365,16 +4623,35 @@ function vmc_main_cal!(
     ctimer_stop!(maincal_diag_timer, 940)
     sample_start, sample_end = split_loop(n_vmc_sample, ctx.rank1, ctx.size1)
     sample_size = sample_end - sample_start
-    process_sample_range!(
-        sample_start:(sample_end-1),
-        state,
-        local_acc,
-        c_timer,
-        calham1_diag_timer,
-        slater_diag_timer,
-        maincal_diag_timer,
-        true,
-    )
+    run_samples = function()
+        process_sample_range!(
+            sample_start:(sample_end-1),
+            state,
+            local_acc,
+            c_timer,
+            calham1_diag_timer,
+            slater_diag_timer,
+            maincal_diag_timer,
+            true,
+        )
+        return nothing
+    end
+    # Optimization mode has no per-sample Green measurement, so a single
+    # sleeping worker team can serve all CalculateMAll batches of the pass
+    # without competing with the serial sample consumers. PhysCal keeps the
+    # per-batch team (its Green kernels use the default-pool threads).
+    use_maincal_team = nvmc_cal_mode == 0 && !all_complex &&
+        vmc_inner_threading_requested(true) && n_size >= 64 && n_qp_full >= 2 &&
+        Threads.threadid() == 1 && ccall(:jl_in_threaded_region, Cint, ()) == 0
+    if use_maincal_team
+        with_vmc_hop_team(state.workspace;
+                          qp_count=max(Threads.nthreads(), 2),
+                          sleep_workers=true) do
+            run_samples()
+        end
+    else
+        run_samples()
+    end
 
     # Finalize OO from stored samples ([45] multiply store OO)
     if nvmc_cal_mode == 0 && use_sr_store
@@ -4405,7 +4682,7 @@ function vmc_main_cal!(
 
     ctimer_start!(maincal_diag_timer, 940)
     ctimer_start!(maincal_diag_timer, 950)
-    if !_owns_sropt_accumulator(state.sr_opt, local_acc.sr_opt)
+    if nvmc_cal_mode == 0 && !_owns_sropt_accumulator(state.sr_opt, local_acc.sr_opt)
         clear_sropt_store!(state.sr_opt)
     end
     merge_thread_accumulator!(state, c_timer, local_acc)
@@ -4495,7 +4772,7 @@ function vmc_main_cal_fsz!(
     # Clear all physical quantities (energy and SR optimization data)
     # This is equivalent to C's clearPhysQuantity() call in VMCMainCal_fsz ([24] cal)
     ctimer_start!(c_timer, 24)
-    clear_phys_quantity!(state)
+    clear_phys_quantity!(state; clear_sr = data.modpara.vmc_calc_mode == 0)
     ctimer_stop!(c_timer, 24)
 
     function process_sample_range_fsz!(
@@ -4742,7 +5019,7 @@ function _accumulate_slater_buffer_fcmp_fast!(
         n_qp_full * n_size_sq >= 32768 && Threads.threadid() == 1 &&
         ccall(:jl_in_threaded_region, Cint, ()) == 0
     if parallel
-        Threads.@threads :static for slot in 1:workers
+        Threads.@threads :dynamic for slot in 1:workers
             first_qp = ((slot - 1) * n_qp_full) ÷ workers
             last_qp = (slot * n_qp_full) ÷ workers
             _accumulate_slater_buffer_fcmp_range!(

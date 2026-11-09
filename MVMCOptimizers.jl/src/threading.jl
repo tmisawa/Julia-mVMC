@@ -29,6 +29,88 @@ end
 
 const PFAPACK_CALL_LOCK = ReentrantLock()
 
+# --- Optional Linux CPU affinity for the persistent hop team -----------------
+# Worker threads that migrate between physical cores lose their private L2
+# copy of the accepted-hop inverse planes. On the benchmark hosts this alone
+# costs about 1.3x in the rank-1 update. Pin the caller and each worker to a
+# distinct CPU from the process affinity set for the lifetime of one sampling
+# call, then restore the original set. Linux-only and best-effort: an
+# unsupported call or a smaller CPU set leaves scheduling untouched.
+const _CPU_SET_BYTES = 128
+
+@inline _cpu_pinning_enabled() =
+    Sys.islinux() && get(ENV, "JULIA_MVMC_PIN_CPUS", "1") != "0"
+
+function _get_affinity_mask()
+    mask = zeros(UInt8, _CPU_SET_BYTES)
+    rc = ccall(:sched_getaffinity, Cint, (Cint, Csize_t, Ptr{UInt8}),
+               0, _CPU_SET_BYTES, mask)
+    rc == 0 || return nothing
+    return mask
+end
+
+function _set_affinity_mask(mask::Vector{UInt8})
+    rc = ccall(:sched_setaffinity, Cint, (Cint, Csize_t, Ptr{UInt8}),
+               0, length(mask), mask)
+    return rc == 0
+end
+
+function _affinity_cpus(mask::Vector{UInt8})
+    cpus = Int[]
+    for byte in eachindex(mask)
+        bits = mask[byte]
+        bits == 0x00 && continue
+        for bit in 0:7
+            (bits >> bit) & 0x01 == 0x01 && push!(cpus, (byte - 1) * 8 + bit)
+        end
+    end
+    return cpus
+end
+
+function _cpu_core_key(cpu::Int)
+    top = "/sys/devices/system/cpu/cpu$cpu/topology"
+    pkg_file = joinpath(top, "physical_package_id")
+    core_file = joinpath(top, "core_id")
+    (isfile(pkg_file) && isfile(core_file)) || return (-1, -1)
+    pk = tryparse(Int, strip(read(pkg_file, String)))
+    co = tryparse(Int, strip(read(core_file, String)))
+    (pk === nothing || co === nothing) && return (-1, -1)
+    return (pk, co)
+end
+
+function _pin_team_cpus(workers::Int)
+    mask = _get_affinity_mask()
+    mask === nothing && return Int[], UInt8[]
+    cpus = _affinity_cpus(mask)
+    length(cpus) >= workers + 1 || return Int[], UInt8[]
+    # Prefer one CPU per physical core so SMT siblings do not share a worker
+    # slot's L1/L2. Fall back to the allowed order when topology is unavailable.
+    selected = Int[]
+    seen = Set{Tuple{Int,Int}}()
+    for cpu in cpus
+        key = _cpu_core_key(cpu)
+        if key !== (-1, -1) && !(key in seen)
+            push!(seen, key)
+            push!(selected, cpu)
+        end
+        length(selected) >= workers + 1 && break
+    end
+    if length(selected) < workers + 1
+        for cpu in cpus
+            cpu in selected || push!(selected, cpu)
+            length(selected) >= workers + 1 && break
+        end
+    end
+    length(selected) >= workers + 1 || return Int[], UInt8[]
+    return selected[1:workers+1], mask
+end
+
+@inline function _pin_current_thread(cpu::Int)
+    mask = zeros(UInt8, _CPU_SET_BYTES)
+    mask[cpu ÷ 8 + 1] = UInt8(1) << (cpu % 8)
+    return _set_affinity_mask(mask)
+end
+
 # Accepted hops are short and frequent: creating static tasks for every hop
 # costs more than the rank-2 update. Keep N-1 workers for one sampling call;
 # the calling thread performs the remaining partition and owns the RNG.
@@ -37,56 +119,102 @@ mutable struct VMCHopTeam
     completed::Threads.Atomic{Int}
     started::Threads.Atomic{Int}
     stop::Threads.Atomic{Bool}
+    wake::Base.Event
+    sleeping::Bool
     job::Any
     tasks::Vector{Task}
     errors::Vector{Any}
     workers::Int
+    pin_cpus::Vector{Int}
+    original_affinity::Vector{UInt8}
 end
 
 @inline function _vmc_spin_pause()
     ccall(:jl_cpu_pause, Cvoid, ())
-    GC.safepoint()
+end
+
+@inline function _vmc_spin_safepoint(counter::Int)
+    (counter & 0xff) == 0 && GC.safepoint()
+    return nothing
 end
 
 function _vmc_hop_worker!(team::VMCHopTeam, slot::Int)
     # A spinning worker cannot migrate; keep it sticky for its whole lifetime.
     current_task().sticky = true
+    if slot < length(team.pin_cpus)
+        _pin_current_thread(team.pin_cpus[slot+1])
+    end
     epoch = 0
+    spins = 0
     Threads.atomic_add!(team.started, 1)
-    while !team.stop[]
-        next_epoch = team.epoch[]
-        if next_epoch == epoch
-            _vmc_spin_pause()
-            continue
+    try
+        while !team.stop[]
+            next_epoch = team.epoch[]
+            if next_epoch == epoch
+                if team.sleeping
+                    wait(team.wake)
+                else
+                    _vmc_spin_pause()
+                    spins += 1
+                    _vmc_spin_safepoint(spins)
+                end
+                continue
+            end
+            spins = 0
+            epoch = next_epoch
+            try
+                team.job(slot)
+            catch err
+                team.errors[slot] = CapturedException(err, catch_backtrace())
+            finally
+                Threads.atomic_add!(team.completed, 1)
+            end
         end
-        epoch = next_epoch
-        try
-            team.job(slot)
-        catch err
-            team.errors[slot] = CapturedException(err, catch_backtrace())
-        finally
-            Threads.atomic_add!(team.completed, 1)
-        end
+    finally
+        isempty(team.original_affinity) || _set_affinity_mask(team.original_affinity)
     end
     return nothing
 end
 
-function with_vmc_hop_team(f, workspace::SamplingWorkspace; qp_count=length(workspace.pf_m_real_temp))
+function with_vmc_hop_team(f, workspace::SamplingWorkspace;
+                           qp_count=length(workspace.pf_m_real_temp),
+                           sleep_workers::Bool=false)
     workspace.hop_team === nothing || return f()
-    workers = min(Threads.nthreads(),qp_count) - 1
+    # Use only default-pool threads that are not the caller's own thread. With
+    # `--threads=N,0` the caller itself is a default thread; pinning a
+    # spinning helper there would starve it.
+    caller_tid = Threads.threadid()
+    available_tids = filter(tid -> tid != caller_tid, Threads.threadpooltids(:default))
+    workers = min(min(Threads.nthreads(), qp_count) - 1, length(available_tids))
     workers > 0 || return f()
+    pin_cpus, original_affinity = _cpu_pinning_enabled() ?
+        _pin_team_cpus(workers) : (Int[], UInt8[])
     team = VMCHopTeam(Threads.Atomic{Int}(0), Threads.Atomic{Int}(0),
                       Threads.Atomic{Int}(0), Threads.Atomic{Bool}(false),
-                      nothing, Task[], Any[nothing for _ in 1:workers], workers)
+                      Base.Event(), sleep_workers,
+                      nothing, Task[], Any[nothing for _ in 1:workers], workers,
+                      pin_cpus, original_affinity)
+    caller_pinned = !isempty(pin_cpus) && _pin_current_thread(pin_cpus[1])
     storage = task_local_storage()
     previous = get(storage,:mvmc_hop_team_active,false)
     try
+        # Pin each worker to its own default-pool thread. `Threads.@spawn`
+        # does not guarantee distinct threads, and co-located workers both
+        # halve the hop-update parallelism and make the thread-indexed scratch
+        # vectors alias. `jl_set_task_tid` uses 0-based ids.
         for slot in 1:workers
-            push!(team.tasks, Threads.@spawn _vmc_hop_worker!(team, slot))
+            task = Task(() -> _vmc_hop_worker!(team, slot))
+            task.sticky = true
+            ccall(:jl_set_task_tid, Cint, (Any, Cint), task, available_tids[slot] - 1)
+            push!(team.tasks, task)
+            schedule(task)
         end
         # Do not yield the caller onto a spinning task on its own thread.
+        spins = 0
         while team.started[] != workers
             _vmc_spin_pause()
+            spins += 1
+            _vmc_spin_safepoint(spins)
         end
         workspace.hop_team = team
         storage[:mvmc_hop_team_active] = true
@@ -95,7 +223,9 @@ function with_vmc_hop_team(f, workspace::SamplingWorkspace; qp_count=length(work
         workspace.hop_team = nothing
         storage[:mvmc_hop_team_active] = previous
         team.stop[] = true
+        team.sleeping && notify(team.wake)
         foreach(wait, team.tasks)
+        caller_pinned && !isempty(original_affinity) && _set_affinity_mask(original_affinity)
     end
 end
 
@@ -121,16 +251,21 @@ function vmc_hop_dispatch!(job, team::VMCHopTeam)
     # Sequentially consistent atomic publication also publishes the closure
     # and all matrix/configuration writes before workers read them.
     Threads.atomic_add!(team.epoch, 1)
+    team.sleeping && notify(team.wake)
     caller_error = nothing
     try
         job(0)
     catch err
         caller_error = CapturedException(err, catch_backtrace())
     finally
+        spins = 0
         while team.completed[] != team.workers
             _vmc_spin_pause()
+            spins += 1
+            _vmc_spin_safepoint(spins)
         end
         team.job = nothing
+        team.sleeping && reset(team.wake)
     end
     caller_error === nothing || throw(caller_error)
     for err in team.errors
@@ -509,14 +644,18 @@ end
 
 struct VMCRealMainCalBatch
     indices::Vector{Vector{Int}}
-    inverse::Array{Float64,4}
+    inverse::Vector{Vector{Float64}}
     pfaffian::Matrix{Float64}
     status::Matrix{Int}
 end
 
 function VMCRealMainCalBatch(n_size::Int, n_qp::Int, capacity::Int)
+    # Keep the same storage size as `SlaterMatrixData.inv_m_real` so a slot can
+    # be swapped into the state without copying: `n_qp` planes of `n_size^2`
+    # entries plus the historical trailing pad entry per plane.
     VMCRealMainCalBatch([zeros(Int,n_size) for _ in 1:capacity],
-        zeros(n_size,n_size,n_qp,capacity),zeros(n_qp,capacity),zeros(Int,n_qp,capacity))
+        [zeros(Float64,n_qp*(n_size*n_size+1)) for _ in 1:capacity],
+        zeros(n_qp,capacity),zeros(Int,n_qp,capacity))
 end
 
 mutable struct VMCMainCalScratch
@@ -528,6 +667,7 @@ mutable struct VMCMainCalScratch
     sample_ele_proj_cnt::Vector{Int}
     sample_ele_spn::Vector{Int}
     slater_buffer::Vector{ComplexF64}
+    slater_buffer_real::Vector{Float64}
     slater_trans_orb_idx::Vector{Int}
     slater_trans_orb_sgn::Vector{Int}
     calh1_transfer_ri::Vector{Int}
@@ -546,6 +686,10 @@ mutable struct VMCMainCalScratch
     calh1_thread_proj_cnt_new::Vector{Vector{Int}}
     calh1_thread_pf_m_new_real::Vector{Vector{Float64}}
     calh1_thread_acc::Vector{Float64}
+    green_thread_idx::Vector{Vector{Int}}
+    green_thread_num::Vector{Vector{Int}}
+    green_thread_proj::Vector{Vector{Int}}
+    green_thread_pf::Vector{Vector{Float64}}
     real_batch::Union{Nothing,VMCRealMainCalBatch}
 end
 
@@ -559,6 +703,7 @@ function VMCMainCalScratch(state::VMCOptimizationState)
         zeros(Int, length(state.electron_config.tmp_ele_proj_cnt)),
         zeros(Int, length(state.electron_config.tmp_ele_spn)),
         ComplexF64[],
+        Float64[],
         Int[],
         Int[],
         Int[],
@@ -577,6 +722,10 @@ function VMCMainCalScratch(state::VMCOptimizationState)
         Vector{Int}[],
         Vector{Float64}[],
         Float64[],
+        Vector{Int}[],
+        Vector{Int}[],
+        Vector{Int}[],
+        Vector{Float64}[],
         nothing,
     )
 end
@@ -613,7 +762,7 @@ end
 
 mutable struct VMCThreadAccumulator
     energy::VMCEnergyAccumulator
-    sr_opt::VMCSROptAccumulator
+    sr_opt::Union{Nothing,VMCSROptAccumulator}
     phys::VMCPhysAccumulator
     counter::VMCCounterAccumulator
     main_cal_scratch::VMCMainCalScratch
@@ -622,6 +771,7 @@ mutable struct VMCThreadAccumulator
     use_sr_store::Bool
     nsrcg::Bool
     owned_sr::Bool
+    use_sr_opt::Bool
 end
 
 function VMCThreadAccumulator(
@@ -631,10 +781,12 @@ function VMCThreadAccumulator(
     use_sr_store::Bool = false,
     nsrcg::Bool = false,
     owned_sr::Bool = false,
+    use_sr_opt::Bool = true,
 )
+    sr_acc = use_sr_opt ? VMCSROptAccumulator(state.sr_opt; owned = owned_sr) : nothing
     return VMCThreadAccumulator(
         VMCEnergyAccumulator(),
-        VMCSROptAccumulator(state.sr_opt; owned = owned_sr),
+        sr_acc,
         VMCPhysAccumulator(state.phys_quantities),
         VMCCounterAccumulator(length(state.electron_config.counter)),
         VMCMainCalScratch(state),
@@ -643,6 +795,7 @@ function VMCThreadAccumulator(
         use_sr_store,
         nsrcg,
         owned_sr,
+        use_sr_opt,
     )
 end
 
@@ -831,20 +984,25 @@ function reset_thread_accumulator!(
         acc.all_complex == all_complex &&
         acc.use_sr_store == use_sr_store &&
         acc.nsrcg == nsrcg
-    resized = _resize_sropt_accumulator!(acc.sr_opt, state.sr_opt)
-
     clear_energy_accumulator!(acc.energy)
-    if same_mode && !resized
-        reset_sropt_accumulator_for_maincal!(
-            acc.sr_opt,
-            state.sr_opt;
-            all_complex = all_complex,
-            use_sr_store = use_sr_store,
-            nsrcg = nsrcg,
-            use_sr_opt = use_sr_opt,
-        )
-    else
-        clear_sropt_accumulator!(acc.sr_opt)
+    if use_sr_opt
+        if acc.sr_opt === nothing
+            acc.sr_opt = VMCSROptAccumulator(state.sr_opt; owned = acc.owned_sr)
+        end
+        sr_acc = acc.sr_opt::VMCSROptAccumulator
+        resized = _resize_sropt_accumulator!(sr_acc, state.sr_opt)
+        if same_mode && !resized
+            reset_sropt_accumulator_for_maincal!(
+                sr_acc,
+                state.sr_opt;
+                all_complex = all_complex,
+                use_sr_store = use_sr_store,
+                nsrcg = nsrcg,
+                use_sr_opt = use_sr_opt,
+            )
+        else
+            clear_sropt_accumulator!(sr_acc)
+        end
     end
     reset_phys_accumulator!(acc.phys, state.phys_quantities)
     reset_counter_accumulator!(acc.counter, length(state.electron_config.counter))
@@ -854,6 +1012,7 @@ function reset_thread_accumulator!(
     acc.all_complex = all_complex
     acc.use_sr_store = use_sr_store
     acc.nsrcg = nsrcg
+    acc.use_sr_opt = use_sr_opt
     return acc
 end
 
@@ -889,6 +1048,7 @@ function main_cal_accumulator!(
         use_sr_store = use_sr_store,
         nsrcg = nsrcg,
         owned_sr = owned_sr,
+        use_sr_opt = use_sr_opt,
     )
     state.workspace.main_cal_accumulator = acc
     return acc
@@ -900,15 +1060,18 @@ function merge_thread_accumulator!(
     local_acc::VMCThreadAccumulator,
 )
     merge_energy_accumulator!(state.energy, local_acc.energy)
-    if _owns_sropt_accumulator(state.sr_opt, local_acc.sr_opt)
-        # Preserve the original zero-plus-local publication, including signed zero.
-        for name in (:sr_opt_oo, :sr_opt_ho, :sr_opt_o_store,
-                     :sr_opt_oo_real, :sr_opt_ho_real, :sr_opt_o_store_real)
-            values = getproperty(state.sr_opt, name)
-            values .+= zero(eltype(values))
+    if local_acc.use_sr_opt
+        sr_acc = local_acc.sr_opt::VMCSROptAccumulator
+        if _owns_sropt_accumulator(state.sr_opt, sr_acc)
+            # Preserve the original zero-plus-local publication, including signed zero.
+            for name in (:sr_opt_oo, :sr_opt_ho, :sr_opt_o_store,
+                         :sr_opt_oo_real, :sr_opt_ho_real, :sr_opt_o_store_real)
+                values = getproperty(state.sr_opt, name)
+                values .+= zero(eltype(values))
+            end
+        else
+            merge_sropt_accumulator!(state.sr_opt, sr_acc)
         end
-    else
-        merge_sropt_accumulator!(state.sr_opt, local_acc.sr_opt)
     end
 
     merge_phys_accumulators!(state.phys_quantities, (local_acc.phys,))

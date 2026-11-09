@@ -175,7 +175,7 @@ function vmc_phys_cal!(
 
         # Reset physical quantities for this sampling run
         reset_phys_quantities!(state)
-        clear_phys_quantity!(state)
+        clear_phys_quantity!(state; clear_sr = false)
 
         # Initialize output files
         init_file_phys_cal!(data, ismp)

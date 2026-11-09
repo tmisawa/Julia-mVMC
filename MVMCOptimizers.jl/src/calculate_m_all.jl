@@ -580,16 +580,9 @@ function calculate_m_all_child_real!(
         end
     end
 
-    # Check if inv_m is all zeros or has issues
-    max_abs2 = typemin(Float64)
-    for i in 1:n_size
-        for j in 1:n_size
-            @inbounds max_abs2 = max(max_abs2, abs2(inv_m[i, j]))
-        end
-    end
-    if max_abs2 < 1e-14 ^ 2
-        return 2
-    end
+    # The factorization's zero-pivot path already reports an all-zero or
+    # singular plane, so the former extra full-matrix `max_abs2` scan is not
+    # needed before it.
 
     # LTL decomposition (upper triangular)
     # M_DSKTRF("U", "N", &n, invM, &lda, iwork, bufM, &nsq, &info)
@@ -598,9 +591,6 @@ function calculate_m_all_child_real!(
     if info != 0
         return info
     end
-
-    # Copy inv_m to buf_m for LTL decomposition result
-    buf_m .= inv_m
 
     # Calculate Pfaffian using utu2pfa from LTL-decomposed matrix
     pfaff = utu2pfa(n_size, inv_m, n_size, iwork)
