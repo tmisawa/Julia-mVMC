@@ -37,7 +37,7 @@ function parse_modpara_content(content::String)::ParseResult{ModParaParameters}
             continue
         end
 
-        tokens = split_def_line(clean_line_str)
+        tokens = split(clean_line_str)
         if length(tokens) < 2
             continue
         end
@@ -72,14 +72,14 @@ function parse_modpara_content(content::String)::ParseResult{ModParaParameters}
 end
 
 """
-    parse_modpara_parameter!(params::ModParaParameters, name::String, value::String, context::ParsingContext)
+    parse_modpara_parameter!(params::ModParaParameters, name::AbstractString, value::AbstractString, context::ParsingContext)
 
 Parse a single parameter and update the ModParaParameters struct.
 """
 function parse_modpara_parameter!(
     params::ModParaParameters,
-    name::String,
-    value::String,
+    name::AbstractString,
+    value::AbstractString,
     context::ParsingContext,
 )
     # Basic system parameters

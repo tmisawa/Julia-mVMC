@@ -50,8 +50,15 @@ end
 Clean a line by removing comments and extra whitespace.
 """
 function clean_line(line::AbstractString)::String
+    # Fast path for the huge comment-free orbital/Jastrow tables: one strip
+    # instead of two strips plus two `findfirst` scans.
+    if !occursin('#', line) && !occursin("//", line)
+        return strip(line)
+    end
+
     # Remove comments (lines starting with # or //)
-    if startswith(strip(line), "#") || startswith(strip(line), "//")
+    stripped = strip(line)
+    if startswith(stripped, "#") || startswith(stripped, "//")
         return ""
     end
 
@@ -75,19 +82,17 @@ end
 
 Split a definition file line into tokens.
 """
-function split_def_line(line::AbstractString)::Vector{String}
-    # Clean the line first
-    clean_line_str = clean_line(line)
-
-    if isempty(clean_line_str)
-        return String[]
+function split_def_line(line::AbstractString)
+    # A cleaned, comment-free line (the 16k-line orbital/Jastrow tables) can
+    # be split directly. `split` already drops empty tokens and ignores
+    # surrounding whitespace, so no extra filter or String copy is needed.
+    if !occursin('#', line) && !occursin("//", line)
+        return split(line)
     end
 
-    # Split by whitespace
-    tokens = split(clean_line_str)
-
-    # Filter out empty tokens
-    return filter(!isempty, tokens)
+    clean_line_str = clean_line(line)
+    isempty(clean_line_str) && return split("")
+    return split(clean_line_str)
 end
 
 """
@@ -95,7 +100,7 @@ end
 
 Parse a complex number from string format.
 """
-function parse_complex_value(str::String)::ComplexF64
+function parse_complex_value(str::AbstractString)::ComplexF64
     # Handle different formats: "1.0+2.0i", "1.0 2.0", "1.0", etc.
     if occursin("i", str) || occursin("j", str)
         # Complex format with i or j
@@ -121,7 +126,7 @@ end
 
 Safely parse an integer with a default value.
 """
-function safe_parse_int(str::String, default::Int = 0)::Int
+function safe_parse_int(str::AbstractString, default::Int = 0)::Int
     try
         return parse(Int, str)
     catch
@@ -162,7 +167,7 @@ end
 
 Safely parse a float with a default value.
 """
-function safe_parse_float(str::String, default::Float64 = 0.0)::Float64
+function safe_parse_float(str::AbstractString, default::Float64 = 0.0)::Float64
     try
         return parse(Float64, str)
     catch
@@ -175,10 +180,63 @@ end
 
 Safely parse a complex number with a default value.
 """
-function safe_parse_complex(str::String, default::ComplexF64 = 0.0+0.0im)::ComplexF64
+function safe_parse_complex(str::AbstractString, default::ComplexF64 = 0.0+0.0im)::ComplexF64
     try
         return parse_complex_value(str)
     catch
         return default
     end
+end
+
+"""
+    parse_int_tokens_fast(line, max_tokens=4) -> Union{Nothing, NTuple}
+
+Allocation-free scan of up to `max_tokens` whitespace-separated decimal
+integers from an ASCII line. Returns `(count, v1, v2, v3, v4)` or `nothing`
+when a comment marker or a non-integer character is present, so callers fall
+back to the diagnostic parser. Blank lines return count 0.
+"""
+function parse_int_tokens_fast(line::AbstractString, max_tokens::Int = 4)
+    n = ncodeunits(line)
+    i = 1
+    tok = 0
+    v1 = v2 = v3 = v4 = 0
+    while i <= n
+        c = codeunit(line, i)
+        while c == 0x20 || c == 0x09 || c == 0x0d
+            i += 1
+            i > n && break
+            c = codeunit(line, i)
+        end
+        i > n && break
+        c == 0x23 && return nothing                 # '#'
+        c == 0x2f && i < n && codeunit(line, i + 1) == 0x2f && return nothing  # '//'
+        neg = false
+        if c == 0x2d
+            neg = true
+            i += 1
+        elseif c == 0x2b
+            i += 1
+        end
+        i <= n || return nothing
+        c = codeunit(line, i)
+        (0x30 <= c <= 0x39) || return nothing
+        val = 0
+        while i <= n && (0x30 <= codeunit(line, i) <= 0x39)
+            val = val * 10 + (codeunit(line, i) - 0x30)
+            i += 1
+        end
+        neg && (val = -val)
+        tok += 1
+        tok > max_tokens && return nothing
+        tok == 1 && (v1 = val)
+        tok == 2 && (v2 = val)
+        tok == 3 && (v3 = val)
+        tok == 4 && (v4 = val)
+        if i <= n
+            c = codeunit(line, i)
+            (c == 0x20 || c == 0x09 || c == 0x0d) || return nothing
+        end
+    end
+    return (tok, v1, v2, v3, v4)
 end

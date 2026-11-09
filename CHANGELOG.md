@@ -4,6 +4,23 @@
 
 ### Changed
 
+- Accelerated the CPU L=128 half-filled Hubbard path toward the Rust-port
+  timings. The real accepted-hop rank-1 update holds 16 accumulators in
+  registers, the real `utu2inv` uses the Rust port's 64-column upper-triangle
+  panel product, the real Slater derivative accumulates in `Float64`,
+  saved-sample measurement batches run on the persistent pinned hop team and
+  reuse inversion slots by vector swap, and CPU main-calculation kernels use
+  dynamic default-pool scheduling. Persistent hop workers are pinned to
+  distinct physical cores (Linux, best effort; `JULIA_MVMC_PIN_CPUS=0`
+  disables it). PhysCal skips unused SR-accumulator allocation/reset/merge
+  work, runs its one-body Green loop in parallel with reusable per-thread
+  scratch, and the parser avoids reparsing the large orbital table for
+  OptFlags.
+- On the 2026-11-05 benchmark host, the 20-step L=128 optimization improved
+  from 78.0/40.3/34.2/29.2 s to 66.3/24.4/16.9/16.1 s for 1/4/8/16 cores
+  (Rust: 69.0/24.4/16.7/14.8 s). The fixed-parameter PhysCal improved from
+  4.38/2.84/2.30/2.01 s to 3.75/1.47/1.01/0.98 s (Rust: 3.73/1.38/0.95/0.90 s).
+  All eight target cells are within 0.96–1.09x of the Rust port.
 - Moved the C reference from mVMC 1.3.0 to mVMC 1.4.0 (`v1.4.0`, `e83aa6cb`)
   (#95). C-native fixtures were re-verified or regenerated against 1.4.0 with
   recorded provenance.

@@ -123,7 +123,7 @@ end
 function _parse_rbm_content(
     make_term::Function,
     content::String,
-    context_name::String,
+    context_name::AbstractString,
     map_cols::Int,
     term_type::Type{T},
 )::RBMParseResult{T} where {T<:RBMTerm}

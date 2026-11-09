@@ -260,16 +260,22 @@ function apply_orbital_opt_flags_from_files!(
         full_path = joinpath(base_dir, file_path)
         validate_file_exists(full_path) || continue
 
-        result, opt_flags, header_count = parse_orbital_def(full_path)
-        result.success || continue
+        # This pass only needs the header declarations and the trailing
+        # two-column OptFlag records. Parse them directly instead of running the
+        # full orbital-term parser (16k site-pair lines on L=128) and reading the
+        # file a second time for the header.
+        content = read(full_path, String)
+        lines = split(content, '\n')
+        length(lines) >= 2 || continue
+        header_tokens = split(clean_line(lines[2]))
+        has_header = length(header_tokens) >= 2 && startswith(header_tokens[1], "NOrbital")
+        has_header || continue   # legacy headerless orbital.def has no OptFlag section
+        header_count = safe_parse_int(header_tokens[2], 0)
 
-        # Read the declaration, not populated terms: a section may reserve
-        # parameters without supplying a corresponding mapping record.
-        header = split(read(full_path, String), '\n')
-        if length(header) >= 3
-            fields = split(clean_line(header[3]))
+        if length(lines) >= 3
+            fields = split(clean_line(lines[3]))
             if length(fields) == 2 && fields[1] == "ComplexType"
-                declaration = parse(Int, fields[2])
+                declaration = safe_parse_int(fields[2], 0)
                 orbital_complex_sum += declaration
             end
         end
@@ -279,6 +285,23 @@ function apply_orbital_opt_flags_from_files!(
         # correct even when the anti-parallel file carries no opt flags.
         if file_type == "Orbital" || file_type == "OrbitalAntiParallel"
             n_orbital_anti_parallel = header_count
+        end
+
+        # The OptFlag records are the trailing two-column lines. Walk from the
+        # end instead of splitting all 16k site-pair lines; stop at the first
+        # three-column row. Empty/comment lines are skipped.
+        opt_flags = Dict{Int,Int}()
+        remaining = header_count
+        for line_num in length(lines):-1:6
+            remaining <= 0 && break
+            clean_line_str = clean_line(lines[line_num])
+            isempty(clean_line_str) && continue
+            tokens = split(clean_line_str)
+            length(tokens) == 2 || break
+            idx = safe_parse_int(tokens[1], -1)
+            opt_flag = safe_parse_int(tokens[2], 0)
+            idx >= 0 && (opt_flags[idx] = opt_flag)
+            remaining -= 1
         end
 
         isempty(opt_flags) && continue
@@ -526,6 +549,22 @@ function parse_file_by_type!(data::ExpertModeData, file_type::String, file_path:
             )
         end
     elseif file_type == "Jastrow"
+        if data.modpara.nsite > 0
+            fast = parse_jastrow_def_fast(file_path, data.modpara.nsite)
+            if fast !== nothing
+                extended_result, jidx = fast
+                data.jastrow_terms = extended_result.terms
+                data.n_jastrow_idx = extended_result.n_jastrow_idx
+                data.jastrow_idx = jidx
+                set_projection_opt_flags!(
+                    data,
+                    Dict{Int,Int}(),
+                    extended_result.opt_flags;
+                    jastrow_is_complex = extended_result.is_complex_flag,
+                )
+                return
+            end
+        end
         content = read_def_file(file_path)
         extended_result = parse_jastrow_content_extended(content)
         if extended_result.success
@@ -547,7 +586,9 @@ function parse_file_by_type!(data::ExpertModeData, file_type::String, file_path:
             )
         end
     elseif file_type == "Orbital"
-        result, opt_flags, anti_count = parse_orbital_def(file_path)
+        fast_orb = parse_orbital_def_fast(file_path, data.modpara.nsite)
+        result, opt_flags, anti_count = fast_orb === nothing ?
+            parse_orbital_def(file_path) : fast_orb
         if result.success
             data.orbital_terms = result.data
             # C implementation: KWOrbital sets iFlgOrbitalAntiParallel = 1
@@ -562,7 +603,9 @@ function parse_file_by_type!(data::ExpertModeData, file_type::String, file_path:
             end
         end
     elseif file_type == "OrbitalAntiParallel"
-        result, opt_flags, anti_count = parse_orbital_def(file_path)
+        fast_orb = parse_orbital_def_fast(file_path, data.modpara.nsite)
+        result, opt_flags, anti_count = fast_orb === nothing ?
+            parse_orbital_def(file_path) : fast_orb
         if result.success
             data.orbital_terms = result.data
             data.i_flg_orbital_anti_parallel = 1
@@ -574,7 +617,9 @@ function parse_file_by_type!(data::ExpertModeData, file_type::String, file_path:
             end
         end
     elseif file_type == "OrbitalParallel"
-        result, opt_flags, parallel_count = parse_orbital_def(file_path)
+        fast_orb = parse_orbital_def_fast(file_path, data.modpara.nsite)
+        result, opt_flags, parallel_count = fast_orb === nothing ?
+            parse_orbital_def(file_path) : fast_orb
         if result.success
             # C implementation: OrbitalParallel indices are interleaved for up-up and down-down
             # See readdef.c GetInfoOrbitalParallel (lines 2608-2620):
@@ -626,7 +671,9 @@ function parse_file_by_type!(data::ExpertModeData, file_type::String, file_path:
             data.modpara.n_orbital_idx = n_orbital_anti_parallel + 2 * parallel_count
         end
     elseif file_type == "OrbitalGeneral"
-        result, opt_flags, general_count = parse_orbital_def(file_path)
+        fast_orb = parse_orbital_def_fast(file_path, data.modpara.nsite)
+        result, opt_flags, general_count = fast_orb === nothing ?
+            parse_orbital_def(file_path) : fast_orb
         if result.success
             data.orbital_terms = result.data
             data.i_flg_orbital_general = 1

@@ -59,7 +59,7 @@ function parse_green_one_content(content::String)::ParseResult{Vector{GreenOneTe
             continue
         end
 
-        tokens = split_def_line(clean_line_str)
+        tokens = split(clean_line_str)
         if length(tokens) < 2
             continue
         end
@@ -84,7 +84,7 @@ function parse_green_one_content(content::String)::ParseResult{Vector{GreenOneTe
 end
 
 """
-    parse_green_one_term(tokens::Vector{String}, context::ParsingContext) -> Union{GreenOneTerm, Nothing}
+    parse_green_one_term(tokens::AbstractVector{<:AbstractString}, context::ParsingContext) -> Union{GreenOneTerm, Nothing}
 
 Parse a single Green's function term from tokens.
 
@@ -95,7 +95,7 @@ C format (cisajs.def / greenone.def): ri si rj sj
 - Column 4: sj (spin j, 0=up, 1=down)
 """
 function parse_green_one_term(
-    tokens::Vector{String},
+    tokens::AbstractVector{<:AbstractString},
     context::ParsingContext,
 )::Union{GreenOneTerm,Nothing}
     if length(tokens) < 4
@@ -187,7 +187,7 @@ function parse_green_two_content(content::String)::ParseResult{Vector{GreenTwoTe
             continue
         end
 
-        tokens = split_def_line(clean_line_str)
+        tokens = split(clean_line_str)
         if length(tokens) < 4
             continue
         end
@@ -215,7 +215,7 @@ function parse_green_two_content(content::String)::ParseResult{Vector{GreenTwoTe
 end
 
 """
-    parse_green_two_term(tokens::Vector{String}, context::ParsingContext) -> Union{GreenTwoTerm, Nothing}
+    parse_green_two_term(tokens::AbstractVector{<:AbstractString}, context::ParsingContext) -> Union{GreenTwoTerm, Nothing}
 
 Parse a single two-body Green's function term from tokens.
 
@@ -228,7 +228,7 @@ C format (greentwo.def / cisajscktalt.def): ri si rj sj rk sk rl sl
 This represents <c†_{ri,si} c_{rj,sj} c†_{rk,sk} c_{rl,sl}>
 """
 function parse_green_two_term(
-    tokens::Vector{String},
+    tokens::AbstractVector{<:AbstractString},
     context::ParsingContext,
 )::Union{GreenTwoTerm,Nothing}
     if length(tokens) < 8

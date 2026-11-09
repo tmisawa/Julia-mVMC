@@ -49,15 +49,49 @@ function _ordinary_dsktf2_c_order!(A::AbstractMatrix{Float64}, ipiv::Vector{<:In
         end
         if colmax != 0.0
             alpha = 1.0 / A[kk, k]
-            for j in 1:k-2
-                # DSKR2 skips the products when both vector entries are zero.
+            # Update two adjacent columns per pass. They share every load of
+            # A[i,k] and A[i,kk], halving the source traffic while keeping each
+            # element's `(A + x*t1) - y*t2` order (the Rust AVX2 kernel does the
+            # same two-column pairing).
+            j = 1
+            while j + 1 <= k - 2
+                a_active = A[j, k] != 0.0 || A[j, kk] != 0.0
+                b_active = A[j+1, k] != 0.0 || A[j+1, kk] != 0.0
+                if a_active && b_active
+                    ta1 = alpha * A[j, kk]
+                    ta2 = alpha * A[j, k]
+                    tb1 = alpha * A[j+1, kk]
+                    tb2 = alpha * A[j+1, k]
+                    @simd ivdep for i in 1:j-1
+                        A[i, j] = (A[i, j] + A[i, k] * ta1) - A[i, kk] * ta2
+                        A[i, j+1] = (A[i, j+1] + A[i, k] * tb1) - A[i, kk] * tb2
+                    end
+                    A[j, j+1] = (A[j, j+1] + A[j, k] * tb1) - A[j, kk] * tb2
+                else
+                    if a_active
+                        ta1 = alpha * A[j, kk]
+                        ta2 = alpha * A[j, k]
+                        @simd ivdep for i in 1:j-1
+                            A[i, j] = (A[i, j] + A[i, k] * ta1) - A[i, kk] * ta2
+                        end
+                    end
+                    if b_active
+                        tb1 = alpha * A[j+1, kk]
+                        tb2 = alpha * A[j+1, k]
+                        @simd ivdep for i in 1:j
+                            A[i, j+1] = (A[i, j+1] + A[i, k] * tb1) - A[i, kk] * tb2
+                        end
+                    end
+                end
+                A[j, j] = 0.0
+                A[j+1, j+1] = 0.0
+                j += 2
+            end
+            if j <= k - 2
                 if A[j, k] != 0.0 || A[j, kk] != 0.0
                     temp1 = alpha * A[j, kk]
                     temp2 = alpha * A[j, k]
-                    # Distinct columns: j <= k-2, while inputs are k and k-1.
-                    # Each i writes only A[i,j], with no reduction reassociation.
                     @simd ivdep for i in 1:j-1
-                        # Deliberately no @fastmath/@turbo or fused muladd.
                         A[i, j] = (A[i, j] + A[i, k] * temp1) - A[i, kk] * temp2
                     end
                 end

@@ -115,7 +115,7 @@ function parse_orbital_content(
             continue
         end
 
-        tokens = split_def_line(clean_line_str)
+        tokens = split(clean_line_str)
 
         # 2-column lines are OptFlag (idx opt_flag format)
         # Once we see 2-column lines after 3-column lines, we're done with OrbitalIdx
@@ -185,14 +185,14 @@ function parse_orbital_content(
 end
 
 """
-    parse_orbital_term(tokens::Vector{String}, context::ParsingContext, is_complex_flag::Bool) -> Union{OrbitalTerm, Nothing}
+    parse_orbital_term(tokens::AbstractVector{<:AbstractString}, context::ParsingContext, is_complex_flag::Bool) -> Union{OrbitalTerm, Nothing}
 
 Parse a single orbital term from tokens.
 For orbitalidx.def format, tokens[3] is the orbital index (idx), not a value.
 The is_complex_flag comes from the ComplexType header in the file.
 """
 function parse_orbital_term(
-    tokens::Vector{String},
+    tokens::AbstractVector{<:AbstractString},
     context::ParsingContext,
     is_complex_flag::Bool = false,
 )::Union{OrbitalTerm,Nothing}
@@ -247,4 +247,47 @@ function parse_orbital_term(
         # This matches C implementation: ComplexType 0 = real, ComplexType != 0 = complex
         return OrbitalTerm(site1, site2, 0, value, is_complex_flag, sign)
     end
+end
+
+"""
+    parse_orbital_def_fast(filepath, nsite) -> Union{Nothing, Tuple}
+
+Single-pass reader for the header-bearing `orbitalidx.def` format (five header
+lines, three/four-column site-pair rows, then two-column OptFlag rows). Returns
+the term vector and declared count without the generic parser's per-line
+`ParsingContext` bookkeeping. Returns `nothing` for unsupported layouts so the
+generic parser keeps all diagnostics and legacy support.
+"""
+function parse_orbital_def_fast(filepath::AbstractString, nsite::Int)
+    nsite > 0 || return nothing
+    content = read_def_file(filepath)
+    lines = split(content, '\n')
+    length(lines) >= 5 || return nothing
+    header = split(clean_line(lines[2]))
+    (length(header) >= 2 && startswith(header[1], "NOrbital")) || return nothing
+    declared = safe_parse_int(header[2], -1)
+    declared >= 0 || return nothing
+    is_complex_flag = false
+    if length(lines) >= 3
+        ct = split(clean_line(lines[3]))
+        if length(ct) == 2 && ct[1] == "ComplexType"
+            is_complex_flag = safe_parse_int(ct[2], 0) != 0
+        end
+    end
+    terms = OrbitalTerm[]
+    sizehint!(terms, nsite * nsite)
+    zero = ComplexF64(0.0, 0.0)
+    for li in 6:length(lines)
+        parsed = parse_int_tokens_fast(lines[li], 4)
+        parsed === nothing && return nothing
+        tok, s1, s2, idx, sgn = parsed
+        tok == 0 && continue
+        tok == 2 && break   # OptFlag section
+        tok >= 3 || return nothing
+        (0 <= s1 < nsite && 0 <= s2 < nsite && idx >= 0) || return nothing
+        sign = (tok >= 4 && (sgn == 1 || sgn == -1)) ? sgn : 1
+        push!(terms, OrbitalTerm(s1, s2, idx, zero, is_complex_flag, sign))
+    end
+    result = ParseResult{Vector{OrbitalTerm}}(true, terms, "", length(lines))
+    return result, Dict{Int,Int}(), declared
 end

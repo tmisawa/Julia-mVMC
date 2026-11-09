@@ -126,7 +126,7 @@ function parse_gutzwiller_content_extended(content::String)::GutzwillerParseResu
                 continue
             end
 
-            tokens = split_def_line(clean_line_str)
+            tokens = split(clean_line_str)
             if length(tokens) < 2
                 continue
             end
@@ -170,7 +170,7 @@ function parse_gutzwiller_content_extended(content::String)::GutzwillerParseResu
             continue
         end
 
-        tokens = split_def_line(clean_line_str)
+        tokens = split(clean_line_str)
         if length(tokens) < 2
             continue
         end
@@ -252,14 +252,14 @@ function parse_gutzwiller_content_extended(content::String)::GutzwillerParseResu
 end
 
 """
-    parse_gutzwiller_term(tokens::Vector{String}, context::ParsingContext, is_complex_flag::Bool) -> Union{GutzwillerTerm, Nothing}
+    parse_gutzwiller_term(tokens::AbstractVector{<:AbstractString}, context::ParsingContext, is_complex_flag::Bool) -> Union{GutzwillerTerm, Nothing}
 
 Parse a single Gutzwiller term from tokens.
 For gutzwilleridx.def format, tokens[2] is the idx, not a value.
 The is_complex_flag comes from the ComplexType header in the file.
 """
 function parse_gutzwiller_term(
-    tokens::Vector{String},
+    tokens::AbstractVector{<:AbstractString},
     context::ParsingContext,
     is_complex_flag::Bool = false,
 )::Union{GutzwillerTerm,Nothing}

@@ -37,7 +37,7 @@ function parse_qptrans_content(content::String)::ParseResult{Vector{QPTransTerm}
             continue
         end
 
-        tokens = split_def_line(clean_line_str)
+        tokens = split(clean_line_str)
         if length(tokens) < 2
             continue
         end
@@ -62,12 +62,12 @@ function parse_qptrans_content(content::String)::ParseResult{Vector{QPTransTerm}
 end
 
 """
-    parse_qptrans_term(tokens::Vector{String}, context::ParsingContext) -> Union{QPTransTerm, Nothing}
+    parse_qptrans_term(tokens::AbstractVector{<:AbstractString}, context::ParsingContext) -> Union{QPTransTerm, Nothing}
 
 Parse a single QPTrans term from tokens.
 """
 function parse_qptrans_term(
-    tokens::Vector{String},
+    tokens::AbstractVector{<:AbstractString},
     context::ParsingContext,
 )::Union{QPTransTerm,Nothing}
     if length(tokens) < 2

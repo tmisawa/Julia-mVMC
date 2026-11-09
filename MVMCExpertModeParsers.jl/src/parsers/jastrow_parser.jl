@@ -122,7 +122,7 @@ function parse_jastrow_content_extended(content::String)::JastrowParseResult
             continue
         end
 
-        tokens = split_def_line(clean_line_str)
+        tokens = split(clean_line_str)
 
         if length(tokens) == 2
             if !isempty(terms)
@@ -177,14 +177,14 @@ function parse_jastrow_content_extended(content::String)::JastrowParseResult
 end
 
 """
-    parse_jastrow_term(tokens::Vector{String}, context::ParsingContext, is_complex_flag::Bool) -> Union{JastrowTerm, Nothing}
+    parse_jastrow_term(tokens::AbstractVector{<:AbstractString}, context::ParsingContext, is_complex_flag::Bool) -> Union{JastrowTerm, Nothing}
 
 Parse a single Jastrow term from tokens.
 For jastrowidx.def format, tokens[3] is the idx, not a value.
 The is_complex_flag comes from the ComplexType header in the file.
 """
 function parse_jastrow_term(
-    tokens::Vector{String},
+    tokens::AbstractVector{<:AbstractString},
     context::ParsingContext,
     is_complex_flag::Bool = false,
 )::Union{JastrowTerm,Nothing}
@@ -269,7 +269,7 @@ function build_jastrow_idx_matrix(filepath::String, nsite::Int)::Tuple{Matrix{In
                 continue
             end
 
-            tokens = split_def_line(clean_line_str)
+            tokens = split(clean_line_str)
 
             # Skip 2-column lines (idx opt_flag format)
             if length(tokens) == 2
@@ -327,41 +327,132 @@ function jastrow_idx_matrix_c_contract(
     lines = split(content, '\n')
     IGNORE_LINES_IN_DEF = 5
     length(lines) >= IGNORE_LINES_IN_DEF || error("Jastrow: missing header lines")
-    tokens = String[]
-    for line in lines[(IGNORE_LINES_IN_DEF+1):end]
-        append!(tokens, split(line))
-    end
     expected = nsite * (nsite - 1)
     UNREAD = -2
     directed = [i == j ? -1 : UNREAD for i = 1:nsite, j = 1:nsite]
-    for row = 1:expected
-        k = 3 * (row - 1)
-        vals = k + 3 <= length(tokens) ? tryparse.(Int, tokens[(k+1):(k+3)]) : nothing
-        (vals === nothing || any(isnothing, vals)) &&
-            error("Jastrow: failed to read Jastrow row $row")
-        i, j, n = vals
-        i == j && error("Jastrow: [Condition] i neq j at row $row")
+
+    # Parse the Nsite*(Nsite-1) three-column rows directly. The former version
+    # flattened every token into one 49k-element String vector and allocated a
+    # temporary per row; this keeps only the current line's three substrings.
+    line_idx = IGNORE_LINES_IN_DEF + 1
+    row = 0
+    while row < expected
+        line_idx <= length(lines) ||
+            error("Jastrow: failed to read Jastrow row $(row + 1)")
+        clean_line_str = clean_line(lines[line_idx])
+        line_idx += 1
+        isempty(clean_line_str) && continue
+        parts = split(clean_line_str)
+        length(parts) == 3 ||
+            error("Jastrow: failed to read Jastrow row $(row + 1)")
+        pi = tryparse(Int, parts[1])
+        pj = tryparse(Int, parts[2])
+        pn = tryparse(Int, parts[3])
+        (pi === nothing || pj === nothing || pn === nothing) &&
+            error("Jastrow: failed to read Jastrow row $(row + 1)")
+        i, j, n = pi, pj, pn
+        i == j && error("Jastrow: [Condition] i neq j at row $(row + 1)")
         (0 <= i < nsite && 0 <= j < nsite) ||
-            error("Jastrow: Site index is incorrect at row $row")
+            error("Jastrow: Site index is incorrect at row $(row + 1)")
         0 <= n < n_jastrow_idx ||
-            error("Jastrow: class index $n out of range [0, $n_jastrow_idx) at row $row")
-        directed[i+1, j+1] == UNREAD || error("Jastrow: duplicated pair ($i,$j) at row $row")
+            error("Jastrow: class index $n out of range [0, $n_jastrow_idx) at row $(row + 1)")
+        directed[i+1, j+1] == UNREAD ||
+            error("Jastrow: duplicated pair ($i,$j) at row $(row + 1)")
         directed[i+1, j+1] = n
         a, b = minmax(i, j)
         if table[a+1, b+1] == -1
             table[a+1, b+1] = n
             table[b+1, a+1] = n
         elseif table[a+1, b+1] != n
-            error("Jastrow: inconsistent class for pair ($a,$b) at row $row")
+            error("Jastrow: inconsistent class for pair ($a,$b) at row $(row + 1)")
         end
+        row += 1
     end
-    # Nsite*(Nsite-1) distinct directed pairs cover every off-diagonal cell, so
-    # C's explicit missing-pair checks cannot fire after the loop above.
-    remaining = length(tokens) - 3 * expected
-    n_opt = cld(remaining, 2)  # C GetInfoOpt counts each `%d ` read until EOF
+
+    # Remaining two-column OptFlag tokens (C GetInfoOpt counts each `%d` read
+    # until EOF).
+    remaining_tokens = 0
+    for li in line_idx:length(lines)
+        clean_line_str = clean_line(lines[li])
+        isempty(clean_line_str) && continue
+        parts = split(clean_line_str)
+        remaining_tokens += length(parts)
+        all(t -> tryparse(Int, t) !== nothing, parts) ||
+            error("Jastrow: invalid opt-flag row")
+    end
+    n_opt = cld(remaining_tokens, 2)
     n_opt == n_jastrow_idx ||
         error("Jastrow: $n_opt opt-flag rows, expected NJastrowIdx = $n_jastrow_idx")
-    all(t -> tryparse(Int, t) !== nothing, tokens[(3*expected+1):end]) ||
-        error("Jastrow: invalid opt-flag row")
     return table
+end
+
+"""
+    parse_jastrow_def_fast(filepath, nsite) -> Union{Nothing, Tuple}
+
+Specialized single-pass reader for the header-bearing `jastrowidx.def` format
+(header + Nsite*(Nsite-1) three-column rows + two-column OptFlag rows). Builds
+the term vector, the symmetric JastrowIdx table and the OptFlags together.
+Returns `nothing` for any other layout, so the generic parser keeps its
+diagnostics and legacy-format support.
+"""
+function parse_jastrow_def_fast(filepath::AbstractString, nsite::Int)
+    content = read_def_file(filepath)
+    lines = split(content, '\n')
+    length(lines) >= 5 || return nothing
+    header = split(clean_line(lines[2]))
+    (length(header) >= 2 && startswith(header[1], "NJastrowIdx")) || return nothing
+    n_jastrow_idx = safe_parse_int(header[2], -1)
+    n_jastrow_idx >= 0 || return nothing
+    is_complex_flag = false
+    if length(lines) >= 3
+        ct = split(clean_line(lines[3]))
+        if length(ct) == 2 && ct[1] == "ComplexType"
+            is_complex_flag = safe_parse_int(ct[2], 0) != 0
+        end
+    end
+    expected = nsite * (nsite - 1)
+    table = fill(-1, nsite, nsite)
+    directed = fill(false, nsite, nsite)
+    terms = Vector{JastrowTerm}(undef, expected)
+    row = 0
+    li = 6
+    zero = ComplexF64(0.0, 0.0)
+    while row < expected
+        li <= length(lines) || return nothing
+        parsed = parse_int_tokens_fast(lines[li], 3)
+        parsed === nothing && return nothing
+        tok, i, j, n, _ = parsed
+        li += 1
+        tok == 0 && continue
+        tok == 3 || return nothing
+        (i != j && 0 <= i < nsite && 0 <= j < nsite && 0 <= n < n_jastrow_idx) ||
+            return nothing
+        directed[i+1, j+1] && return nothing
+        directed[i+1, j+1] = true
+        a, b = minmax(i, j)
+        if table[a+1, b+1] == -1
+            table[a+1, b+1] = n
+            table[b+1, a+1] = n
+        elseif table[a+1, b+1] != n
+            return nothing
+        end
+        terms[row+1] = JastrowTerm(i, j, zero, is_complex_flag)
+        row += 1
+    end
+    opt_flags = Dict{Int,Int}()
+    n_opt_tokens = 0
+    for k in li:length(lines)
+        parsed = parse_int_tokens_fast(lines[k], 2)
+        parsed === nothing && return nothing
+        tok, idx, flag, _, _ = parsed
+        tok == 0 && continue
+        tok == 2 || return nothing
+        n_opt_tokens += 2
+        idx >= 0 && (opt_flags[idx] = flag)
+    end
+    cld(n_opt_tokens, 2) == n_jastrow_idx || return nothing
+    result = JastrowParseResult(
+        true, terms, n_jastrow_idx, opt_flags, is_complex_flag, "", length(lines),
+    )
+    return result, table
 end

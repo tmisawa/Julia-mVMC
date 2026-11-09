@@ -42,7 +42,7 @@ function parse_coulomb_intra_content(content::String)::ParseResult{Vector{Coulom
             continue
         end
 
-        tokens = split_def_line(clean_line_str)
+        tokens = split(clean_line_str)
         if length(tokens) < 2
             continue
         end
@@ -67,13 +67,13 @@ function parse_coulomb_intra_content(content::String)::ParseResult{Vector{Coulom
 end
 
 """
-    parse_coulomb_intra_term(tokens::Vector{String}, context::ParsingContext) -> Union{CoulombIntraTerm, Nothing}
+    parse_coulomb_intra_term(tokens::AbstractVector{<:AbstractString}, context::ParsingContext) -> Union{CoulombIntraTerm, Nothing}
 
 Parse a single Coulomb intra term from tokens.
 Format: site value
 """
 function parse_coulomb_intra_term(
-    tokens::Vector{String},
+    tokens::AbstractVector{<:AbstractString},
     context::ParsingContext,
 )::Union{CoulombIntraTerm,Nothing}
     if length(tokens) < 2
@@ -155,7 +155,7 @@ function parse_coulomb_inter_content(content::String)::ParseResult{Vector{Coulom
             continue
         end
 
-        tokens = split_def_line(clean_line_str)
+        tokens = split(clean_line_str)
         if length(tokens) < 3
             continue
         end
@@ -180,12 +180,12 @@ function parse_coulomb_inter_content(content::String)::ParseResult{Vector{Coulom
 end
 
 """
-    parse_coulomb_inter_term(tokens::Vector{String}, context::ParsingContext) -> Union{CoulombInterTerm, Nothing}
+    parse_coulomb_inter_term(tokens::AbstractVector{<:AbstractString}, context::ParsingContext) -> Union{CoulombInterTerm, Nothing}
 
 Parse a single Coulomb inter term from tokens.
 """
 function parse_coulomb_inter_term(
-    tokens::Vector{String},
+    tokens::AbstractVector{<:AbstractString},
     context::ParsingContext,
 )::Union{CoulombInterTerm,Nothing}
     if length(tokens) < 3

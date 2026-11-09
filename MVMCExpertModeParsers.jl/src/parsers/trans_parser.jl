@@ -42,7 +42,7 @@ function parse_trans_content(content::String)::ParseResult{Vector{TransferTerm}}
             continue
         end
 
-        tokens = split_def_line(clean_line_str)
+        tokens = split(clean_line_str)
         if length(tokens) < 3
             continue
         end
@@ -67,14 +67,14 @@ function parse_trans_content(content::String)::ParseResult{Vector{TransferTerm}}
 end
 
 """
-    parse_transfer_term(tokens::Vector{String}, context::ParsingContext) -> Union{TransferTerm, Nothing}
+    parse_transfer_term(tokens::AbstractVector{<:AbstractString}, context::ParsingContext) -> Union{TransferTerm, Nothing}
 
 Parse a single transfer term from tokens.
 Format: site1 spin1 site2 spin2 real_value imag_value
 Where spin1 and spin2 should be equal (same-spin hopping).
 """
 function parse_transfer_term(
-    tokens::Vector{String},
+    tokens::AbstractVector{<:AbstractString},
     context::ParsingContext,
 )::Union{TransferTerm,Nothing}
     if length(tokens) < 6
